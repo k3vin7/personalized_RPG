@@ -199,17 +199,22 @@ func _run_smoke() -> void:
 	# plaza nothing is, and no occluder sits in this line of sight either.
 	# Settled, not just teleported: an order left over from the drag check would
 	# walk the body straight back off the platform.
-	await _settle(local, Vector3(14.0, 6.0, 14.0))
-	await get_tree().create_timer(0.6).timeout
-	var faded_high := OcclusionFader.faded_rids().size()
-	await _settle(local, Vector3(-15.0, 1.0, 6.0))
-	await get_tree().create_timer(0.6).timeout
-	var faded_low := OcclusionFader.faded_rids().size()
-	await _settle(local, Vector3(-1.5, 3.0, 14.0))
+	# Walls nearer the camera than the body fade; walls further away do not.
+	# Every wall in this map sits at z 2 or z 6..10, so standing north of them
+	# all should fade none, and standing south of them all should fade all.
+	await _settle(local, Vector3(0.0, 1.0, 14.0))
 	await get_tree().create_timer(0.8).timeout
-	var faded_step := OcclusionFader.faded_rids().size()
-	print("PLAYGROUND_SMOKE_FADE on_platform=%d on_plaza=%d on_2m_step=%d" % [
-		faded_high, faded_low, faded_step])
+	var faded_behind := OcclusionFader.faded_rids().size()
+	await _settle(local, Vector3(0.0, 1.0, 0.0))
+	await get_tree().create_timer(0.8).timeout
+	var faded_in_front := OcclusionFader.faded_rids().size()
+	var jump_before := OcclusionFader.faded_rids().size()
+	local.movement.request_jump()
+	await get_tree().create_timer(0.35).timeout
+	var jump_during := OcclusionFader.faded_rids().size()
+	await get_tree().create_timer(1.2).timeout
+	print("PLAYGROUND_SMOKE_FADE north_of_walls=%d south_of_walls=%d jump_before=%d jump_during=%d" % [
+		faded_behind, faded_in_front, jump_before, jump_during])
 
 	if multiplayer.is_server():
 		await _run_stage2_checks(local)
@@ -471,19 +476,27 @@ func _box(
 	var box_mesh := BoxMesh.new()
 	box_mesh.size = size
 	mesh_instance.mesh = box_mesh
-	# Everything can fade, floors and steps included: anything topping out below
-	# the character is behind them as far as the view is concerned. The ground
-	# actually under their feet is spared at runtime, not here, because which
-	# box that is changes as they move.
-	var shader_material := ShaderMaterial.new()
-	shader_material.shader = load("res://shaders/dither_fade.gdshader")
-	shader_material.set_shader_parameter("albedo", color)
-	shader_material.set_shader_parameter("fade", 1.0)
-	mesh_instance.material_override = shader_material
-	body.set_meta("top_y", at_position.y + size.y * 0.5)
-	body.add_to_group(OcclusionFader.WALL_GROUP)
-	if occluder:
-		body.add_to_group(OcclusionFader.OCCLUDER_GROUP)
+	# Walls fade, floors never do. A floor cannot hide the character, and fading
+	# them turned every jump into a screen wide flicker as the ground crossed
+	# the threshold and came back.
+	var is_wall := layer == WALL_LAYER or layer == CLIMBABLE_LAYER
+	if is_wall:
+		var shader_material := ShaderMaterial.new()
+		shader_material.shader = load("res://shaders/dither_fade.gdshader")
+		shader_material.set_shader_parameter("albedo", color)
+		shader_material.set_shader_parameter("fade", 1.0)
+		mesh_instance.material_override = shader_material
+		# The face nearest the camera. The view never rotates, so the camera
+		# side is simply the larger z.
+		body.set_meta("near_z", at_position.z + size.z * 0.5)
+		body.add_to_group(OcclusionFader.WALL_GROUP)
+		if occluder:
+			body.add_to_group(OcclusionFader.OCCLUDER_GROUP)
+	else:
+		var material := StandardMaterial3D.new()
+		material.albedo_color = color
+		material.roughness = 0.8
+		mesh_instance.material_override = material
 	body.add_child(mesh_instance)
 
 	_region.add_child(body)
