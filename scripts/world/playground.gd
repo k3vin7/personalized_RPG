@@ -197,18 +197,155 @@ func _run_smoke() -> void:
 	# Walls below the character fade by height alone, wherever they are. From
 	# the high platform the smooth wall (top 4 m) is under our feet; from the
 	# plaza nothing is, and no occluder sits in this line of sight either.
-	local.global_position = Vector3(14.0, 6.0, 14.0)
-	await get_tree().create_timer(1.2).timeout
+	# Settled, not just teleported: an order left over from the drag check would
+	# walk the body straight back off the platform.
+	await _settle(local, Vector3(14.0, 6.0, 14.0))
+	await get_tree().create_timer(0.6).timeout
 	var faded_high := OcclusionFader.faded_rids().size()
-	local.global_position = Vector3(-15.0, 1.0, 6.0)
-	await get_tree().create_timer(1.2).timeout
+	await _settle(local, Vector3(-15.0, 1.0, 6.0))
+	await get_tree().create_timer(0.6).timeout
 	var faded_low := OcclusionFader.faded_rids().size()
 	print("PLAYGROUND_SMOKE_FADE on_platform=%d on_plaza=%d" % [faded_high, faded_low])
 
 	if multiplayer.is_server():
+		await _run_stage2_checks(local)
 		# Long enough that the other process has really gone, not merely queued.
 		await get_tree().create_timer(9.0).timeout
 		print("PLAYGROUND_SMOKE_AFTER_LEAVE players=%d" % _players_root.get_child_count())
+
+
+# Stage 2 gates. Each one is the outcome the work order asks for, measured
+# rather than argued from the numbers.
+func _run_stage2_checks(local: Player) -> void:
+	# What is actually standing at the step positions?
+	for probe in [Vector3(-6.0, 5.0, 14.0), Vector3(-1.5, 5.0, 14.0)]:
+		var query := PhysicsRayQueryParameters3D.create(probe, probe + Vector3.DOWN * 8.0, 0xFFFFFFFF)
+		var hit := get_world_3d().direct_space_state.intersect_ray(query)
+		var collider := hit.get("collider") as Node3D if not hit.is_empty() else null
+		print("PLAYGROUND_PROBE at=%.1f hit=%s y=%.2f layer=%d" % [
+			probe.x,
+			collider.name if collider != null else "none",
+			(hit.get("position", Vector3.ZERO) as Vector3).y,
+			(collider as CollisionObject3D).collision_layer if collider != null else -1])
+	print("PLAYGROUND_STAGE2_FORMULA ratio=%.2f jump_height=%.2f jump_velocity=%.2f move_speed=%.2f" % [
+		local.get_ratio(), local.get_jump_height(), local.get_jump_velocity(), local.get_move_speed()])
+
+	# Standing jump: straight up, and as high as the formula says.
+	var start := await _settle(local, Vector3(1.5, 1.0, 8.0))
+	local.movement.request_jump()
+	var peak := start.y
+	var airborne := 0.0
+	while airborne < 1.4:
+		await get_tree().physics_frame
+		airborne += get_physics_process_delta_time()
+		peak = maxf(peak, local.global_position.y)
+	print("PLAYGROUND_STAGE2_STANDING rise=%.2f drift=%.2f" % [
+		peak - start.y, _flat(local.global_position - start)])
+
+	# Steps: 1.5 m is meant to be reachable, 2.0 m is not. The jump has to be
+	# taken on the run and early: launching from the edge puts the body only a
+	# metre up by the time it reaches the step and it hits the side. Picking
+	# that moment is the skill the work order is asking about.
+	for step in [{"height": 1.5, "x": -6.0}, {"height": 2.0, "x": -1.5}]:
+		# Approached from the south, where there is room to get up to speed:
+		# the step row sits close to the plaza's north edge.
+		# Aimed at the ground in front of the step, not at its top: a click on
+		# the top makes the path walk around the block, and the jump inherits
+		# that sideways heading and misses.
+		var landed := await _jump_on_the_run(
+			local,
+			Vector3(step["x"], 1.0, 7.0),
+			Vector3(step["x"], 0.0, 11.5),
+			12.5,
+			2.3)
+		print("PLAYGROUND_STAGE2_STEP height=%.1f landed_y=%.2f on_top=%s" % [
+			step["height"], landed.y, landed.y > float(step["height"]) + 0.5])
+
+	# Gaps: 3 m is meant to be crossable, 5 m is not.
+	for gap in [{"width": 3.0, "x": -5.0}, {"width": 5.0, "x": 15.0}]:
+		var far_z: float = -2.0 - float(gap["width"]) - 2.0
+		var landed := await _jump_towards(
+			local,
+			Vector3(gap["x"], 1.0, 1.5),
+			Vector3(gap["x"], 0.0, far_z))
+		print("PLAYGROUND_STAGE2_GAP width=%.0f landed_z=%.2f crossed=%s" % [
+			gap["width"], landed.z, landed.z < -2.0 - float(gap["width"])])
+
+	# A click made in the air must not bend the arc, and must be honoured on
+	# landing.
+	start = await _settle(local, Vector3(1.5, 1.0, 8.0))
+	local.movement.request_jump()
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var air_velocity := Vector2(local.velocity.x, local.velocity.z)
+	local.movement.set_target(Vector3(1.5, 0.0, 2.0))
+	await get_tree().create_timer(0.3).timeout
+	var bend := (Vector2(local.velocity.x, local.velocity.z) - air_velocity).length()
+	await get_tree().create_timer(2.5).timeout
+	print("PLAYGROUND_STAGE2_AIRCLICK arc_bend=%.3f walked_after_landing=%.2f state=%s" % [
+		bend, _flat(local.global_position - start), Player.State.keys()[local.state]])
+
+
+# Walk at something and jump while still moving, once the body passes the
+# given z. The horizontal speed is carried into the arc, which is what makes a
+# step clearable at all.
+func _jump_on_the_run(
+		local: Player,
+		from: Vector3,
+		target: Vector3,
+		edge_z: float,
+		lead: float) -> Vector3:
+	await _settle(local, from)
+	local.movement.set_target(target)
+	var waited := 0.0
+	while waited < 4.0:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		if absf(local.global_position.z - edge_z) <= lead:
+			break
+	var launch := local.global_position
+	var launch_velocity := Vector2(local.velocity.x, local.velocity.z)
+	var launch_speed := launch_velocity.length()
+	local.movement.request_jump()
+	var peak := launch.y
+	var airborne := 0.0
+	var trace := PackedStringArray()
+	var samples := 0
+	while airborne < 2.0:
+		await get_tree().physics_frame
+		airborne += get_physics_process_delta_time()
+		peak = maxf(peak, local.global_position.y)
+		samples += 1
+		if samples % 12 == 0 and trace.size() < 10:
+			trace.append("%.2f/%.2f" % [local.global_position.z, local.global_position.y])
+	print("PLAYGROUND_STAGE2_RUNJUMP launch=(%.2f, %.2f) vel=(%.2f, %.2f) peak_y=%.2f end=(%.2f, %.2f)" % [
+		launch.x, launch.z, launch_velocity.x, launch_velocity.y, peak,
+		local.global_position.x, local.global_position.z])
+	return local.global_position
+
+
+func _settle(local: Player, at_position: Vector3) -> Vector3:
+	local.global_position = at_position
+	local.velocity = Vector3.ZERO
+	local.movement.cancel_target()
+	await get_tree().create_timer(0.8).timeout
+	return local.global_position
+
+
+# Walk at an unreachable target, which stops at the edge and leaves the jump
+# intent behind, then jump. This is the "click, stop, Space" flow.
+func _jump_towards(local: Player, from: Vector3, target: Vector3) -> Vector3:
+	await _settle(local, from)
+	local.movement.set_target(target)
+	var waited := 0.0
+	while waited < 3.0:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		if local.movement.intent_seconds_left() > 0.0:
+			break
+	local.movement.request_jump()
+	await get_tree().create_timer(2.5).timeout
+	return local.global_position
 
 
 func _flat(delta: Vector3) -> float:
@@ -301,10 +438,12 @@ func _build_walls() -> void:
 
 
 func _build_occluders() -> void:
-	# Between the camera and the plaza, so walking behind one fades it.
-	_box("OccluderA", Vector3(-6.0, 2.5, 10.0), Vector3(8.0, 5.0, 0.6), Color("4b535c"), WALL_LAYER, true)
-	_box("OccluderB", Vector3(8.0, 2.5, 6.0), Vector3(8.0, 5.0, 0.6), Color("4b535c"), WALL_LAYER, true)
-	_sign("OCCLUSION", Vector3(-6.0, 6.0, 10.0), Color.WHITE)
+	# Between the camera and the plaza, so walking behind one fades it. Kept
+	# east of the step row: a wall across the approach would stop the run up a
+	# step before it started, now that walls are part of the navigation bake.
+	_box("OccluderA", Vector3(7.0, 2.5, 10.0), Vector3(8.0, 5.0, 0.6), Color("4b535c"), WALL_LAYER, true)
+	_box("OccluderB", Vector3(16.0, 2.5, 6.0), Vector3(8.0, 5.0, 0.6), Color("4b535c"), WALL_LAYER, true)
+	_sign("OCCLUSION", Vector3(7.0, 6.0, 10.0), Color.WHITE)
 
 
 func _box(

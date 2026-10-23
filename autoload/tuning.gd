@@ -28,3 +28,25 @@ func ratio_mult(ratio: float, k: float) -> float:
 
 func notify_changed() -> void:
 	tuning_changed.emit()
+
+
+# Tuning is local to each peer, so the only way it crosses the wire is when
+# someone asks for the host's numbers on purpose.
+func export_values() -> Dictionary:
+	var out := {}
+	for property in values.get_property_list():
+		if not (int(property["usage"]) & PROPERTY_USAGE_EDITOR):
+			continue
+		var name_text := String(property["name"])
+		if name_text.begins_with("resource_") or name_text == "script":
+			continue
+		out[name_text] = values.get(name_text)
+	return out
+
+
+func import_values(incoming: Dictionary) -> void:
+	for key in incoming.keys():
+		var name_text := String(key)
+		if name_text in values:
+			values.set(name_text, incoming[key])
+	tuning_changed.emit()

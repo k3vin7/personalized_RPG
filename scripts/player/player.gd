@@ -51,6 +51,11 @@ var hp: float = 100.0
 var sync_position := Vector3.ZERO
 var sync_yaw := 0.0
 var sync_state: int = State.IDLE
+# The stats travel too: a shove is worked out from the pusher's strength
+# against the target's weight, so every peer needs the target's numbers.
+var sync_strength := 10.0
+var sync_race_weight := 10.0
+var sync_gear_weight := 0.0
 
 var movement: PlayerMovement
 var camera: QuarterCamera
@@ -58,6 +63,7 @@ var camera: QuarterCamera
 var _visual: Node3D
 var _material: StandardMaterial3D
 var _label: Label3D
+var _default_snap := 0.3
 
 
 func _enter_tree() -> void:
@@ -74,6 +80,7 @@ func _ready() -> void:
 	hp = stats.max_hp
 	collision_layer = PLAYER_LAYER
 	collision_mask = WORLD_LAYER | WALL_LAYER | CLIMBABLE_LAYER | PLAYER_LAYER
+	floor_snap_length = _default_snap
 	_build_body()
 	sync_position = global_position
 
@@ -94,6 +101,11 @@ func _ready() -> void:
 		fader.name = "OcclusionFader"
 		camera.add_child(fader)
 		fader.setup(camera, self)
+
+		var panel := DebugPanel.new()
+		panel.name = "DebugPanel"
+		get_tree().current_scene.add_child(panel)
+		panel.setup(self)
 	set_physics_process(true)
 
 
@@ -109,6 +121,28 @@ func change_state(new_state: int) -> void:
 	state_changed.emit(new_state)
 
 
+# The one place the strength to weight numbers turn into movement. Nothing
+# else may recompute them.
+func get_ratio() -> float:
+	return stats.ratio()
+
+
+func get_jump_height() -> float:
+	return Tuning.values.base_jump_height * Tuning.ratio_mult(get_ratio(), Tuning.values.ratio_k_jump)
+
+
+func get_jump_velocity() -> float:
+	return sqrt(2.0 * Tuning.values.gravity * get_jump_height())
+
+
+func get_move_speed() -> float:
+	return Tuning.values.base_move_speed * Tuning.ratio_mult(get_ratio(), Tuning.values.ratio_k_speed)
+
+
+func default_snap_length() -> float:
+	return _default_snap
+
+
 func is_grounded_state() -> bool:
 	return state == State.IDLE or state == State.MOVE
 
@@ -118,7 +152,13 @@ func _physics_process(delta: float) -> void:
 		sync_position = global_position
 		sync_yaw = rotation.y
 		sync_state = state
+		sync_strength = stats.strength
+		sync_race_weight = stats.race_weight
+		sync_gear_weight = stats.gear_weight
 		return
+	stats.strength = sync_strength
+	stats.race_weight = sync_race_weight
+	stats.gear_weight = sync_gear_weight
 	# Remote bodies are shown, not simulated: a short lerp hides the gap
 	# between state packets without letting them drift.
 	global_position = global_position.lerp(sync_position, 1.0 - exp(-18.0 * delta))

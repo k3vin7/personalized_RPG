@@ -12,6 +12,12 @@ const CLICK_MASK := 1 | 2 | 4 | 16  # World, Wall, Climbable, Throwable
 const ARRIVE_TOLERANCE := 0.3
 const PATH_LOOKAHEAD := 0.75
 const PATH_QUERY_RETRIES := 4
+# A click whose path ends further than this from where it was aimed did not
+# reach: the target is across something.
+const UNREACHABLE_DISTANCE := 0.5
+# Pressing a touch early or a touch late still jumps.
+const JUMP_BUFFER := 0.1
+const COYOTE_TIME := 0.1
 
 var player: Player
 
@@ -24,6 +30,11 @@ var _pending_frames := 0
 var _path_dirty := false
 var _retries := 0
 var _drag_left := 0.0
+var _jump_buffer_left := 0.0
+var _coyote_left := 0.0
+var _intent_direction := Vector3.ZERO
+var _intent_left := 0.0
+var _pending_air_target: Variant = null
 
 
 func setup(owner_player: Player) -> void:
@@ -47,12 +58,38 @@ func cancel_target() -> void:
 	_path_dirty = false
 
 
+# Same path the key takes: the buffer is the only way in, so a test and a key
+# press go through identical code.
+func request_jump() -> void:
+	_jump_buffer_left = JUMP_BUFFER
+
+
+func intent_direction() -> Vector3:
+	return _intent_direction
+
+
+func intent_seconds_left() -> float:
+	return _intent_left
+
+
+func _clear_intent() -> void:
+	_intent_direction = Vector3.ZERO
+	_intent_left = 0.0
+
+
 func set_target(world_point: Vector3) -> void:
+	if player.state == Player.State.AIRBORNE:
+		# In the air the click books a destination and nothing else: the arc is
+		# already decided and must not bend.
+		_pending_air_target = world_point
+		return
 	# An order to where we already stand is not an order. Without this, holding
 	# the button with the cursor over your own feet arrives, cancels and
 	# re-orders every tenth of a second, which reads as a flickering state.
 	if _flat_distance(player.global_position, world_point) <= ARRIVE_TOLERANCE:
 		return
+	# A fresh click replaces any intent the last blocked one left behind.
+	_clear_intent()
 	_target = world_point
 	_has_target = true
 	_agent.target_position = world_point
@@ -71,16 +108,39 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event.is_action_pressed("cancel"):
 		cancel_target()
+		_clear_intent()
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("move_click"):
 		_click_to_target()
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_pressed("jump"):
+		# Buffered, never acted on here: input runs outside the physics step,
+		# where is_on_floor() still holds last step's answer.
+		_jump_buffer_left = JUMP_BUFFER
 		get_viewport().set_input_as_handled()
 
 
 func _physics_process(delta: float) -> void:
 	if not player.is_local():
 		return
+	_jump_buffer_left = maxf(0.0, _jump_buffer_left - delta)
+	_intent_left = maxf(0.0, _intent_left - delta)
+	if _intent_left == 0.0:
+		_intent_direction = Vector3.ZERO
+	if player.is_on_floor():
+		_coyote_left = COYOTE_TIME
+	else:
+		_coyote_left = maxf(0.0, _coyote_left - delta)
+
+	if player.state == Player.State.AIRBORNE:
+		_air_step(delta)
+	else:
+		_ground_step(delta)
+
+
+func _ground_step(delta: float) -> void:
 	# Held right button keeps re-issuing the order, the way a MOBA does.
 	if Input.is_action_pressed("move_click"):
 		_drag_left -= delta
@@ -89,6 +149,17 @@ func _physics_process(delta: float) -> void:
 			_click_to_target()
 	else:
 		_drag_left = 0.0
+
+	if _pending_air_target is Vector3:
+		# Applied on any grounded frame, not only on the landing transition: a
+		# body that never reports a clean landing would swallow the click.
+		var queued: Vector3 = _pending_air_target
+		_pending_air_target = null
+		set_target(queued)
+
+	if _jump_buffer_left > 0.0 and (player.is_grounded_state() or _coyote_left > 0.0):
+		_launch_jump()
+		return
 
 	var desired := _desired_velocity()
 	if desired.length_squared() > 0.0001:
@@ -104,12 +175,68 @@ func _physics_process(delta: float) -> void:
 		player.change_state(Player.State.MOVE)
 	elif not _has_target and player.state == Player.State.MOVE:
 		player.change_state(Player.State.IDLE)
-	# Gravity is here even before the jump stage, or the body floats off ledges.
 	if player.is_on_floor():
 		player.velocity.y = -0.5
 	else:
 		player.velocity.y -= Tuning.values.gravity * delta
 	player.move_and_slide()
+	if not player.is_on_floor():
+		# Walked off something. Coyote time is already running, so a jump
+		# pressed a frame late still goes.
+		player.change_state(Player.State.AIRBORNE)
+
+
+func _launch_jump() -> void:
+	_jump_buffer_left = 0.0
+	_coyote_left = 0.0
+	var horizontal := Vector3(player.velocity.x, 0.0, player.velocity.z)
+	if horizontal.length() <= 0.1:
+		# Standing still, but an order was blocked by a gap: jump the way the
+		# click was pointing.
+		if _intent_left > 0.0 and _intent_direction.length_squared() > 0.01:
+			horizontal = _intent_direction * player.get_move_speed()
+		else:
+			horizontal = Vector3.ZERO
+	_clear_intent()
+	# A jump is a new order of its own, so the click that was taking us
+	# somewhere is dropped rather than resumed on landing.
+	cancel_target()
+	player.velocity.x = horizontal.x
+	player.velocity.z = horizontal.z
+	player.velocity.y = player.get_jump_velocity()
+	# Snapping would pull us straight back down on the launch frame.
+	player.floor_snap_length = 0.0
+	player.change_state(Player.State.AIRBORNE)
+	player.move_and_slide()
+
+
+func _air_step(delta: float) -> void:
+	# No self input on the horizontal: the arc is decided at launch. Only the
+	# body's facing still follows the cursor.
+	_face_cursor(delta)
+	player.velocity.y -= Tuning.values.gravity * delta
+	player.move_and_slide()
+	if player.is_on_floor():
+		player.floor_snap_length = player.default_snap_length()
+		player.change_state(Player.State.MOVE if _has_target else Player.State.IDLE)
+
+
+func _face_cursor(delta: float) -> void:
+	var point: Variant = _cursor_ground_point()
+	if point == null:
+		return
+	player.face_direction((point as Vector3) - player.global_position, delta)
+
+
+# Where the cursor meets the plane the body is standing on.
+func _cursor_ground_point() -> Variant:
+	if player.camera == null or player.camera.camera == null:
+		return null
+	var mouse := player.get_viewport().get_mouse_position()
+	var from := player.camera.camera.project_ray_origin(mouse)
+	var direction := player.camera.camera.project_ray_normal(mouse)
+	var plane := Plane(Vector3.UP, player.global_position.y)
+	return plane.intersects_ray(from, direction)
 
 
 func move_speed() -> float:
@@ -161,6 +288,7 @@ func _desired_velocity() -> Vector3:
 		# Walked out the old path while a new one is still being prepared: wait
 		# for it rather than reporting an arrival that is not one.
 		if not _path_dirty:
+			_capture_intent_if_blocked()
 			cancel_target()
 		return Vector3.ZERO
 
@@ -171,6 +299,21 @@ func _desired_velocity() -> Vector3:
 	return step.normalized() * move_speed()
 
 
+# Stopping at the near edge of a gap is not the same as arriving. When the path
+# ends well short of where the click landed, the direction is kept for a while
+# so a jump pressed here goes where the click was pointing.
+func _capture_intent_if_blocked() -> void:
+	var path_end := _path[_path.size() - 1] if not _path.is_empty() else player.global_position
+	if _flat_distance(path_end, _target) <= UNREACHABLE_DISTANCE:
+		return
+	var direction := _target - player.global_position
+	direction.y = 0.0
+	if direction.length_squared() < 0.01:
+		return
+	_intent_direction = direction.normalized()
+	_intent_left = Tuning.values.move_intent_timeout
+
+
 func _query_path() -> void:
 	# One call makes the agent run its pending query; the points are then ours
 	# to walk in XZ.
@@ -179,6 +322,9 @@ func _query_path() -> void:
 	if result.is_empty():
 		_retries += 1
 		if _retries > PATH_QUERY_RETRIES:
+			# No path at all: the click was somewhere this body cannot walk to,
+			# which is exactly the case the jump intent exists for.
+			_capture_intent_if_blocked()
 			cancel_target()
 			return
 		_pending_frames = 1

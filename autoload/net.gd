@@ -129,6 +129,19 @@ func _spawn_player(peer_id: int) -> void:
 	print("PLAYGROUND_SPAWN peer=%d players=%d" % [peer_id, spawn_root.get_child_count()])
 
 
+@rpc("any_peer", "call_remote", "reliable")
+func request_tuning() -> void:
+	if not multiplayer.is_server():
+		return
+	send_tuning.rpc_id(multiplayer.get_remote_sender_id(), Tuning.export_values())
+
+
+@rpc("authority", "call_remote", "reliable")
+func send_tuning(incoming: Dictionary) -> void:
+	Tuning.import_values(incoming)
+	print("PLAYGROUND_TUNING_PULLED fields=%d" % incoming.size())
+
+
 func _on_peer_connected(peer_id: int) -> void:
 	print("PLAYGROUND_PEER_CONNECTED peer=%d" % peer_id)
 
