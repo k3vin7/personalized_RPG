@@ -205,7 +205,11 @@ func _run_smoke() -> void:
 	await _settle(local, Vector3(-15.0, 1.0, 6.0))
 	await get_tree().create_timer(0.6).timeout
 	var faded_low := OcclusionFader.faded_rids().size()
-	print("PLAYGROUND_SMOKE_FADE on_platform=%d on_plaza=%d" % [faded_high, faded_low])
+	await _settle(local, Vector3(-1.5, 3.0, 14.0))
+	await get_tree().create_timer(0.8).timeout
+	var faded_step := OcclusionFader.faded_rids().size()
+	print("PLAYGROUND_SMOKE_FADE on_platform=%d on_plaza=%d on_2m_step=%d" % [
+		faded_high, faded_low, faded_step])
 
 	if multiplayer.is_server():
 		await _run_stage2_checks(local)
@@ -467,26 +471,19 @@ func _box(
 	var box_mesh := BoxMesh.new()
 	box_mesh.size = size
 	mesh_instance.mesh = box_mesh
-	# Anything on a wall layer can fade, whether or not it is in the way: a wall
-	# that tops out below the character is fading by height alone. World layer
-	# boxes are floors, steps and platforms, and must never fade or standing on
-	# a step would dissolve the ground under it.
-	var is_wall := layer == WALL_LAYER or layer == CLIMBABLE_LAYER
-	if is_wall or occluder:
-		var shader_material := ShaderMaterial.new()
-		shader_material.shader = load("res://shaders/dither_fade.gdshader")
-		shader_material.set_shader_parameter("albedo", color)
-		shader_material.set_shader_parameter("fade", 1.0)
-		mesh_instance.material_override = shader_material
-		body.set_meta("top_y", at_position.y + size.y * 0.5)
-		body.add_to_group(OcclusionFader.WALL_GROUP)
-		if occluder:
-			body.add_to_group(OcclusionFader.OCCLUDER_GROUP)
-	else:
-		var material := StandardMaterial3D.new()
-		material.albedo_color = color
-		material.roughness = 0.8
-		mesh_instance.material_override = material
+	# Everything can fade, floors and steps included: anything topping out below
+	# the character is behind them as far as the view is concerned. The ground
+	# actually under their feet is spared at runtime, not here, because which
+	# box that is changes as they move.
+	var shader_material := ShaderMaterial.new()
+	shader_material.shader = load("res://shaders/dither_fade.gdshader")
+	shader_material.set_shader_parameter("albedo", color)
+	shader_material.set_shader_parameter("fade", 1.0)
+	mesh_instance.material_override = shader_material
+	body.set_meta("top_y", at_position.y + size.y * 0.5)
+	body.add_to_group(OcclusionFader.WALL_GROUP)
+	if occluder:
+		body.add_to_group(OcclusionFader.OCCLUDER_GROUP)
 	body.add_child(mesh_instance)
 
 	_region.add_child(body)

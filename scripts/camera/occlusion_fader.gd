@@ -49,6 +49,7 @@ func _physics_process(delta: float) -> void:
 	# that tops out below our feet is behind us as far as the view is concerned,
 	# so it fades whether it is next to us or across the map.
 	var feet_y := target.global_position.y - Player.BODY_HALF_HEIGHT - FADE_BELOW_MARGIN
+	var standing_on := _ground_under_feet()
 	for node in get_tree().get_nodes_in_group(WALL_GROUP):
 		var wall := node as CollisionObject3D
 		if wall == null:
@@ -56,6 +57,10 @@ func _physics_process(delta: float) -> void:
 		var wall_id := wall.get_instance_id()
 		if not _levels.has(wall_id):
 			_levels[wall_id] = {"body": wall, "level": FADE_VISIBLE}
+		if wall_id == standing_on:
+			# The ground being stood on is the one thing below that has to stay
+			# solid, or the character appears to float over a hole.
+			continue
 		if float(wall.get_meta("top_y", INF)) < feet_y:
 			blocking[wall_id] = true
 
@@ -79,6 +84,17 @@ func _physics_process(delta: float) -> void:
 			var body := entry["body"] as CollisionObject3D
 			if is_instance_valid(body):
 				_faded.append(body.get_rid())
+
+
+func _ground_under_feet() -> int:
+	var from := target.global_position
+	var query := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * (Player.BODY_HALF_HEIGHT + 0.6), RAY_MASK)
+	query.collide_with_areas = false
+	var hit := camera.get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		return 0
+	var body := hit.get("collider") as Object
+	return body.get_instance_id() if body != null else 0
 
 
 func _walls_in_the_way() -> Dictionary:
