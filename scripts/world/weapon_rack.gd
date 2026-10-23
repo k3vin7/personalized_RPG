@@ -1,12 +1,16 @@
 class_name WeaponRack
 extends Node3D
 
-# Five pedestals. Walking onto one takes that weapon, which is a choice and
-# nothing more: there is no combat in this playground. The choice replicates so
-# the other player sees what you picked up.
+# Five pedestals. Standing on one and pressing the interact key takes that
+# weapon, which is a choice and nothing more: there is no combat here. The
+# choice replicates, so the other player sees what you are carrying.
+
+const INTERACT_GROUP := "interactable"
 
 const PICKUP_LAYER := 64
 const SPACING := 2.2
+
+var _zones: Array[Area3D] = []
 
 
 func _ready() -> void:
@@ -22,8 +26,10 @@ func _ready() -> void:
 		var offset := Vector3((float(index) - 2.0) * SPACING, 0.0, 0.0)
 		_build_pedestal(kind, offset)
 
+	add_to_group(INTERACT_GROUP)
+
 	var sign_label := Label3D.new()
-	sign_label.text = "무기 선택대 (올라서면 교체 · 가운데 맨손)"
+	sign_label.text = "무기 선택대 · 받침대에 서서 G"
 	sign_label.position = Vector3(0.0, 2.6, 0.0)
 	sign_label.font_size = 34
 	sign_label.outline_size = 7
@@ -33,6 +39,18 @@ func _ready() -> void:
 
 	# Middle of the rack drops the weapon again.
 	_build_zone(WeaponKinds.Kind.NONE, Vector3(0.0, 0.0, 1.8), Vector3(2.0, 2.0, 1.4))
+
+
+# Returns whether this rack had anything to offer the body that pressed the key.
+func interact(player: Player) -> bool:
+	for area in _zones:
+		if not is_instance_valid(area):
+			continue
+		if not area.get_overlapping_bodies().has(player):
+			continue
+		player.set_weapon(int(area.get_meta("kind", WeaponKinds.Kind.NONE)))
+		return true
+	return false
 
 
 func _build_pedestal(kind: int, offset: Vector3) -> void:
@@ -76,8 +94,7 @@ func _build_zone(kind: int, offset: Vector3, size: Vector3) -> void:
 	collision.shape = shape
 	area.add_child(collision)
 	add_child(area)
-	area.body_entered.connect(func(body: Node3D) -> void:
-		var player := body as Player
-		# Only the owner of a body may change what it carries.
-		if player != null and player.is_local():
-			player.set_weapon(kind))
+	# Entering no longer equips anything: the area only records who is standing
+	# where, and the interact key decides when that matters.
+	area.set_meta("kind", kind)
+	_zones.append(area)

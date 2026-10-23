@@ -243,6 +243,7 @@ func _run_smoke() -> void:
 
 	if multiplayer.is_server():
 		await _run_stage2_checks(local)
+		await _run_weapon_rack_check(local)
 		await _run_stage3_checks(local)
 		await _run_jump_toggle_check(local)
 		await _run_respawn_checks(local)
@@ -276,6 +277,30 @@ func _run_jump_toggle_check(local: Player) -> void:
 		(off["travel"] as Vector2).normalized().dot((off["launch"] as Vector2).normalized()),
 		Vector2(cursor.x, cursor.z).normalized().dot((on["launch"] as Vector2).normalized()),
 		(off["launch"] as Vector2).length(), (on["launch"] as Vector2).length()])
+
+
+# Walk onto each pedestal in turn, the way a player would, and report what the
+# body ends up carrying.
+func _run_weapon_rack_check(local: Player) -> void:
+	var rack := get_node_or_null("WeaponRack") as Node3D
+	if rack == null:
+		print("PLAYGROUND_RACK missing")
+		return
+	var picked := PackedStringArray()
+	for index in range(5):
+		var lane := rack.global_position + Vector3((float(index) - 2.0) * WeaponRack.SPACING, 1.0, -3.0)
+		await _settle(local, lane)
+		local.movement.set_target(rack.global_position + Vector3((float(index) - 2.0) * WeaponRack.SPACING, 0.0, 0.0))
+		await get_tree().create_timer(1.6).timeout
+		# Standing on it is not enough any more; the key is what equips.
+		var before := local.weapon
+		var took: bool = (rack as WeaponRack).interact(local)
+		picked.append("%d:%s%s" % [
+			index,
+			WeaponKinds.LABELS.get(local.weapon, "?"),
+			"" if took and before != local.weapon else "(미변경)"])
+	print("PLAYGROUND_RACK picked=[%s] held_node=%s" % [
+		", ".join(picked), local.has_node("Visual/HeldWeapon")])
 
 
 func _run_stage3_checks(local: Player) -> void:

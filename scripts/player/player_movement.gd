@@ -126,6 +126,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		_click_to_target()
 		get_viewport().set_input_as_handled()
 		return
+	if event.is_action_pressed("grab_throw"):
+		_interact()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("dash"):
 		request_dash()
 		get_viewport().set_input_as_handled()
@@ -249,6 +253,15 @@ func _air_step(delta: float) -> void:
 
 
 # DOC: ground only, cursor aimed, and never while already dashing or airborne.
+# One key for every object that offers something where you are standing. The
+# rack is the only one so far; grabbing arrives on this same key later.
+func _interact() -> bool:
+	for node in player.get_tree().get_nodes_in_group(WeaponRack.INTERACT_GROUP):
+		if node.has_method("interact") and node.interact(player):
+			return true
+	return false
+
+
 func request_dash() -> bool:
 	if not player.is_grounded_state() or _dash_cooldown_left > 0.0:
 		return false
