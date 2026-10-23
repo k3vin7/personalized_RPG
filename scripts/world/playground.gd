@@ -199,7 +199,7 @@ func _run_smoke() -> void:
 	# the same thing as whether the body kept moving.
 	var measured := 0
 	var covered := 0.0
-	var previous := local.global_position
+	var drag_previous := local.global_position
 	for _tick in range(240):
 		if _tick % 12 == 0:
 			local.movement.set_target(drag_target)
@@ -207,8 +207,8 @@ func _run_smoke() -> void:
 		if not local.movement.has_target():
 			break
 		measured += 1
-		covered += _flat(local.global_position - previous)
-		previous = local.global_position
+		covered += _flat(local.global_position - drag_previous)
+		drag_previous = local.global_position
 		if local.state != last_state:
 			flips += 1
 			last_state = local.state
