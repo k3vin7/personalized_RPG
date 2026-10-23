@@ -135,6 +135,10 @@ func _run_smoke() -> void:
 		print("PLAYGROUND_SMOKE_LOCAL missing")
 		return
 
+	# The view must not change angle between standing and moving.
+	var idle_rotation := local.camera.rotation
+	var idle_forward := local.camera.get_camera_flat_forward()
+
 	var home := local.global_position
 	var travelled := 0.0
 	var remote_travelled := 0.0
@@ -153,6 +157,10 @@ func _run_smoke() -> void:
 		multiplayer.get_unique_id(), travelled, Player.State.keys()[local.state]])
 	print("PLAYGROUND_SMOKE_REMOTE peer=%d remote_travelled=%.2f" % [
 		multiplayer.get_unique_id(), remote_travelled])
+	print("PLAYGROUND_SMOKE_CAMERA moving_rotation_delta=%.4f forward_delta=%.4f pitch=%.1f" % [
+		(local.camera.rotation - idle_rotation).length(),
+		(local.camera.get_camera_flat_forward() - idle_forward).length(),
+		rad_to_deg(-local.camera.rotation.x)])
 
 	# A target on the far side of a gap is unreachable: the navigation mesh does
 	# not bridge it, so the body must stop on this side rather than walk out.
