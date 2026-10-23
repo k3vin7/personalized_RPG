@@ -35,6 +35,9 @@ var _coyote_left := 0.0
 var _intent_direction := Vector3.ZERO
 var _intent_left := 0.0
 var _pending_air_target: Variant = null
+var _dash_left := 0.0
+var _dash_direction := Vector3.ZERO
+var _dash_cooldown_left := 0.0
 
 
 func setup(owner_player: Player) -> void:
@@ -123,6 +126,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		_click_to_target()
 		get_viewport().set_input_as_handled()
 		return
+	if event.is_action_pressed("dash"):
+		request_dash()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("jump"):
 		# Buffered, never acted on here: input runs outside the physics step,
 		# where is_on_floor() still holds last step's answer.
@@ -137,6 +144,7 @@ func _physics_process(delta: float) -> void:
 		# Nothing moves while dead; the body waits where it fell.
 		return
 	_jump_buffer_left = maxf(0.0, _jump_buffer_left - delta)
+	_dash_cooldown_left = maxf(0.0, _dash_cooldown_left - delta)
 	_intent_left = maxf(0.0, _intent_left - delta)
 	if _intent_left == 0.0:
 		_intent_direction = Vector3.ZERO
@@ -145,7 +153,9 @@ func _physics_process(delta: float) -> void:
 	else:
 		_coyote_left = maxf(0.0, _coyote_left - delta)
 
-	if player.state == Player.State.AIRBORNE:
+	if player.state == Player.State.DASH:
+		_dash_step(delta)
+	elif player.state == Player.State.AIRBORNE:
 		_air_step(delta)
 	else:
 		_ground_step(delta)
@@ -208,6 +218,12 @@ func _launch_jump() -> void:
 			horizontal = _intent_direction * player.get_move_speed()
 		else:
 			horizontal = Vector3.ZERO
+	# Only the heading changes with the toggle, never the speed, so the two
+	# rules can be compared with one variable between them.
+	if Tuning.values.jump_aims_at_cursor and horizontal.length() > 0.1:
+		var aim := cursor_direction()
+		if aim.length_squared() > 0.01:
+			horizontal = aim * horizontal.length()
 	_clear_intent()
 	# A jump is a new order of its own, so the click that was taking us
 	# somewhere is dropped rather than resumed on landing.
@@ -230,6 +246,63 @@ func _air_step(delta: float) -> void:
 	if player.is_on_floor():
 		player.floor_snap_length = player.default_snap_length()
 		player.change_state(Player.State.MOVE if _has_target else Player.State.IDLE)
+
+
+# DOC: ground only, cursor aimed, and never while already dashing or airborne.
+func request_dash() -> bool:
+	if not player.is_grounded_state() or _dash_cooldown_left > 0.0:
+		return false
+	var aim := cursor_direction()
+	if aim.length_squared() < 0.01:
+		return false
+	_dash_direction = aim
+	_dash_left = Tuning.values.dash_distance
+	_dash_cooldown_left = Tuning.values.dash_cooldown
+	cancel_target()
+	_clear_intent()
+	player.velocity.y = 0.0
+	player.change_state(Player.State.DASH)
+	return true
+
+
+func is_dashing() -> bool:
+	return player.state == Player.State.DASH
+
+
+func _dash_step(delta: float) -> void:
+	var speed: float = Tuning.values.dash_distance / maxf(Tuning.values.dash_duration, 0.01)
+	# Tracked as remaining distance so the last step covers exactly what is
+	# left rather than a frame's worth more or less.
+	var step := minf(speed * delta, _dash_left)
+	_dash_left -= step
+	var frame_speed := step / maxf(delta, 0.0001)
+	player.velocity.x = _dash_direction.x * frame_speed
+	player.velocity.z = _dash_direction.z * frame_speed
+	player.velocity.y -= Tuning.values.gravity * delta
+	player.move_and_slide()
+	# A wall ends it on the spot, and so does running out of ground.
+	if player.is_on_wall() or _dash_left <= 0.0:
+		_end_dash()
+	elif not player.is_on_floor():
+		_end_dash()
+
+
+func _end_dash() -> void:
+	_dash_left = 0.0
+	player.velocity.x = 0.0
+	player.velocity.z = 0.0
+	player.change_state(Player.State.IDLE if player.is_on_floor() else Player.State.AIRBORNE)
+
+
+func cursor_direction() -> Vector3:
+	var point: Variant = _cursor_ground_point()
+	if point == null:
+		return Vector3.ZERO
+	var direction := (point as Vector3) - player.global_position
+	direction.y = 0.0
+	if direction.length_squared() < 0.0004:
+		return Vector3.ZERO
+	return direction.normalized()
 
 
 func _face_cursor(delta: float) -> void:

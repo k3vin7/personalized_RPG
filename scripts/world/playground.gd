@@ -243,6 +243,8 @@ func _run_smoke() -> void:
 
 	if multiplayer.is_server():
 		await _run_stage2_checks(local)
+		await _run_stage3_checks(local)
+		await _run_jump_toggle_check(local)
 		await _run_respawn_checks(local)
 		# Long enough that the other process has really gone, not merely queued.
 		await get_tree().create_timer(9.0).timeout
@@ -251,6 +253,85 @@ func _run_smoke() -> void:
 
 # Stage 2 gates. Each one is the outcome the work order asks for, measured
 # rather than argued from the numbers.
+# The toggle must change the heading and nothing else.
+func _run_jump_toggle_check(local: Player) -> void:
+	var results := {}
+	for aimed in [false, true]:
+		Tuning.values.jump_aims_at_cursor = aimed
+		await _settle(local, Vector3(0.0, 1.0, 11.0))
+		local.movement.set_target(Vector3(8.0, 0.0, 11.0))
+		await get_tree().create_timer(0.8).timeout
+		var travel := Vector2(local.velocity.x, local.velocity.z)
+		local.movement.request_jump()
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		var launch := Vector2(local.velocity.x, local.velocity.z)
+		results[aimed] = {"travel": travel, "launch": launch}
+		await get_tree().create_timer(1.2).timeout
+	Tuning.values.jump_aims_at_cursor = false
+	var off: Dictionary = results[false]
+	var on: Dictionary = results[true]
+	var cursor := local.movement.cursor_direction()
+	print("PLAYGROUND_JUMP_TOGGLE off_matches_travel=%.2f on_matches_cursor=%.2f speed_off=%.2f speed_on=%.2f" % [
+		(off["travel"] as Vector2).normalized().dot((off["launch"] as Vector2).normalized()),
+		Vector2(cursor.x, cursor.z).normalized().dot((on["launch"] as Vector2).normalized()),
+		(off["launch"] as Vector2).length(), (on["launch"] as Vector2).length()])
+
+
+func _run_stage3_checks(local: Player) -> void:
+	await _settle(local, Vector3(0.0, 1.0, 11.0))
+	var start := local.global_position
+	var aim := local.movement.cursor_direction()
+	var went := local.movement.request_dash()
+	# Refused mid dash, and a jump pressed during one is ignored.
+	var second := local.movement.request_dash()
+	local.movement.request_jump()
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var jumped := local.velocity.y > 1.0
+	await get_tree().create_timer(0.8).timeout
+	print("PLAYGROUND_STAGE3_DASH went=%s distance=%.2f heading_match=%.2f second=%s jumped=%s state=%s" % [
+		went, _flat(local.global_position - start),
+		aim.dot((local.global_position - start).normalized()),
+		second, jumped, Player.State.keys()[local.state]])
+
+	# Cooldown: still refused a moment later, allowed once it has run out.
+	var during_cooldown := local.movement.request_dash()
+	await get_tree().create_timer(Tuning.values.dash_cooldown + 0.2).timeout
+	var after_cooldown := local.movement.request_dash()
+	await get_tree().create_timer(0.6).timeout
+	print("PLAYGROUND_STAGE3_COOLDOWN during=%s after=%s" % [during_cooldown, after_cooldown])
+
+	# In the air it does not go at all.
+	await _settle(local, Vector3(0.0, 4.0, 11.0))
+	local.global_position = Vector3(0.0, 6.0, 11.0)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	print("PLAYGROUND_STAGE3_AIR state=%s went=%s" % [
+		Player.State.keys()[local.state], local.movement.request_dash()])
+
+	# A wall stops it where it hits, not four metres on.
+	await _settle(local, Vector3(0.0, 1.0, 11.0))
+	var blocker := StaticBody3D.new()
+	blocker.name = "DashBlocker"
+	blocker.position = local.global_position + aim * 2.5
+	blocker.collision_layer = WALL_LAYER
+	var collision := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(4.0, 3.0, 0.6)
+	shape.size = Vector3(4.0, 3.0, 0.6) if absf(aim.z) > absf(aim.x) else Vector3(0.6, 3.0, 4.0)
+	collision.shape = shape
+	blocker.add_child(collision)
+	add_child(blocker)
+	await get_tree().physics_frame
+	var wall_start := local.global_position
+	local.movement.request_dash()
+	await get_tree().create_timer(0.6).timeout
+	print("PLAYGROUND_STAGE3_WALL distance=%.2f state=%s" % [
+		_flat(local.global_position - wall_start), Player.State.keys()[local.state]])
+	blocker.queue_free()
+
+
 func _run_respawn_checks(local: Player) -> void:
 	# Falling past the kill plane kills and brings the body back on its own.
 	await _settle(local, Vector3(0.0, 1.0, 8.0))
