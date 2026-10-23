@@ -64,6 +64,10 @@ func request_jump() -> void:
 	_jump_buffer_left = JUMP_BUFFER
 
 
+func has_target() -> bool:
+	return _has_target
+
+
 func intent_direction() -> Vector3:
 	return _intent_direction
 

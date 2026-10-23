@@ -192,16 +192,30 @@ func _run_smoke() -> void:
 	var last_state := local.state
 	var stalls := 0
 	var drag_target := Vector3(1.5, 0.0, -1.0)
+	# Counted only while the order is still live. Idling at the destination is
+	# not a stall, and counting it hid the real number behind the travel time.
+	# Distance covered against distance possible: a per frame velocity sample
+	# turned out to read whatever the step had just left behind, which is not
+	# the same thing as whether the body kept moving.
+	var measured := 0
+	var covered := 0.0
+	var previous := local.global_position
 	for _tick in range(240):
 		if _tick % 12 == 0:
 			local.movement.set_target(drag_target)
 		await get_tree().physics_frame
+		if not local.movement.has_target():
+			break
+		measured += 1
+		covered += _flat(local.global_position - previous)
+		previous = local.global_position
 		if local.state != last_state:
 			flips += 1
 			last_state = local.state
-		if Vector2(local.velocity.x, local.velocity.z).length() < 0.5:
-			stalls += 1
-	print("PLAYGROUND_SMOKE_DRAG state_flips=%d stalled_frames=%d of 240" % [flips, stalls])
+	stalls = measured
+	var possible := local.get_move_speed() * float(measured) * get_physics_process_delta_time()
+	print("PLAYGROUND_SMOKE_DRAG state_flips=%d covered=%.2f of possible %.2f (%.0f%%)" % [
+		flips, covered, possible, 100.0 * covered / maxf(possible, 0.01)])
 
 	# Walls below the character fade by height alone, wherever they are. From
 	# the high platform the smooth wall (top 4 m) is under our feet; from the
