@@ -150,13 +150,16 @@ func _run_smoke() -> void:
 	var idle_rotation := local.camera.rotation
 	var idle_forward := local.camera.get_camera_flat_forward()
 
-	var home := local.global_position
+	# North of the gap lanes. With nav bridges in place a leg that reaches the
+	# plaza's south edge walks the body off it and the rest of the run happens
+	# on a corpse.
+	var home := await _settle(local, Vector3(0.0, 1.0, 11.0))
 	var travelled := 0.0
 	var remote_travelled := 0.0
 	var previous := home
 	var remote_previous := remote.global_position if remote != null else Vector3.ZERO
 	for leg in range(6):
-		local.movement.set_target(home + Vector3(0.0, 0.0, -5.0 if leg % 2 == 0 else 0.0))
+		local.movement.set_target(home + Vector3(0.0, 0.0, 4.0 if leg % 2 == 0 else 0.0))
 		for _tick in range(60):
 			await get_tree().physics_frame
 			travelled += _flat(local.global_position - previous)
@@ -186,8 +189,7 @@ func _run_smoke() -> void:
 	# not flicker and the body must not stall between the queries.
 	# Far enough that the whole window is travel: measuring past the arrival
 	# would just be counting the time spent standing still.
-	local.global_position = Vector3(1.5, 1.0, 16.0)
-	await get_tree().create_timer(0.6).timeout
+	await _settle(local, Vector3(1.5, 1.0, 16.0))
 	var flips := 0
 	var last_state := local.state
 	var stalls := 0
