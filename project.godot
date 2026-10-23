@@ -77,6 +77,7 @@ cancel={
 3d_physics/layer_5="Throwable"
 3d_physics/layer_6="Dummy"
 3d_physics/layer_7="Hitbox"
+3d_physics/layer_8="NavBridge"
 
 [physics]
 

@@ -24,6 +24,9 @@ properties/5/replication_mode = 1
 properties/6/path = NodePath(".:sync_gear_weight")
 properties/6/spawn = true
 properties/6/replication_mode = 1
+properties/7/path = NodePath(".:sync_weapon")
+properties/7/spawn = true
+properties/7/replication_mode = 1
 
 [node name="Player" type="CharacterBody3D"]
 script = ExtResource("1")

@@ -8,6 +8,10 @@ extends Node3D
 const WORLD_LAYER := 1
 const WALL_LAYER := 2
 const CLIMBABLE_LAYER := 4
+# Seen by the navigation bake and by nothing else. A bridge on this layer makes
+# a gap look like continuous ground to pathfinding while bodies pass straight
+# through it, so walking at the far side walks you off the edge and down.
+const NAV_BRIDGE_LAYER := 128
 
 # A navigation surface is eroded by agent_radius from every edge, so any top a
 # character is meant to stand on needs a short side wider than twice that plus a
@@ -34,6 +38,11 @@ func _ready() -> void:
 	_build_gaps()
 	_build_walls()
 	_build_occluders()
+
+	var rack := WeaponRack.new()
+	rack.name = "WeaponRack"
+	rack.position = Vector3(0.0, 0.0, 16.0)
+	add_child(rack)
 
 	_players_root = Node3D.new()
 	_players_root.name = "Players"
@@ -82,7 +91,7 @@ func _bake_navigation() -> void:
 	# through. They cannot contribute a walkable surface: their faces are
 	# vertical, and every wall here is 0.6 m thick, which agent_radius erodes
 	# away entirely, so no polygon forms on top of one either.
-	nav_mesh.geometry_collision_mask = WORLD_LAYER | WALL_LAYER | CLIMBABLE_LAYER
+	nav_mesh.geometry_collision_mask = WORLD_LAYER | WALL_LAYER | CLIMBABLE_LAYER | NAV_BRIDGE_LAYER
 	_region.navigation_mesh = nav_mesh
 	_region.bake_finished.connect(_on_bake_finished)
 	_region.call_deferred("bake_navigation_mesh", true)
@@ -290,15 +299,33 @@ func _run_stage2_checks(local: Player) -> void:
 		print("PLAYGROUND_STAGE2_STEP height=%.1f landed_y=%.2f on_top=%s" % [
 			step["height"], landed.y, landed.y > float(step["height"]) + 0.5])
 
-	# Gaps: 3 m is meant to be crossable, 5 m is not.
+	# With a nav bridge the far side is a valid destination, so ordering a move
+	# there walks the body out over the gap and drops it.
+	await _settle(local, Vector3(-5.0, 1.0, 2.0))
+	local.movement.set_target(Vector3(-5.0, 0.0, -8.0))
+	await get_tree().create_timer(3.0).timeout
+	print("PLAYGROUND_STAGE2_WALKOFF y=%.2f z=%.2f state=%s" % [
+		local.global_position.y, local.global_position.z, Player.State.keys()[local.state]])
+	await _settle(local, Vector3(0.0, 1.0, 8.0))
+
+	# Gaps: 3 m is meant to be crossable, 5 m is not. Taken on the run, like the
+	# steps: with a nav bridge over the gap the body no longer stops at the
+	# edge, it walks off, so the jump has to be timed rather than set up.
+	#
+	# A gap wants the opposite timing to a step. A step is cleared by leaving
+	# early and being high at the edge; a gap is crossed by leaving as late as
+	# possible, because every metre spent before the edge is a metre not spent
+	# over it.
 	for gap in [{"width": 3.0, "x": -5.0}, {"width": 5.0, "x": 15.0}]:
 		var far_z: float = -2.0 - float(gap["width"]) - 2.0
-		var landed := await _jump_towards(
+		var landed := await _jump_on_the_run(
 			local,
-			Vector3(gap["x"], 1.0, 1.5),
-			Vector3(gap["x"], 0.0, far_z))
-		print("PLAYGROUND_STAGE2_GAP width=%.0f landed_z=%.2f crossed=%s" % [
-			gap["width"], landed.z, landed.z < -2.0 - float(gap["width"])])
+			Vector3(gap["x"], 1.0, 4.0),
+			Vector3(gap["x"], 0.0, far_z),
+			-2.0,
+			0.5)
+		print("PLAYGROUND_STAGE2_GAP width=%.0f landed=(%.2f, %.2f) crossed=%s" % [
+			gap["width"], landed.y, landed.z, landed.z < -2.0 - float(gap["width"]) and landed.y > -1.0])
 
 	# A click made in the air must not bend the arc, and must be honoured on
 	# landing.
@@ -354,6 +381,12 @@ func _jump_on_the_run(
 
 
 func _settle(local: Player, at_position: Vector3) -> Vector3:
+	# A check that ended in a fall leaves the body dead and unable to move, so
+	# wait the respawn out before placing it for the next one.
+	var waited := 0.0
+	while local.state == Player.State.DEAD and waited < 6.0:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
 	local.global_position = at_position
 	local.velocity = Vector3.ZERO
 	local.movement.cancel_target()
@@ -452,15 +485,19 @@ func _build_gaps() -> void:
 			Vector3(8.0, 1.0, width + 1.0),
 			Color("5f656b"),
 			WORLD_LAYER)
+		# Nothing to stand on, only something to path over.
+		_nav_bridge("GapBridge_%.0f" % width, Vector3(lane, -0.5, gap_start - width * 0.5), Vector3(8.0, 1.0, width))
 		_sign("GAP %.0fm" % width, Vector3(lane, 1.6, gap_start + 1.0), Color("d9f3ff"))
 
 
 func _build_walls() -> void:
 	# Climbable, 6 x 6. A faces the camera, B faces sideways, C faces away.
 	_box("ClimbWallA", Vector3(-14.0, 3.0, 2.0), Vector3(6.0, 6.0, 0.6), Color("7a8f7a"), CLIMBABLE_LAYER)
-	_box("ClimbWallB", Vector3(-4.0, 3.0, 2.0), Vector3(0.6, 6.0, 6.0), Color("7a8f7a"), CLIMBABLE_LAYER)
+	# Clear of the x=-5 gap lane: a wall beside a lane eats the run up, because
+	# agent_radius keeps the walkable surface half a metre off it.
+	_box("ClimbWallB", Vector3(-9.0, 3.0, 2.0), Vector3(0.6, 6.0, 6.0), Color("7a8f7a"), CLIMBABLE_LAYER)
 	_box("ClimbWallC", Vector3(6.0, 3.0, 2.0), Vector3(6.0, 6.0, 0.6), Color("7a8f7a"), CLIMBABLE_LAYER)
-	_sign("CLIMB A / B / C", Vector3(-4.0, 7.0, 2.0), Color("c8ffc8"))
+	_sign("CLIMB A / B / C", Vector3(-9.0, 7.0, 2.0), Color("c8ffc8"))
 	# Smooth wall: looks the same, cannot be climbed.
 	_box("SmoothWall", Vector3(16.0, 2.0, 2.0), Vector3(6.0, 4.0, 0.6), Color("555b62"), WALL_LAYER)
 	_sign("SMOOTH", Vector3(16.0, 5.0, 2.0), Color.WHITE)
@@ -521,6 +558,21 @@ func _box(
 
 	_region.add_child(body)
 	return body
+
+
+# No mesh and no mask anyone reads: it exists for the bake and for nothing else.
+func _nav_bridge(bridge_name: String, at_position: Vector3, size: Vector3) -> void:
+	var body := StaticBody3D.new()
+	body.name = bridge_name
+	body.position = at_position
+	body.collision_layer = NAV_BRIDGE_LAYER
+	body.collision_mask = 0
+	var collision := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = size
+	collision.shape = shape
+	body.add_child(collision)
+	_region.add_child(body)
 
 
 func _sign(text: String, at_position: Vector3, color: Color) -> void:

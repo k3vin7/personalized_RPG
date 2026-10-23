@@ -56,6 +56,7 @@ var sync_state: int = State.IDLE
 var sync_strength := 10.0
 var sync_race_weight := 10.0
 var sync_gear_weight := 0.0
+var sync_weapon: int = WeaponKinds.Kind.NONE
 
 var movement: PlayerMovement
 var camera: QuarterCamera
@@ -66,6 +67,8 @@ var _label: Label3D
 var _default_snap := 0.3
 var spawn_point := Vector3.ZERO
 var _respawn_left := 0.0
+var weapon: int = WeaponKinds.Kind.NONE
+var _weapon_node: Node3D
 
 
 func _enter_tree() -> void:
@@ -159,10 +162,13 @@ func _physics_process(delta: float) -> void:
 		sync_strength = stats.strength
 		sync_race_weight = stats.race_weight
 		sync_gear_weight = stats.gear_weight
+		sync_weapon = weapon
 		return
 	stats.strength = sync_strength
 	stats.race_weight = sync_race_weight
 	stats.gear_weight = sync_gear_weight
+	if sync_weapon != weapon:
+		_apply_weapon(sync_weapon)
 	# Remote bodies are shown, not simulated: a short lerp hides the gap
 	# between state packets without letting them drift.
 	global_position = global_position.lerp(sync_position, 1.0 - exp(-18.0 * delta))
@@ -208,6 +214,30 @@ func respawn() -> void:
 		movement.cancel_target()
 	change_state(State.IDLE)
 	print("PLAYGROUND_RESPAWN peer=%s at=%s" % [name, spawn_point])
+
+
+# Picked up by standing on a rack pedestal. Only the body's owner may change it;
+# everyone else receives it through sync_weapon.
+func set_weapon(kind: int) -> void:
+	if not is_local() or kind == weapon:
+		return
+	_apply_weapon(kind)
+	print("PLAYGROUND_WEAPON peer=%s kind=%s" % [name, WeaponKinds.LABELS.get(kind, "?")])
+
+
+func _apply_weapon(kind: int) -> void:
+	weapon = kind
+	sync_weapon = kind
+	if is_instance_valid(_weapon_node):
+		_weapon_node.queue_free()
+	_weapon_node = null
+	if kind == WeaponKinds.Kind.NONE:
+		return
+	_weapon_node = WeaponKinds.build_mesh(kind)
+	_weapon_node.name = "HeldWeapon"
+	# At the hand, pointing the way the body faces.
+	_weapon_node.position = Vector3(0.34, 0.1, -0.1)
+	_visual.add_child(_weapon_node)
 
 
 func face_direction(direction: Vector3, delta: float, turn_speed: float = 16.0) -> void:
