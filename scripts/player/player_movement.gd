@@ -106,6 +106,10 @@ func set_target(world_point: Vector3) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not player.is_local():
 		return
+	if event.is_action_pressed("restart"):
+		player.respawn()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("cancel"):
 		cancel_target()
 		_clear_intent()
@@ -124,6 +128,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	if not player.is_local():
+		return
+	if player.state == Player.State.DEAD:
+		# Nothing moves while dead; the body waits where it fell.
 		return
 	_jump_buffer_left = maxf(0.0, _jump_buffer_left - delta)
 	_intent_left = maxf(0.0, _intent_left - delta)

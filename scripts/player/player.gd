@@ -64,6 +64,8 @@ var _visual: Node3D
 var _material: StandardMaterial3D
 var _label: Label3D
 var _default_snap := 0.3
+var spawn_point := Vector3.ZERO
+var _respawn_left := 0.0
 
 
 func _enter_tree() -> void:
@@ -83,6 +85,7 @@ func _ready() -> void:
 	floor_snap_length = _default_snap
 	_build_body()
 	sync_position = global_position
+	spawn_point = global_position
 
 	if is_local():
 		movement = PlayerMovement.new()
@@ -149,6 +152,7 @@ func is_grounded_state() -> bool:
 
 func _physics_process(delta: float) -> void:
 	if is_local():
+		_check_death(delta)
 		sync_position = global_position
 		sync_yaw = rotation.y
 		sync_state = state
@@ -165,6 +169,45 @@ func _physics_process(delta: float) -> void:
 	rotation.y = lerp_angle(rotation.y, sync_yaw, 1.0 - exp(-20.0 * delta))
 	if sync_state != state:
 		change_state(sync_state)
+
+
+# Falling out of the world is not a special case anywhere else: the body dies
+# and comes back, and everything that was in progress is dropped.
+func _check_death(delta: float) -> void:
+	if state == State.DEAD:
+		_respawn_left -= delta
+		if _respawn_left <= 0.0:
+			respawn()
+		return
+	if global_position.y < Tuning.values.kill_plane_y:
+		die()
+
+
+func die() -> void:
+	if not is_local() or state == State.DEAD:
+		return
+	velocity = Vector3.ZERO
+	_respawn_left = Tuning.values.respawn_delay
+	if movement != null:
+		movement.cancel_target()
+	change_state(State.DEAD)
+	print("PLAYGROUND_DIED peer=%s y=%.1f" % [name, global_position.y])
+
+
+# Also the R key: a restart is the same thing as coming back from a fall, so
+# there is one path rather than two that can drift apart.
+func respawn() -> void:
+	if not is_local():
+		return
+	global_position = spawn_point
+	velocity = Vector3.ZERO
+	hp = stats.max_hp
+	floor_snap_length = _default_snap
+	_respawn_left = 0.0
+	if movement != null:
+		movement.cancel_target()
+	change_state(State.IDLE)
+	print("PLAYGROUND_RESPAWN peer=%s at=%s" % [name, spawn_point])
 
 
 func face_direction(direction: Vector3, delta: float, turn_speed: float = 16.0) -> void:

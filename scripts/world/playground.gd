@@ -218,6 +218,7 @@ func _run_smoke() -> void:
 
 	if multiplayer.is_server():
 		await _run_stage2_checks(local)
+		await _run_respawn_checks(local)
 		# Long enough that the other process has really gone, not merely queued.
 		await get_tree().create_timer(9.0).timeout
 		print("PLAYGROUND_SMOKE_AFTER_LEAVE players=%d" % _players_root.get_child_count())
@@ -225,6 +226,25 @@ func _run_smoke() -> void:
 
 # Stage 2 gates. Each one is the outcome the work order asks for, measured
 # rather than argued from the numbers.
+func _run_respawn_checks(local: Player) -> void:
+	# Falling past the kill plane kills and brings the body back on its own.
+	await _settle(local, Vector3(0.0, 1.0, 8.0))
+	var home := local.spawn_point
+	local.global_position = Vector3(0.0, Tuning.values.kill_plane_y - 2.0, 8.0)
+	await get_tree().create_timer(0.3).timeout
+	var died := local.state == Player.State.DEAD
+	await get_tree().create_timer(Tuning.values.respawn_delay + 0.8).timeout
+	print("PLAYGROUND_FALL died=%s back_home=%.2f state=%s" % [
+		died, local.global_position.distance_to(home), Player.State.keys()[local.state]])
+
+	# R restarts from anywhere, without having to fall first.
+	await _settle(local, Vector3(-12.0, 1.0, 4.0))
+	local.respawn()
+	await get_tree().create_timer(0.5).timeout
+	print("PLAYGROUND_RESTART back_home=%.2f state=%s" % [
+		local.global_position.distance_to(home), Player.State.keys()[local.state]])
+
+
 func _run_stage2_checks(local: Player) -> void:
 	# What is actually standing at the step positions?
 	for probe in [Vector3(-6.0, 5.0, 14.0), Vector3(-1.5, 5.0, 14.0)]:
