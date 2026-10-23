@@ -78,9 +78,11 @@ func _bake_navigation() -> void:
 	nav_mesh.cell_height = 0.25
 	nav_mesh.geometry_source_geometry_mode = NavigationMesh.SOURCE_GEOMETRY_ROOT_NODE_CHILDREN
 	nav_mesh.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
-	# Only the World layer is walkable: climb walls and smooth walls must not
-	# contribute a surface.
-	nav_mesh.geometry_collision_mask = WORLD_LAYER
+	# Walls are parsed too, so a path routes around them instead of straight
+	# through. They cannot contribute a walkable surface: their faces are
+	# vertical, and every wall here is 0.6 m thick, which agent_radius erodes
+	# away entirely, so no polygon forms on top of one either.
+	nav_mesh.geometry_collision_mask = WORLD_LAYER | WALL_LAYER | CLIMBABLE_LAYER
 	_region.navigation_mesh = nav_mesh
 	_region.bake_finished.connect(_on_bake_finished)
 	_region.call_deferred("bake_navigation_mesh", true)
@@ -171,6 +173,38 @@ func _run_smoke() -> void:
 	print("PLAYGROUND_SMOKE_GAP peer=%d stopped_z=%.2f crossed=%s" % [
 		multiplayer.get_unique_id(), local.global_position.z, local.global_position.z < -2.5])
 
+	# A held right button re-issues the order ten times a second. The state must
+	# not flicker and the body must not stall between the queries.
+	# Far enough that the whole window is travel: measuring past the arrival
+	# would just be counting the time spent standing still.
+	local.global_position = Vector3(1.5, 1.0, 16.0)
+	await get_tree().create_timer(0.6).timeout
+	var flips := 0
+	var last_state := local.state
+	var stalls := 0
+	var drag_target := Vector3(1.5, 0.0, -1.0)
+	for _tick in range(240):
+		if _tick % 12 == 0:
+			local.movement.set_target(drag_target)
+		await get_tree().physics_frame
+		if local.state != last_state:
+			flips += 1
+			last_state = local.state
+		if Vector2(local.velocity.x, local.velocity.z).length() < 0.5:
+			stalls += 1
+	print("PLAYGROUND_SMOKE_DRAG state_flips=%d stalled_frames=%d of 240" % [flips, stalls])
+
+	# Walls below the character fade by height alone, wherever they are. From
+	# the high platform the smooth wall (top 4 m) is under our feet; from the
+	# plaza nothing is, and no occluder sits in this line of sight either.
+	local.global_position = Vector3(14.0, 6.0, 14.0)
+	await get_tree().create_timer(1.2).timeout
+	var faded_high := OcclusionFader.faded_rids().size()
+	local.global_position = Vector3(-15.0, 1.0, 6.0)
+	await get_tree().create_timer(1.2).timeout
+	var faded_low := OcclusionFader.faded_rids().size()
+	print("PLAYGROUND_SMOKE_FADE on_platform=%d on_plaza=%d" % [faded_high, faded_low])
+
 	if multiplayer.is_server():
 		# Long enough that the other process has really gone, not merely queued.
 		await get_tree().create_timer(9.0).timeout
@@ -257,9 +291,9 @@ func _build_gaps() -> void:
 
 func _build_walls() -> void:
 	# Climbable, 6 x 6. A faces the camera, B faces sideways, C faces away.
-	_box("ClimbWallA", Vector3(-14.0, 3.0, 2.0), Vector3(6.0, 6.0, 0.6), Color("7a8f7a"), CLIMBABLE_LAYER, true)
-	_box("ClimbWallB", Vector3(-4.0, 3.0, 2.0), Vector3(0.6, 6.0, 6.0), Color("7a8f7a"), CLIMBABLE_LAYER, true)
-	_box("ClimbWallC", Vector3(6.0, 3.0, 2.0), Vector3(6.0, 6.0, 0.6), Color("7a8f7a"), CLIMBABLE_LAYER, true)
+	_box("ClimbWallA", Vector3(-14.0, 3.0, 2.0), Vector3(6.0, 6.0, 0.6), Color("7a8f7a"), CLIMBABLE_LAYER)
+	_box("ClimbWallB", Vector3(-4.0, 3.0, 2.0), Vector3(0.6, 6.0, 6.0), Color("7a8f7a"), CLIMBABLE_LAYER)
+	_box("ClimbWallC", Vector3(6.0, 3.0, 2.0), Vector3(6.0, 6.0, 0.6), Color("7a8f7a"), CLIMBABLE_LAYER)
 	_sign("CLIMB A / B / C", Vector3(-4.0, 7.0, 2.0), Color("c8ffc8"))
 	# Smooth wall: looks the same, cannot be climbed.
 	_box("SmoothWall", Vector3(16.0, 2.0, 2.0), Vector3(6.0, 4.0, 0.6), Color("555b62"), WALL_LAYER)
@@ -268,8 +302,8 @@ func _build_walls() -> void:
 
 func _build_occluders() -> void:
 	# Between the camera and the plaza, so walking behind one fades it.
-	_box("OccluderA", Vector3(-6.0, 2.5, 10.0), Vector3(8.0, 5.0, 0.6), Color("4b535c"), WALL_LAYER, true, true)
-	_box("OccluderB", Vector3(8.0, 2.5, 6.0), Vector3(8.0, 5.0, 0.6), Color("4b535c"), WALL_LAYER, true, true)
+	_box("OccluderA", Vector3(-6.0, 2.5, 10.0), Vector3(8.0, 5.0, 0.6), Color("4b535c"), WALL_LAYER, true)
+	_box("OccluderB", Vector3(8.0, 2.5, 6.0), Vector3(8.0, 5.0, 0.6), Color("4b535c"), WALL_LAYER, true)
 	_sign("OCCLUSION", Vector3(-6.0, 6.0, 10.0), Color.WHITE)
 
 
@@ -279,7 +313,6 @@ func _box(
 		size: Vector3,
 		color: Color,
 		layer: int,
-		outside_navigation := false,
 		occluder := false) -> StaticBody3D:
 	var body := StaticBody3D.new()
 	body.name = box_name
@@ -295,15 +328,21 @@ func _box(
 	var box_mesh := BoxMesh.new()
 	box_mesh.size = size
 	mesh_instance.mesh = box_mesh
-	if occluder:
-		# Dither fade needs the shader; everything else can stay a plain
-		# material so the fade path is only paid for where it is used.
+	# Anything on a wall layer can fade, whether or not it is in the way: a wall
+	# that tops out below the character is fading by height alone. World layer
+	# boxes are floors, steps and platforms, and must never fade or standing on
+	# a step would dissolve the ground under it.
+	var is_wall := layer == WALL_LAYER or layer == CLIMBABLE_LAYER
+	if is_wall or occluder:
 		var shader_material := ShaderMaterial.new()
 		shader_material.shader = load("res://shaders/dither_fade.gdshader")
 		shader_material.set_shader_parameter("albedo", color)
 		shader_material.set_shader_parameter("fade", 1.0)
 		mesh_instance.material_override = shader_material
-		body.add_to_group(OcclusionFader.OCCLUDER_GROUP)
+		body.set_meta("top_y", at_position.y + size.y * 0.5)
+		body.add_to_group(OcclusionFader.WALL_GROUP)
+		if occluder:
+			body.add_to_group(OcclusionFader.OCCLUDER_GROUP)
 	else:
 		var material := StandardMaterial3D.new()
 		material.albedo_color = color
@@ -311,11 +350,7 @@ func _box(
 		mesh_instance.material_override = material
 	body.add_child(mesh_instance)
 
-	# Only navigation geometry hangs under the region.
-	if outside_navigation:
-		add_child(body)
-	else:
-		_region.add_child(body)
+	_region.add_child(body)
 	return body
 
 

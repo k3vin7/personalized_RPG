@@ -21,6 +21,7 @@ var _target := Vector3.ZERO
 var _path := PackedVector3Array()
 var _path_index := 0
 var _pending_frames := 0
+var _path_dirty := false
 var _retries := 0
 var _drag_left := 0.0
 
@@ -43,20 +44,26 @@ func cancel_target() -> void:
 	_path.clear()
 	_path_index = 0
 	_retries = 0
-	if player.state == Player.State.MOVE:
-		player.change_state(Player.State.IDLE)
+	_path_dirty = false
 
 
 func set_target(world_point: Vector3) -> void:
+	# An order to where we already stand is not an order. Without this, holding
+	# the button with the cursor over your own feet arrives, cancels and
+	# re-orders every tenth of a second, which reads as a flickering state.
+	if _flat_distance(player.global_position, world_point) <= ARRIVE_TOLERANCE:
+		return
 	_target = world_point
 	_has_target = true
 	_agent.target_position = world_point
-	_path.clear()
-	_path_index = 0
 	_retries = 0
 	# The agent reports its previous path as finished until the server has taken
-	# the new target. Do not read arrival from that one frame window.
+	# the new target, so the result is only read after a few frames. The path we
+	# already have stays in use until then: a held right button re-issues the
+	# order ten times a second, and dropping the path on each one would stop the
+	# body dead between queries and flicker the state.
 	_pending_frames = 3
+	_path_dirty = true
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -84,18 +91,19 @@ func _physics_process(delta: float) -> void:
 		_drag_left = 0.0
 
 	var desired := _desired_velocity()
-	var speed := player.stats.ratio()
 	if desired.length_squared() > 0.0001:
 		player.velocity.x = desired.x
 		player.velocity.z = desired.z
 		player.face_direction(desired, delta)
-		if player.state == Player.State.IDLE:
-			player.change_state(Player.State.MOVE)
 	else:
 		player.velocity.x = 0.0
 		player.velocity.z = 0.0
-		if player.state == Player.State.MOVE:
-			player.change_state(Player.State.IDLE)
+	# Taken from whether an order stands, not from this frame's velocity: a
+	# re-query gap is still MOVE, because the order has not gone anywhere.
+	if _has_target and player.state == Player.State.IDLE:
+		player.change_state(Player.State.MOVE)
+	elif not _has_target and player.state == Player.State.MOVE:
+		player.change_state(Player.State.IDLE)
 	# Gravity is here even before the jump stage, or the body floats off ledges.
 	if player.is_on_floor():
 		player.velocity.y = -0.5
@@ -138,21 +146,10 @@ func _desired_velocity() -> Vector3:
 		return Vector3.ZERO
 	if _pending_frames > 0:
 		_pending_frames -= 1
-		return Vector3.ZERO
+	elif _path_dirty or _path.is_empty():
+		_query_path()
 	if _path.is_empty():
-		# One call makes the agent run its pending query; the points are then
-		# ours to walk.
-		_agent.get_next_path_position()
-		_path = _agent.get_current_navigation_path()
-		_path_index = 0
-		if _path.is_empty():
-			_retries += 1
-			if _retries > PATH_QUERY_RETRIES:
-				cancel_target()
-				return Vector3.ZERO
-			_pending_frames = 1
-			return Vector3.ZERO
-		_retries = 0
+		return Vector3.ZERO
 
 	var last_index := _path.size() - 1
 	while _path_index < _path.size():
@@ -161,7 +158,10 @@ func _desired_velocity() -> Vector3:
 			break
 		_path_index += 1
 	if _path_index >= _path.size():
-		cancel_target()
+		# Walked out the old path while a new one is still being prepared: wait
+		# for it rather than reporting an arrival that is not one.
+		if not _path_dirty:
+			cancel_target()
 		return Vector3.ZERO
 
 	var step := _path[_path_index] - player.global_position
@@ -169,6 +169,24 @@ func _desired_velocity() -> Vector3:
 	if step.length() < 0.05:
 		return Vector3.ZERO
 	return step.normalized() * move_speed()
+
+
+func _query_path() -> void:
+	# One call makes the agent run its pending query; the points are then ours
+	# to walk in XZ.
+	_agent.get_next_path_position()
+	var result := _agent.get_current_navigation_path()
+	if result.is_empty():
+		_retries += 1
+		if _retries > PATH_QUERY_RETRIES:
+			cancel_target()
+			return
+		_pending_frames = 1
+		return
+	_path = result
+	_path_index = 0
+	_path_dirty = false
+	_retries = 0
 
 
 func _flat_distance(a: Vector3, b: Vector3) -> float:
