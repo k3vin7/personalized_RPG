@@ -317,14 +317,20 @@ func _run_stage4_checks(local: Player) -> void:
 	# Jumping at a climbable wall and pressing jump again while touching it
 	# takes hold, and hanging there drains stamina without an entry fee.
 	await _settle(local, Vector3(-14.0, 1.0, 4.0))
-	local.global_position = Vector3(-14.0, 3.5, 3.0)
+	local.global_position = Vector3(-14.0, 4.0, 4.6)
 	local.velocity = Vector3(0.0, 0.0, -4.0)
 	local.change_state(Player.State.AIRBORNE)
+	# Let coyote time lapse first. Pressed inside it, the key is still a jump,
+	# which is correct and not what this check is about.
+	await get_tree().create_timer(0.25).timeout
+	# Pressed once, early, the way a player would: the buffer and the probe
+	# have to find the wall, not the press.
+	local.movement.request_jump()
 	var caught := false
 	var stamina_at_catch := 0.0
 	for _tick in range(90):
 		await get_tree().physics_frame
-		if local.movement.try_air_catch():
+		if local.climb.is_climbing():
 			caught = true
 			stamina_at_catch = local.stamina
 			break

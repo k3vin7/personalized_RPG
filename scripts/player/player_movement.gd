@@ -18,6 +18,12 @@ const UNREACHABLE_DISTANCE := 0.5
 # Pressing a touch early or a touch late still jumps.
 const JUMP_BUFFER := 0.1
 const COYOTE_TIME := 0.1
+# How far out a wall still counts as within reach when the catch is attempted.
+# Longer than the jump buffer on purpose: a catch is aimed at a wall you are
+# still travelling towards, so the press lands well before the contact does.
+const CATCH_BUFFER := 0.3
+const CATCH_REACH := 0.3
+const CATCH_PROBES := 8
 
 var player: Player
 
@@ -32,6 +38,7 @@ var _retries := 0
 var _drag_left := 0.0
 var _jump_buffer_left := 0.0
 var _coyote_left := 0.0
+var _catch_buffer_left := 0.0
 var _intent_direction := Vector3.ZERO
 var _intent_left := 0.0
 var _pending_air_target: Variant = null
@@ -68,6 +75,7 @@ func cancel_target() -> void:
 # press go through identical code.
 func request_jump() -> void:
 	_jump_buffer_left = JUMP_BUFFER
+	_catch_buffer_left = CATCH_BUFFER
 
 
 func has_target() -> bool:
@@ -150,13 +158,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("jump"):
-		# In the air against a climbable wall the same key takes hold of it.
-		if try_air_catch():
-			get_viewport().set_input_as_handled()
-			return
-		# Buffered, never acted on here: input runs outside the physics step,
-		# where is_on_floor() still holds last step's answer.
+		# Always buffered, never acted on here: input runs outside the physics
+		# step, where is_on_floor() and the contact list both still describe
+		# the previous one. What the press means is decided in the step.
 		_jump_buffer_left = JUMP_BUFFER
+		_catch_buffer_left = CATCH_BUFFER
 		get_viewport().set_input_as_handled()
 
 
@@ -170,6 +176,7 @@ func _physics_process(delta: float) -> void:
 		# The wall owns the body until it lets go.
 		return
 	_jump_buffer_left = maxf(0.0, _jump_buffer_left - delta)
+	_catch_buffer_left = maxf(0.0, _catch_buffer_left - delta)
 	_dash_cooldown_left = maxf(0.0, _dash_cooldown_left - delta)
 	_intent_left = maxf(0.0, _intent_left - delta)
 	if _intent_left == 0.0:
@@ -237,6 +244,7 @@ func _ground_step(delta: float) -> void:
 
 func _launch_jump() -> void:
 	_jump_buffer_left = 0.0
+	_catch_buffer_left = 0.0
 	_coyote_left = 0.0
 	var horizontal := Vector3(player.velocity.x, 0.0, player.velocity.z)
 	if horizontal.length() <= 0.1:
@@ -266,6 +274,14 @@ func _launch_jump() -> void:
 
 
 func _air_step(delta: float) -> void:
+	if _jump_buffer_left > 0.0 and _coyote_left > 0.0:
+		# Walked off something a moment ago: this is still the jump.
+		_launch_jump()
+		return
+	if _catch_buffer_left > 0.0 and try_air_catch():
+		_catch_buffer_left = 0.0
+		_jump_buffer_left = 0.0
+		return
 	# No self input on the horizontal: the arc is decided at launch. Only the
 	# body's facing still follows the cursor.
 	_face_cursor(delta)
@@ -307,17 +323,27 @@ func climb_request_distance() -> float:
 	return absf(plane.distance_to(player.global_position)) - Player.BODY_RADIUS
 
 
-# Reads the contacts the last move_and_slide() left behind, so "touching" means
-# actually touching rather than being somewhere near.
+# Probes outwards for a wall rather than reading the last step's contact list.
+# Sliding down a face separates and re-touches from frame to frame, so the
+# contact list is empty on most of them and a press would be thrown away.
 func try_air_catch() -> bool:
 	if player.state != Player.State.AIRBORNE or player.climb == null:
 		return false
-	for index in range(player.get_slide_collision_count()):
-		var contact := player.get_slide_collision(index)
-		var body := contact.get_collider() as CollisionObject3D
-		if body == null or (body.collision_layer & Player.CLIMBABLE_LAYER) == 0:
+	var space := player.get_world_3d().direct_space_state
+	var reach := Player.BODY_RADIUS + CATCH_REACH
+	for index in range(CATCH_PROBES):
+		var angle := TAU * float(index) / float(CATCH_PROBES)
+		var direction := Vector3(sin(angle), 0.0, cos(angle))
+		var from := player.global_position
+		var query := PhysicsRayQueryParameters3D.create(from, from + direction * reach, Player.CLIMBABLE_LAYER)
+		query.collide_with_areas = false
+		var hit := space.intersect_ray(query)
+		if hit.is_empty():
 			continue
-		if player.climb.attach(body, contact.get_position(), contact.get_normal()):
+		var body := hit.get("collider") as CollisionObject3D
+		if body == null:
+			continue
+		if player.climb.attach(body, hit["position"] as Vector3, hit.get("normal", -direction) as Vector3):
 			print("PLAYGROUND_AIR_CATCH y=%.2f" % player.global_position.y)
 			return true
 	return false
