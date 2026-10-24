@@ -9,6 +9,10 @@ const LAYER := 32
 const RETURN_DELAY := 2.0
 const RETURN_SPEED := 2.0
 const MAX_HP := 60.0
+# 20 state packets a second. A dummy built in code has no synchronizer of its
+# own, so the host pushes its state: without this a client saw a dummy that
+# never moved however hard it was shoved.
+const STATE_INTERVAL := 0.05
 
 var home := Vector3.ZERO
 var hp := MAX_HP
@@ -16,6 +20,8 @@ var sync_position := Vector3.ZERO
 var sync_hp := MAX_HP
 
 var _settle_left := 0.0
+var _state_left := 0.0
+var _has_state := false
 var _label: Label3D
 var _material: StandardMaterial3D
 
@@ -81,6 +87,8 @@ func apply_force_event(event: Dictionary) -> void:
 func _physics_process(delta: float) -> void:
 	if not is_multiplayer_authority():
 		# Shown, not simulated.
+		if not _has_state:
+			return
 		global_position = global_position.lerp(sync_position, 1.0 - exp(-18.0 * delta))
 		if not is_equal_approx(hp, sync_hp):
 			hp = sync_hp
@@ -109,6 +117,20 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	sync_position = global_position
 	sync_hp = hp
+	_state_left -= delta
+	if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
+		_state_left = STATE_INTERVAL
+		push_state.rpc(global_position, hp)
+
+
+@rpc("authority", "call_remote", "unreliable_ordered")
+func push_state(at_position: Vector3, at_hp: float) -> void:
+	sync_position = at_position
+	sync_hp = at_hp
+	if not _has_state:
+		# The first packet places it rather than easing in from the start mark.
+		global_position = at_position
+		_has_state = true
 
 
 func _refresh() -> void:

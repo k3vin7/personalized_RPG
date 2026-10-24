@@ -16,6 +16,14 @@ const NAV_BRIDGE_LAYER := 128
 # A navigation surface is eroded by agent_radius from every edge, so any top a
 # character is meant to stand on needs a short side wider than twice that plus a
 # cell or two. The stair tops here are 3 m, which clears it.
+const ROCK_SCENE := "res://scenes/rock.tscn"
+# West end of the plaza, on a line with 20 m of clear ground east of it and no
+# wall, platform or edge in the way. Every distance a throw is measured over
+# happens here.
+# Six metres clear of the plaza's west edge: a body placed any nearer gets
+# nudged off it by a landing throw and spends the next check falling.
+const THROW_LANE := Vector3(-14.0, 1.0, 8.0)
+
 const AGENT_RADIUS := 0.45
 const CELL_SIZE := 0.25
 
@@ -24,6 +32,9 @@ var spawn_points: Array[Vector3] = []
 var _region: NavigationRegion3D
 var _spawner: MultiplayerSpawner
 var _players_root: Node3D
+# Set by the host over RPC, read by the client's half of the stage 7 checks.
+var _escape_drill := false
+var _disconnect_rock := NodePath()
 
 
 func _ready() -> void:
@@ -44,6 +55,15 @@ func _ready() -> void:
 		dummy.setup(Vector3(-2.0 + float(index) * 4.0, 1.0, 2.0), "Dummy_%d" % index)
 		add_child(dummy)
 	_sign("허수아비 (E로 밀기)", Vector3(0.0, 2.6, 2.0), Color("ffe9b0"))
+
+	# Three rocks, 5 / 10 / 20 kg. Built on every peer with the same names, so
+	# only the host's state has to travel.
+	var rock_weights := [5.0, 10.0, 20.0]
+	for index in rock_weights.size():
+		var rock := (load(ROCK_SCENE) as PackedScene).instantiate() as Rock
+		rock.setup("Rock_%d" % index, Vector3(4.0 + float(index) * 2.0, 1.0, 6.0), rock_weights[index])
+		add_child(rock)
+	_sign("돌 (G 잡기 / G 던지기)", Vector3(6.0, 2.2, 6.0), Color("dfe6ee"))
 
 	var rack := WeaponRack.new()
 	rack.name = "WeaponRack"
@@ -152,6 +172,19 @@ func _run_smoke() -> void:
 		print("PLAYGROUND_SMOKE_LOCAL missing")
 		return
 
+	if Net.auto_only != "":
+		# One stage on its own, for iterating. The full suite is the default.
+		if multiplayer.is_server():
+			if Net.auto_only == "7":
+				await _run_stage7_checks(local)
+			elif Net.auto_only == "6":
+				await _run_stage6_checks(local)
+			elif Net.auto_only == "2":
+				await _run_stage2_checks(local)
+		else:
+			await _client_support(local)
+		return
+
 	# The view must not change angle between standing and moving.
 	var idle_rotation := local.camera.rotation
 	var idle_forward := local.camera.get_camera_flat_forward()
@@ -182,14 +215,18 @@ func _run_smoke() -> void:
 		(local.camera.get_camera_flat_forward() - idle_forward).length(),
 		rad_to_deg(-local.camera.rotation.x)])
 
-	# A target on the far side of a gap is unreachable: the navigation mesh does
-	# not bridge it, so the body must stop on this side rather than walk out.
+	# Every gap is bridged for pathfinding, so a click across one is a valid
+	# order and the body walks out over the edge and falls. That is the asked
+	# for behaviour, so what is checked is that it leaves the plaza and that
+	# falling resolves itself rather than wedging the body somewhere.
 	local.global_position = Vector3(-15.0, 1.0, 0.0)
 	await get_tree().create_timer(0.6).timeout
 	local.movement.set_target(Vector3(-15.0, 0.0, -6.0))
 	await get_tree().create_timer(3.0).timeout
-	print("PLAYGROUND_SMOKE_GAP peer=%d stopped_z=%.2f crossed=%s" % [
-		multiplayer.get_unique_id(), local.global_position.z, local.global_position.z < -2.5])
+	print("PLAYGROUND_SMOKE_GAP peer=%d walked_off=%s y=%.2f state=%s" % [
+		multiplayer.get_unique_id(), local.global_position.z < -2.0,
+		local.global_position.y, Player.State.keys()[local.state]])
+	await _settle(local, Vector3(0.0, 1.0, 11.0))
 
 	# A held right button re-issues the order ten times a second. The state must
 	# not flicker and the body must not stall between the queries.
@@ -199,7 +236,7 @@ func _run_smoke() -> void:
 	var flips := 0
 	var last_state := local.state
 	var stalls := 0
-	var drag_target := Vector3(1.5, 0.0, -1.0)
+	var drag_target := Vector3(1.5, 0.0, 2.0)
 	# Counted only while the order is still live. Idling at the destination is
 	# not a stall, and counting it hid the real number behind the travel time.
 	# Distance covered against distance possible: a per frame velocity sample
@@ -240,9 +277,14 @@ func _run_smoke() -> void:
 	await get_tree().create_timer(0.8).timeout
 	var faded_in_front := OcclusionFader.faded_rids().size()
 	var jump_before := OcclusionFader.faded_rids().size()
+	# Aimed at our own feet, which is how a jump straight up is asked for now
+	# that the jump follows the cursor. Headless has no cursor at all, so every
+	# check that jumps has to say where it is aiming.
+	local.movement.set_aim_override(local.global_position)
 	local.movement.request_jump()
 	await get_tree().create_timer(0.35).timeout
 	var jump_during := OcclusionFader.faded_rids().size()
+	local.movement.set_aim_override(Vector3.INF)
 	await get_tree().create_timer(1.2).timeout
 	print("PLAYGROUND_SMOKE_FADE north_of_walls=%d south_of_walls=%d jump_before=%d jump_during=%d" % [
 		faded_behind, faded_in_front, jump_before, jump_during])
@@ -254,10 +296,14 @@ func _run_smoke() -> void:
 		await _run_weapon_rack_check(local)
 		await _run_stage3_checks(local)
 		await _run_jump_toggle_check(local)
+		await _run_stage6_checks(local)
 		await _run_respawn_checks(local)
+		await _run_stage7_checks(local)
 		# Long enough that the other process has really gone, not merely queued.
 		await get_tree().create_timer(9.0).timeout
 		print("PLAYGROUND_SMOKE_AFTER_LEAVE players=%d" % _players_root.get_child_count())
+	else:
+		await _client_support(local)
 
 
 # Stage 2 gates. Each one is the outcome the work order asks for, measured
@@ -539,23 +585,88 @@ func _run_stage3_checks(local: Player) -> void:
 	blocker.queue_free()
 
 
+# Stage 6 gates. Every height is dropped and measured, never computed: the
+# damage has to come out of the same tracking the game uses in play.
+func _run_stage6_checks(local: Player) -> void:
+	for height in [5.0, 3.5]:
+		var drop := await _drop_from(local, height)
+		print("PLAYGROUND_STAGE6_DROP asked=%.1f measured=%.2f hp=%.0f-%.0f damage=%.1f" % [
+			height, drop["fall"], drop["before"], drop["after"], drop["before"] - drop["after"]])
+
+	# The debug flag turns it off, which is the condition the work order asks
+	# for: the same drop that hurt a moment ago now costs nothing.
+	Tuning.values.fall_damage_enabled = false
+	var disabled := await _drop_from(local, 5.0)
+	Tuning.values.fall_damage_enabled = true
+	print("PLAYGROUND_STAGE6_DISABLED measured=%.2f damage=%.1f" % [
+		disabled["fall"], disabled["before"] - disabled["after"]])
+
+	# Launched by a team mate rather than by our own jump: the push costs no
+	# damage, the landing does.
+	await _settle(local, Vector3(0.0, 1.0, 11.0))
+	local.hp = local.stats.max_hp
+	var before_hp := local.hp
+	ForceSystem.send(local, ForceSystem.make_event(
+		ForceSystem.Kind.THROW, Vector3.UP, 18.0, 0.0, 1, true, 0.0, 0.0))
+	await get_tree().physics_frame
+	var after_launch := local.hp
+	var waited := 0.0
+	var peak := local.global_position.y
+	while waited < 4.0:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		peak = maxf(peak, local.global_position.y)
+		if local.is_grounded_state():
+			break
+	print("PLAYGROUND_STAGE6_THROWN peak=%.2f hp=%.0f-%.0f-%.0f fall=%.2f" % [
+		peak, before_hp, after_launch, local.hp, local.last_fall_height])
+	local.hp = local.stats.max_hp
+
+
+# Placed in the air over the plaza and left to fall. A jump cannot be used to
+# measure a known height, because its own apex goes into the total.
+func _drop_from(local: Player, height: float) -> Dictionary:
+	await _settle(local, Vector3(0.0, 1.0, 11.0))
+	local.hp = local.stats.max_hp
+	var before := local.hp
+	local.global_position = Vector3(0.0, 0.9 + height, 11.0)
+	local.velocity = Vector3.ZERO
+	local.floor_snap_length = 0.0
+	local.change_state(Player.State.AIRBORNE)
+	var waited := 0.0
+	while waited < 4.0:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		if local.is_grounded_state():
+			break
+	return {"before": before, "after": local.hp, "fall": local.last_fall_height}
+
+
 func _run_respawn_checks(local: Player) -> void:
 	# Falling past the kill plane kills and brings the body back on its own.
 	await _settle(local, Vector3(0.0, 1.0, 8.0))
-	var home := local.spawn_point
 	local.global_position = Vector3(0.0, Tuning.values.kill_plane_y - 2.0, 8.0)
 	await get_tree().create_timer(0.3).timeout
 	var died := local.state == Player.State.DEAD
 	await get_tree().create_timer(Tuning.values.respawn_delay + 0.8).timeout
 	print("PLAYGROUND_FALL died=%s back_home=%.2f state=%s" % [
-		died, local.global_position.distance_to(home), Player.State.keys()[local.state]])
+		died, _distance_to_a_spawn(local), Player.State.keys()[local.state]])
 
 	# R restarts from anywhere, without having to fall first.
 	await _settle(local, Vector3(-12.0, 1.0, 4.0))
 	local.respawn()
 	await get_tree().create_timer(0.5).timeout
 	print("PLAYGROUND_RESTART back_home=%.2f state=%s" % [
-		local.global_position.distance_to(home), Player.State.keys()[local.state]])
+		_distance_to_a_spawn(local), Player.State.keys()[local.state]])
+
+
+# A respawn now picks whichever mark is free, so the check asks how far the body
+# is from a mark rather than from one particular mark.
+func _distance_to_a_spawn(local: Player) -> float:
+	var best := INF
+	for point in spawn_points:
+		best = minf(best, local.global_position.distance_to(point))
+	return best
 
 
 func _run_stage2_checks(local: Player) -> void:
@@ -572,8 +683,10 @@ func _run_stage2_checks(local: Player) -> void:
 	print("PLAYGROUND_STAGE2_FORMULA ratio=%.2f jump_height=%.2f jump_velocity=%.2f move_speed=%.2f" % [
 		local.get_ratio(), local.get_jump_height(), local.get_jump_velocity(), local.get_move_speed()])
 
-	# Standing jump: straight up, and as high as the formula says.
+	# Standing jump: straight up, and as high as the formula says. Aimed at our
+	# own feet, which is what asks for a vertical one.
 	var start := await _settle(local, Vector3(1.5, 1.0, 8.0))
+	local.movement.set_aim_override(local.global_position)
 	local.movement.request_jump()
 	var peak := start.y
 	var airborne := 0.0
@@ -581,6 +694,7 @@ func _run_stage2_checks(local: Player) -> void:
 		await get_tree().physics_frame
 		airborne += get_physics_process_delta_time()
 		peak = maxf(peak, local.global_position.y)
+	local.movement.set_aim_override(Vector3.INF)
 	print("PLAYGROUND_STAGE2_STANDING rise=%.2f drift=%.2f" % [
 		peak - start.y, _flat(local.global_position - start)])
 
@@ -634,9 +748,11 @@ func _run_stage2_checks(local: Player) -> void:
 	# A click made in the air must not bend the arc, and must be honoured on
 	# landing.
 	start = await _settle(local, Vector3(1.5, 1.0, 8.0))
+	local.movement.set_aim_override(local.global_position)
 	local.movement.request_jump()
 	await get_tree().physics_frame
 	await get_tree().physics_frame
+	local.movement.set_aim_override(Vector3.INF)
 	var air_velocity := Vector2(local.velocity.x, local.velocity.z)
 	local.movement.set_target(Vector3(1.5, 0.0, 2.0))
 	await get_tree().create_timer(0.3).timeout
@@ -666,7 +782,19 @@ func _jump_on_the_run(
 	var launch := local.global_position
 	var launch_velocity := Vector2(local.velocity.x, local.velocity.z)
 	var launch_speed := launch_velocity.length()
+	# Where the run is heading, well out in front: the cursor decides a jump's
+	# direction now, and aiming at a target the body has nearly reached puts the
+	# cursor inside the deadzone, which asks for a vertical jump and throws the
+	# run up speed away.
+	var heading := Vector3(local.velocity.x, 0.0, local.velocity.z)
+	if heading.length() > 0.1:
+		local.movement.set_aim_override(local.global_position + heading.normalized() * 6.0)
+	else:
+		local.movement.set_aim_override(Vector3(target.x, local.global_position.y, target.z))
 	local.movement.request_jump()
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	local.movement.set_aim_override(Vector3.INF)
 	var peak := launch.y
 	var airborne := 0.0
 	var trace := PackedStringArray()
@@ -709,9 +837,405 @@ func _jump_towards(local: Player, from: Vector3, target: Vector3) -> Vector3:
 		waited += get_physics_process_delta_time()
 		if local.movement.intent_seconds_left() > 0.0:
 			break
+	local.movement.set_aim_override(Vector3(target.x, local.global_position.y, target.z))
 	local.movement.request_jump()
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	local.movement.set_aim_override(Vector3.INF)
 	await get_tree().create_timer(2.5).timeout
 	return local.global_position
+
+
+# Stage 7 gates. The rock half runs on the host alone; the team mate half needs
+# the second peer, which co-operates from _client_support.
+func _run_stage7_checks(local: Player) -> void:
+	# Each rock is picked up where it lies, then carried to the measuring lane
+	# and thrown. Measured in the lane rather than on the spot because a throw
+	# from where the rocks stand runs out of plaza and the rock rolls off the
+	# west edge, and a rock falling through the void covers ground forever.
+	for index in 3:
+		var rock := get_node_or_null("Rock_%d" % index) as Rock
+		if rock == null:
+			continue
+		var spot := rock.global_position
+		await _settle(local, Vector3(spot.x, 1.0, spot.z + 1.1))
+		local.movement.set_aim_override(rock.global_position)
+		var picked := local.movement.interact()
+		var carrying := local.state == Player.State.GRABBING
+		local.global_position = THROW_LANE
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		# Aimed east down the open lane: 20 m of clear plaza, no wall and no
+		# edge in the way.
+		local.movement.set_aim_override(THROW_LANE + Vector3(20.0, 0.0, 0.0))
+		var from := local.global_position
+		var thrown := local.movement.interact()
+		await get_tree().create_timer(2.5).timeout
+		print("PLAYGROUND_STAGE7_ROCK weight=%.0f picked=%s carrying=%s thrown=%s flew=%.2f landed_y=%.2f" % [
+			rock.weight, picked, carrying, thrown,
+			_flat(rock.global_position - from), rock.global_position.y])
+		local.movement.set_aim_override(Vector3.INF)
+
+	# A thrown rock that lands on a dummy pushes it and hurts it.
+	var dummy := get_node_or_null("Dummy_0") as Dummy
+	var rock_0 := get_node_or_null("Rock_0") as Rock
+	if dummy != null and rock_0 != null:
+		# Nine metres back. The hand is 2.6 m up and a dummy is 1.9 m tall, so a
+		# flat throw has to be given enough distance to come down into it; at
+		# seven metres it passed two centimetres over the shoulder.
+		await _settle(local, Vector3(dummy.global_position.x, 1.0, dummy.global_position.z + 9.0))
+		# Brought to hand rather than walked to: the throw is what is under test.
+		rock_0.host_grab(1)
+		local.grab.on_rock_answer(rock_0, true)
+		for _frame in range(6):
+			await get_tree().physics_frame
+		print("PLAYGROUND_STAGE7_INHAND gap=%.2f" % rock_0.global_position.distance_to(local.hand_position()))
+		local.movement.set_aim_override(dummy.global_position)
+		# Thrown flat for this one check: at the documented 35 degrees a rock
+		# aimed from three metres passes clean over a 1.8 m dummy, which would
+		# measure the arc rather than the hit.
+		var angle_was: float = Tuning.values.throw_up_angle_deg
+		Tuning.values.throw_up_angle_deg = 0.0
+		var dummy_hp := dummy.hp
+		var dummy_at := dummy.global_position
+		local.movement.interact()
+		# Watched all the way in: a miss and a hit that does nothing look the
+		# same in the result, and they are not the same problem.
+		var closest := INF
+		var sampled := 0.0
+		var pushed := 0.0
+		while sampled < 1.5:
+			await get_tree().physics_frame
+			sampled += get_physics_process_delta_time()
+			closest = minf(closest, rock_0.global_position.distance_to(dummy.global_position))
+			pushed = maxf(pushed, _flat(dummy.global_position - dummy_at))
+		Tuning.values.throw_up_angle_deg = angle_was
+		print("PLAYGROUND_STAGE7_ROCKPATH closest=%.2f rock_y=%.2f rock_at=(%.1f, %.1f)" % [
+			closest, rock_0.global_position.y, rock_0.global_position.x, rock_0.global_position.z])
+		print("PLAYGROUND_STAGE7_ROCKHIT hp=%.0f-%.0f moved=%.2f" % [dummy_hp, dummy.hp, pushed])
+		local.movement.set_aim_override(Vector3.INF)
+		await get_tree().create_timer(3.5).timeout
+
+	# Carrying costs speed, and a carried rock cannot be jumped with.
+	var rock_1 := get_node_or_null("Rock_1") as Rock
+	if rock_1 != null:
+		await _settle(local, Vector3(0.0, 1.0, 11.0))
+		var free_speed := await _travel_for(local, 1.2)
+		rock_1.host_grab(1)
+		local.grab.on_rock_answer(rock_1, true)
+		for _frame in range(6):
+			await get_tree().physics_frame
+		var carry_speed := await _travel_for(local, 1.2)
+		var jump_y := local.global_position.y
+		local.movement.set_aim_override(local.global_position)
+		local.movement.request_jump()
+		await get_tree().create_timer(0.4).timeout
+		local.movement.set_aim_override(Vector3.INF)
+		print("PLAYGROUND_STAGE7_CARRY free=%.2f carrying=%.2f ratio=%.2f jump_rise=%.2f state=%s" % [
+			free_speed, carry_speed, carry_speed / maxf(free_speed, 0.01),
+			local.global_position.y - jump_y, Player.State.keys()[local.state]])
+
+		# 7-6: a holder who is stunned drops what it was carrying.
+		ForceSystem.send(local, ForceSystem.make_event(
+			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.1, 0.0), Tuning.values.shove_power,
+			10.0, 1, false, 1.0, Tuning.values.shove_stun_time))
+		await get_tree().physics_frame
+		print("PLAYGROUND_STAGE7_STUNDROP state=%s holder=%d holding=%s" % [
+			Player.State.keys()[local.state], rock_1.holder_peer, local.grab.is_holding()])
+		await get_tree().create_timer(Tuning.values.shove_stun_time + 0.8).timeout
+
+		# 7-6: and so does a holder who leaves the ground.
+		await _settle(local, Vector3(0.0, 1.0, 11.0))
+		rock_1.host_grab(1)
+		local.grab.on_rock_answer(rock_1, true)
+		for _frame in range(6):
+			await get_tree().physics_frame
+		local.global_position += Vector3.UP * 2.0
+		local.change_state(Player.State.AIRBORNE)
+		await get_tree().physics_frame
+		print("PLAYGROUND_STAGE7_FALLDROP holder=%d holding=%s" % [
+			rock_1.holder_peer, local.grab.is_holding()])
+		await get_tree().create_timer(1.5).timeout
+
+		# 7-6: two people reaching for the same rock. The host answers one.
+		var other_peer := 0
+		for child in _players_root.get_children():
+			if String(child.name) != str(multiplayer.get_unique_id()):
+				other_peer = String(child.name).to_int()
+		var first := rock_1.host_grab(1)
+		var second := rock_1.host_grab(other_peer) if other_peer != 0 else false
+		print("PLAYGROUND_STAGE7_CONTEST first=%s second=%s holder=%d" % [first, second, rock_1.holder_peer])
+		rock_1.host_release(1)
+		if local.state == Player.State.GRABBING:
+			local.change_state(Player.State.IDLE)
+
+	await _run_stage7_team(local)
+
+
+# Measured as distance covered, not as a velocity sample: the velocity read back
+# from a step is whatever that step left behind.
+func _travel_for(local: Player, seconds: float) -> float:
+	local.movement.set_target(local.global_position + Vector3(0.0, 0.0, -8.0))
+	var previous := local.global_position
+	var covered := 0.0
+	var waited := 0.0
+	while waited < seconds:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		covered += _flat(local.global_position - previous)
+		previous = local.global_position
+	local.movement.cancel_target()
+	return covered / seconds
+
+
+# The team mate half. Needs the second peer, and says so when there is none.
+func _run_stage7_team(local: Player) -> void:
+	var remote: Player = null
+	for child in _players_root.get_children():
+		var player := child as Player
+		if player != null and not player.is_local():
+			remote = player
+	if remote == null:
+		print("PLAYGROUND_STAGE7_TEAM no_remote_peer")
+		return
+
+	# Heavier team mate, shorter throw. The weight lives on their machine, so
+	# they are asked to set it, and both bodies are placed in the same clear
+	# lane each time: the z=8 line is open plaza from the west edge to the east,
+	# and a throw that leaves the ground invalidates the measurement.
+	var lane := THROW_LANE
+	for weight in [10.0, 25.0]:
+		set_remote_weight.rpc_id(String(remote.name).to_int(), weight)
+		await get_tree().create_timer(0.5).timeout
+		if not await _grab_remote(local, remote, lane):
+			print("PLAYGROUND_STAGE7_TEAM grab_failed weight=%.0f" % weight)
+			continue
+		# Read after a moment: the hold is agreed over the network, so the body
+		# is not above the hand on the frame the answer arrives.
+		await get_tree().create_timer(0.4).timeout
+		var held_offset := remote.global_position.y - local.global_position.y
+		local.movement.set_aim_override(local.global_position + Vector3(20.0, 0.0, 0.0))
+		var from := remote.global_position
+		local.movement.interact()
+		await get_tree().create_timer(2.5).timeout
+		print("PLAYGROUND_STAGE7_TEAMTHROW weight=%.0f held_above=%.2f flew=%.2f landed_y=%.2f state=%s" % [
+			weight, held_offset, _flat(remote.global_position - from),
+			remote.global_position.y, Player.State.keys()[remote.state]])
+		local.movement.set_aim_override(Vector3.INF)
+		await get_tree().create_timer(1.5).timeout
+	set_remote_weight.rpc_id(String(remote.name).to_int(), 10.0)
+
+	# A thrown team mate is in the air, so a shove bends their arc again.
+	if await _grab_remote(local, remote):
+		local.movement.set_aim_override(local.global_position + Vector3(20.0, 0.0, 0.0))
+		local.movement.interact()
+		await get_tree().create_timer(0.35).timeout
+		var mid_air := remote.state == Player.State.AIRBORNE
+		var before := remote.global_position
+		ForceSystem.send(remote, ForceSystem.make_event(
+			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.3, 0.0), Tuning.values.shove_power,
+			local.stats.strength, 1, true, Tuning.values.shove_damage, 0.0))
+		await get_tree().create_timer(1.5).timeout
+		print("PLAYGROUND_STAGE7_SECONDPUSH airborne=%s extra=%.2f" % [
+			mid_air, _flat(remote.global_position - before)])
+		local.movement.set_aim_override(Vector3.INF)
+		await get_tree().create_timer(2.0).timeout
+
+	# 7-6: a held body that is pushed comes free and takes the push.
+	if await _grab_remote(local, remote):
+		ForceSystem.send(remote, ForceSystem.make_event(
+			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.3, 0.0), Tuning.values.shove_power,
+			local.stats.strength, 1, true, 0.0, 0.0))
+		await get_tree().create_timer(0.6).timeout
+		print("PLAYGROUND_STAGE7_FORCEFREE remote_state=%s still_holding=%s" % [
+			Player.State.keys()[remote.state], local.grab.is_holding()])
+		await get_tree().create_timer(1.5).timeout
+
+	# 7-5: Space, five times. The presses happen on their machine.
+	if await _grab_remote(local, remote):
+		begin_escape_drill.rpc_id(String(remote.name).to_int())
+		var waited := 0.0
+		while waited < 6.0 and remote.state == Player.State.GRABBED:
+			await get_tree().physics_frame
+			waited += get_physics_process_delta_time()
+		# Read after a moment: the holder's hands are emptied by the same
+		# replicated state, which arrives a frame or two later.
+		await get_tree().create_timer(0.5).timeout
+		print("PLAYGROUND_STAGE7_ESCAPE freed_after=%.2fs state=%s still_holding=%s" % [
+			waited, Player.State.keys()[remote.state], local.grab.is_holding()])
+		await get_tree().create_timer(1.5).timeout
+
+	# 7-6: the holder disconnects. They take a rock with them and leave; the
+	# host's own rule is what has to release it.
+	var rock_2 := get_node_or_null("Rock_2") as Rock
+	if rock_2 != null:
+		begin_disconnect_drill.rpc_id(String(remote.name).to_int(), rock_2.get_path())
+		var held_by := 0
+		var watched := 0.0
+		while watched < 8.0:
+			await get_tree().create_timer(0.1).timeout
+			watched += 0.1
+			if rock_2.holder_peer != 0:
+				held_by = rock_2.holder_peer
+				break
+		await get_tree().create_timer(4.0).timeout
+		print("PLAYGROUND_STAGE7_DISCONNECT held_by=%d after_leave_holder=%d players=%d" % [
+			held_by, rock_2.holder_peer, _players_root.get_child_count()])
+
+
+# Stands next to them and takes hold. Returns whether the hold actually
+# happened: the answer comes back over the network, so it is waited for.
+func _grab_remote(local: Player, remote: Player, lane := THROW_LANE) -> bool:
+	# Both bodies placed, both alive. A check that starts from wherever the last
+	# throw left them measures the leftovers of that throw.
+	#
+	# Our own body is placed FIRST and the team mate second, and never closer
+	# than 1.6 m. A remote body is positioned by assignment rather than by
+	# move_and_slide, so one that travels across the map sweeps its capsule
+	# through whatever is standing at the far end: on the other machine that
+	# reads as a solid wall arriving at speed, and the local body is shoved out
+	# of it and glides away airborne. Placing ourselves first means the sweep
+	# finishes before the other body is standing there.
+	if local.state == Player.State.DEAD:
+		local.respawn()
+	await _settle(local, lane + Vector3(1.6, 0.0, 0.0))
+	var settling := 0.0
+	while settling < 2.0 and not local.is_grounded_state():
+		await get_tree().physics_frame
+		settling += get_physics_process_delta_time()
+	place_remote.rpc_id(String(remote.name).to_int(), lane)
+	await get_tree().create_timer(0.8).timeout
+	# Placed again if the first one landed on a body that was still dying: the
+	# respawn that follows would move it out from under the check.
+	if remote.state == Player.State.DEAD:
+		place_remote.rpc_id(String(remote.name).to_int(), lane)
+		await get_tree().create_timer(2.0).timeout
+	local.movement.set_aim_override(remote.global_position)
+	local.movement.interact()
+	var waited := 0.0
+	# Two things have to arrive: our own approval, and the target's GRABBED
+	# state coming back over the network. Measuring before the second one is
+	# how a working hold reads as a failure.
+	while waited < 2.0 and not (local.grab.is_holding() and remote.state == Player.State.GRABBED):
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+	local.movement.set_aim_override(Vector3.INF)
+	var ready := local.grab.is_holding() and remote.state == Player.State.GRABBED
+	if not ready:
+		print("PLAYGROUND_STAGE7_GRABFAIL me=%s at=(%.1f, %.1f, %.1f) holding=%s them=%s at=(%.1f, %.1f, %.1f) sync=(%.1f, %.1f, %.1f) stepping=%s" % [
+			Player.State.keys()[local.state], local.global_position.x, local.global_position.y,
+			local.global_position.z, local.grab.is_holding(),
+			Player.State.keys()[remote.state], remote.global_position.x,
+			remote.global_position.y, remote.global_position.z,
+			remote.sync_position.x, remote.sync_position.y, remote.sync_position.z,
+			remote.is_physics_processing()])
+	return ready
+
+
+@rpc("authority", "call_remote", "reliable")
+func set_remote_weight(weight: float) -> void:
+	var local := _local_player()
+	if local != null:
+		local.stats.race_weight = weight
+
+
+# Placed by the host so a measurement happens in a known spot. Only the body's
+# own machine may move it, so the host asks.
+@rpc("authority", "call_remote", "reliable")
+func place_remote(at: Vector3) -> void:
+	var local := _local_player()
+	if local == null:
+		return
+	if local.state == Player.State.DEAD:
+		# Otherwise the pending respawn fires later and moves the body out from
+		# under whatever the host was about to measure.
+		local.respawn()
+	local.global_position = at
+	local.velocity = Vector3.ZERO
+	local.movement.cancel_target()
+	local.hp = local.stats.max_hp
+	print("PLAYGROUND_PLACED asked=(%.1f, %.1f, %.1f) now=(%.1f, %.1f, %.1f)" % [
+		at.x, at.y, at.z, local.global_position.x, local.global_position.y, local.global_position.z])
+	var touching := PackedStringArray()
+	var drift := 0.0
+	var previous := local.global_position
+	var watched := 0.0
+	while watched < 1.0:
+		await get_tree().physics_frame
+		watched += get_physics_process_delta_time()
+		drift += _flat(local.global_position - previous)
+		previous = local.global_position
+		for index in local.get_slide_collision_count():
+			var collider := local.get_slide_collision(index).get_collider() as Node
+			if collider != null and not touching.has(collider.name):
+				touching.append(collider.name)
+	print("PLAYGROUND_PLACED_AFTER at=(%.1f, %.1f, %.1f) state=%s drift=%.2f touching=[%s] target=%s" % [
+		local.global_position.x, local.global_position.y, local.global_position.z,
+		Player.State.keys()[local.state], drift, ", ".join(touching),
+		local.movement.has_target()])
+
+
+@rpc("authority", "call_remote", "reliable")
+func begin_escape_drill() -> void:
+	_escape_drill = true
+
+
+@rpc("authority", "call_remote", "reliable")
+func begin_disconnect_drill(rock_path: NodePath) -> void:
+	_disconnect_rock = rock_path
+
+
+# The client's half of stage 7: stand still so the host can reach you, mash
+# Space when asked, and leave while holding a rock when asked.
+func _client_support(local: Player) -> void:
+	var waited := 0.0
+	var reported_mutual := false
+	while waited < 200.0:
+		await get_tree().create_timer(0.12).timeout
+		waited += 0.12
+		if local.state == Player.State.GRABBED and not reported_mutual:
+			reported_mutual = true
+			# 7-6: being held refuses a grab of your own.
+			print("PLAYGROUND_STAGE7_MUTUAL grab_while_held=%s" % local.grab.grab())
+		if _escape_drill and local.state == Player.State.GRABBED:
+			local.grab.escape_press()
+		if _disconnect_rock != NodePath():
+			var rock := get_node_or_null(_disconnect_rock) as Rock
+			_disconnect_rock = NodePath()
+			if rock != null:
+				while local.state == Player.State.DEAD:
+					await get_tree().create_timer(0.2).timeout
+				# Waited out first: a rock that is still rolling has moved on by
+				# the time we have walked to where it was.
+				var resting := 0.0
+				var last := rock.global_position
+				while resting < 4.0:
+					await get_tree().create_timer(0.2).timeout
+					resting += 0.2
+					if last.distance_to(rock.global_position) < 0.05:
+						break
+					last = rock.global_position
+				for _attempt in range(3):
+					await _settle(local, Vector3(
+						rock.global_position.x + 1.0, 1.0, rock.global_position.z))
+					local.movement.set_aim_override(rock.global_position)
+					local.movement.interact()
+					await get_tree().create_timer(0.8).timeout
+					if local.grab.is_holding():
+						break
+				print("PLAYGROUND_STAGE7_LEAVING holding=%s rock_at=%.1f me_at=%.1f" % [
+					local.grab.is_holding(), rock.global_position.x, local.global_position.x])
+				await get_tree().create_timer(0.3).timeout
+				get_tree().quit()
+			return
+
+
+func _local_player() -> Player:
+	for child in _players_root.get_children():
+		var player := child as Player
+		if player != null and player.is_local():
+			return player
+	return null
 
 
 func _flat(delta: Vector3) -> float:

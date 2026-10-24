@@ -20,6 +20,9 @@ var spawner: MultiplayerSpawner
 var _peer: ENetMultiplayerPeer
 var auto_port := DEFAULT_PORT
 var auto_smoke := false
+# Names a single stage to check instead of the whole suite. A full run is
+# minutes long, which is too slow to iterate one stage against.
+var auto_only := ""
 var _spawn_index := 0
 
 
@@ -43,6 +46,8 @@ func _parse_cmdline() -> void:
 			mode = "join"
 		elif argument == "--auto-smoke":
 			auto_smoke = true
+		elif argument.begins_with("--auto-only="):
+			auto_only = argument.trim_prefix("--auto-only=")
 		elif argument.begins_with("--auto-port="):
 			var port := argument.trim_prefix("--auto-port=").to_int()
 			if port >= 1024 and port <= 65535:

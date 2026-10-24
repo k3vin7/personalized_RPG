@@ -31,6 +31,7 @@ const SHOVE_HALF_ANGLE := 45.0
 # pusher's screen still counts after the trip over the network.
 const SHOVE_ALLY_BONUS := 0.3
 const SHOVE_COOLDOWN := 0.6
+const CARRY_SPEED_SCALE := 0.7
 
 var player: Player
 
@@ -137,6 +138,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		player.respawn()
 		get_viewport().set_input_as_handled()
 		return
+	if player.grab != null and player.grab.is_held():
+		# Held in someone's hands: Space is the only input that still does
+		# anything, and it means "let me go".
+		if event.is_action_pressed("jump"):
+			player.grab.escape_press()
+		get_viewport().set_input_as_handled()
+		return
 	if player.climb != null and player.climb.is_climbing():
 		# On a wall the same two buttons mean different things: aim on the wall
 		# face, or let go of it.
@@ -163,7 +171,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("grab_throw"):
-		_interact()
+		interact()
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("dash"):
@@ -184,6 +192,9 @@ func _physics_process(delta: float) -> void:
 		return
 	if player.state == Player.State.DEAD:
 		# Nothing moves while dead; the body waits where it fell.
+		return
+	if player.state == Player.State.GRABBED:
+		# Someone else's hands decide where this body is.
 		return
 	if player.climb != null and player.climb.is_climbing():
 		# The wall owns the body until it lets go.
@@ -229,7 +240,8 @@ func _ground_step(delta: float) -> void:
 		_pending_air_target = null
 		set_target(queued)
 
-	if _jump_buffer_left > 0.0 and (player.is_grounded_state() or _coyote_left > 0.0):
+	if _jump_buffer_left > 0.0 and player.state != Player.State.GRABBING \
+			and (player.is_grounded_state() or _coyote_left > 0.0):
 		_launch_jump()
 		return
 
@@ -389,12 +401,17 @@ func _cursor_jump_velocity(current: Vector3) -> Vector3:
 	return offset.normalized() * speed
 
 
-# One key for every object that offers something where you are standing. The
-# rack is the only one so far; grabbing arrives on this same key later.
-func _interact() -> bool:
+# One key, in the order that cannot surprise anyone: throw what is in your
+# hands, otherwise take what you are standing on, otherwise pick up what is in
+# reach.
+func interact() -> bool:
+	if player.grab != null and player.grab.is_holding():
+		return player.grab.throw()
 	for node in player.get_tree().get_nodes_in_group(WeaponRack.INTERACT_GROUP):
 		if node.has_method("interact") and node.interact(player):
 			return true
+	if player.grab != null:
+		return player.grab.grab()
 	return false
 
 
@@ -519,6 +536,13 @@ func cursor_direction() -> Vector3:
 	return direction.normalized()
 
 
+# The spot on our own standing plane the cursor is over. Used to pick between
+# several things within arm's reach.
+func cursor_point() -> Vector3:
+	var point: Variant = _cursor_ground_point()
+	return point as Vector3 if point != null else player.global_position
+
+
 func _face_cursor(delta: float) -> void:
 	var point: Variant = _cursor_ground_point()
 	if point == null:
@@ -545,7 +569,12 @@ func _cursor_ground_point() -> Variant:
 
 
 func move_speed() -> float:
-	return Tuning.values.base_move_speed * Tuning.ratio_mult(player.stats.ratio(), Tuning.values.ratio_k_speed)
+	var speed: float = Tuning.values.base_move_speed * Tuning.ratio_mult(
+		player.stats.ratio(), Tuning.values.ratio_k_speed)
+	if player.state == Player.State.GRABBING:
+		# DOC: 70% while carrying something, and no jump or dash at all.
+		speed *= CARRY_SPEED_SCALE
+	return speed
 
 
 func _click_to_target() -> void:

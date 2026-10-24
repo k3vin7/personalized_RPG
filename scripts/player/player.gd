@@ -26,6 +26,13 @@ const THROWABLE_LAYER := 16
 
 const BODY_RADIUS := 0.4
 const BODY_HALF_HEIGHT := 0.9
+# DOC: a held rock or team mate sits 0.8 m above the head, where it is visible
+# on both screens and clear of the holder's own body.
+const HAND_HEIGHT := 0.8
+# A replicated step bigger than this is a teleport, not travel: a respawn, a
+# test placement, or a large correction.
+const TELEPORT_STEP := 2.0
+const TELEPORT_BLIND := 0.2
 
 # Stand-in for animation: the state is readable off the body on both screens.
 const STATE_COLORS := {
@@ -60,6 +67,7 @@ var sync_weapon: int = WeaponKinds.Kind.NONE
 
 var movement: PlayerMovement
 var climb: PlayerClimb
+var grab: PlayerGrab
 var stamina := 100.0
 var camera: QuarterCamera
 
@@ -70,8 +78,17 @@ var _default_snap := 0.3
 var spawn_point := Vector3.ZERO
 var _respawn_left := 0.0
 var _stun_left := 0.0
+# Fall measurement. The peak is tracked rather than the launch height: a push
+# that throws you up and then down has to count the whole drop.
+var _fall_peak_y := 0.0
+var _fall_tracking := false
+var last_fall_height := 0.0
 var weapon: int = WeaponKinds.Kind.NONE
 var _weapon_node: Node3D
+# A short line under the name: escape progress, and anything else worth reading
+# off the body.
+var overhead_note := ""
+var _teleport_blind_left := 0.0
 
 
 func _enter_tree() -> void:
@@ -88,7 +105,9 @@ func _ready() -> void:
 	hp = stats.max_hp
 	stamina = Tuning.values.stamina_max
 	collision_layer = PLAYER_LAYER
-	collision_mask = WORLD_LAYER | WALL_LAYER | CLIMBABLE_LAYER | PLAYER_LAYER
+	# Rocks are included: a rock you can walk through is not a thing you would
+	# bother picking up, and a thrown one has to be able to knock you about.
+	collision_mask = WORLD_LAYER | WALL_LAYER | CLIMBABLE_LAYER | PLAYER_LAYER | THROWABLE_LAYER
 	floor_snap_length = _default_snap
 	_build_body()
 	sync_position = global_position
@@ -104,6 +123,11 @@ func _ready() -> void:
 		climb.name = "PlayerClimb"
 		add_child(climb)
 		climb.setup(self)
+
+		grab = PlayerGrab.new()
+		grab.name = "PlayerGrab"
+		add_child(grab)
+		grab.setup(self)
 
 		camera = QuarterCamera.new()
 		camera.name = "QuarterCamera"
@@ -131,9 +155,54 @@ func is_local() -> bool:
 func change_state(new_state: int) -> void:
 	if state == new_state:
 		return
+	var previous := state
 	state = new_state
+	_update_fall_tracking(previous, new_state)
+	_update_hold(previous, new_state)
 	_apply_state_colour()
 	state_changed.emit(new_state)
+
+
+# 7-6: a holder who is stunned, thrown, killed or walks off an edge drops what
+# it was carrying rather than throwing it, and a body that stops being GRABBED
+# forgets its holder. Both live here so no caller has to remember them.
+func _update_hold(previous: int, new_state: int) -> void:
+	if grab == null:
+		return
+	if previous == State.GRABBING and new_state != State.GRABBING:
+		grab.drop()
+	if previous == State.GRABBED and new_state != State.GRABBED:
+		grab.clear_holder()
+
+
+# Every way of leaving the air passes through here, so there is one place that
+# decides whether a drop ended in a landing or in something else.
+func _update_fall_tracking(previous: int, new_state: int) -> void:
+	if new_state == State.AIRBORNE:
+		if not _fall_tracking:
+			_fall_tracking = true
+			_fall_peak_y = global_position.y
+		return
+	if not _fall_tracking:
+		return
+	_fall_tracking = false
+	if previous != State.AIRBORNE:
+		return
+	if new_state == State.IDLE or new_state == State.MOVE or new_state == State.DASH:
+		_resolve_fall_damage()
+	# Caught a wall, grabbed, stunned or dead: nothing landed, so nothing hurts.
+
+
+func _resolve_fall_damage() -> void:
+	last_fall_height = maxf(0.0, _fall_peak_y - global_position.y)
+	if not Tuning.values.fall_damage_enabled:
+		return
+	if last_fall_height <= Tuning.values.fall_damage_min_height:
+		return
+	var damage: float = (last_fall_height - Tuning.values.fall_damage_min_height) * Tuning.values.fall_damage_per_meter
+	_take_damage(damage)
+	print("PLAYGROUND_FALL_DAMAGE peer=%s height=%.2f damage=%.1f hp=%.0f" % [
+		name, last_fall_height, damage, hp])
 
 
 # The one place the strength to weight numbers turn into movement. Nothing
@@ -169,6 +238,8 @@ func _physics_process(delta: float) -> void:
 			_stun_left -= delta
 			if _stun_left <= 0.0:
 				change_state(State.IDLE)
+		if _fall_tracking and state == State.AIRBORNE:
+			_fall_peak_y = maxf(_fall_peak_y, global_position.y)
 		if is_grounded_state():
 			stamina = minf(Tuning.values.stamina_max, stamina + Tuning.values.stamina_regen * delta)
 		sync_position = global_position
@@ -184,9 +255,24 @@ func _physics_process(delta: float) -> void:
 	stats.gear_weight = sync_gear_weight
 	if sync_weapon != weapon:
 		_apply_weapon(sync_weapon)
-	# Remote bodies are shown, not simulated: a short lerp hides the gap
-	# between state packets without letting them drift.
-	global_position = global_position.lerp(sync_position, 1.0 - exp(-18.0 * delta))
+	if _teleport_blind_left > 0.0:
+		_teleport_blind_left -= delta
+		if _teleport_blind_left <= 0.0:
+			collision_layer = PLAYER_LAYER
+	if global_position.distance_to(sync_position) > TELEPORT_STEP:
+		# Put down at the far end rather than slid there. Easing across a
+		# teleport drags this capsule through whatever is standing in between,
+		# and the body it passes through is shoved out of the way at teleport
+		# speed: in testing a respawn across the map threw the other player
+		# seven metres and off the plaza. Collision is off for a moment so the
+		# arrival does not shove anyone either.
+		global_position = sync_position
+		collision_layer = 0
+		_teleport_blind_left = TELEPORT_BLIND
+	else:
+		# Remote bodies are shown, not simulated: a short lerp hides the gap
+		# between state packets without letting them drift.
+		global_position = global_position.lerp(sync_position, 1.0 - exp(-18.0 * delta))
 	rotation.y = lerp_angle(rotation.y, sync_yaw, 1.0 - exp(-20.0 * delta))
 	if sync_state != state:
 		change_state(sync_state)
@@ -212,7 +298,9 @@ func die() -> void:
 	if movement != null:
 		movement.cancel_target()
 	change_state(State.DEAD)
-	print("PLAYGROUND_DIED peer=%s y=%.1f" % [name, global_position.y])
+	print("PLAYGROUND_DIED peer=%s at=(%.1f, %.1f, %.1f) velocity=(%.1f, %.1f, %.1f)" % [
+		name, global_position.x, global_position.y, global_position.z,
+		velocity.x, velocity.y, velocity.z])
 
 
 # Also the R key: a restart is the same thing as coming back from a fall, so
@@ -220,7 +308,7 @@ func die() -> void:
 func respawn() -> void:
 	if not is_local():
 		return
-	global_position = spawn_point
+	global_position = _free_spawn_point()
 	velocity = Vector3.ZERO
 	hp = stats.max_hp
 	stamina = Tuning.values.stamina_max
@@ -228,8 +316,30 @@ func respawn() -> void:
 	_respawn_left = 0.0
 	if movement != null:
 		movement.cancel_target()
+	_fall_tracking = false
 	change_state(State.IDLE)
-	print("PLAYGROUND_RESPAWN peer=%s at=%s" % [name, spawn_point])
+	print("PLAYGROUND_RESPAWN peer=%s at=%s" % [name, global_position])
+
+
+# DOC: an empty spawn point, not necessarily our own: two bodies arriving on the
+# same mark shove each other off it.
+func _free_spawn_point() -> Vector3:
+	var points := Net.spawn_points
+	if points.is_empty():
+		return spawn_point
+	var neighbours: Array[Node] = get_parent().get_children() if get_parent() != null else []
+	for point in points:
+		var taken := false
+		for node in neighbours:
+			var body := node as Node3D
+			if body == null or body == self:
+				continue
+			if Vector2(body.global_position.x - point.x, body.global_position.z - point.z).length() < 1.2:
+				taken = true
+				break
+		if not taken:
+			return point
+	return points[0]
 
 
 # Picked up by standing on a rack pedestal. Only the body's owner may change it;
@@ -267,6 +377,10 @@ func apply_force_event(event: Dictionary) -> void:
 	var change := direction * ForceSystem.power_for(event, stats.total_weight())
 	var ally := bool(event.get("is_ally_source", false))
 	var damage := float(event.get("damage", 0.0))
+	if grab != null:
+		# 7-6: being pushed frees a held body and empties a holder's hands. The
+		# force then applies to whatever state that left us in.
+		grab.on_force_received()
 	if climb != null and climb.is_climbing():
 		# Knocked off the wall rather than pushed along it.
 		climb.detach(0.0)
@@ -311,6 +425,54 @@ func snap_facing(direction: Vector3) -> void:
 	if flat.length_squared() < 0.0004:
 		return
 	rotation.y = atan2(-flat.x, -flat.z)
+
+
+func hand_position() -> Vector3:
+	return global_position + Vector3.UP * (BODY_HALF_HEIGHT + HAND_HEIGHT)
+
+
+func set_overhead_note(text: String) -> void:
+	overhead_note = text
+	_apply_state_colour()
+
+
+# 7-6: every refusal a grab can meet is decided here, on the machine that owns
+# this body. Two people reaching at once means the second request finds the
+# first one already answered.
+func accept_grab(by_peer: int) -> bool:
+	if not is_local() or state == State.DEAD or state == State.GRABBED:
+		return false
+	if grab != null and grab.is_holding():
+		# Already carrying someone: a chain of held bodies is not a thing.
+		return false
+	var holder := _peer_player(by_peer)
+	if holder == null or grab == null:
+		return false
+	grab.become_held(holder)
+	return true
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func request_grab(by_peer: int) -> void:
+	if not is_local():
+		return
+	var answer := accept_grab(by_peer)
+	var asker := _peer_player(by_peer)
+	if asker != null:
+		asker.grab_answer.rpc_id(by_peer, get_path(), answer)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func grab_answer(target_path: NodePath, approved: bool) -> void:
+	if not is_local() or grab == null:
+		return
+	grab.on_player_answer(get_node_or_null(target_path) as Player, approved)
+
+
+func _peer_player(peer_id: int) -> Player:
+	if get_parent() == null:
+		return null
+	return get_parent().get_node_or_null(str(peer_id)) as Player
 
 
 func look_at_wall(normal: Vector3) -> void:
@@ -375,3 +537,5 @@ func _apply_state_colour() -> void:
 		_material.albedo_color = Color(STATE_COLORS.get(state, "6fa8dc"))
 	if _label != null:
 		_label.text = "%s · %s" % [name, State.keys()[state]]
+		if overhead_note != "":
+			_label.text += "\n" + overhead_note
