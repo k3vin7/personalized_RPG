@@ -150,6 +150,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("jump"):
+		# In the air against a climbable wall the same key takes hold of it.
+		if try_air_catch():
+			get_viewport().set_input_as_handled()
+			return
 		# Buffered, never acted on here: input runs outside the physics step,
 		# where is_on_floor() still holds last step's answer.
 		_jump_buffer_left = JUMP_BUFFER
@@ -301,6 +305,22 @@ func climb_request_distance() -> float:
 		return -1.0
 	var plane := Plane(_climb_normal, _climb_point)
 	return absf(plane.distance_to(player.global_position)) - Player.BODY_RADIUS
+
+
+# Reads the contacts the last move_and_slide() left behind, so "touching" means
+# actually touching rather than being somewhere near.
+func try_air_catch() -> bool:
+	if player.state != Player.State.AIRBORNE or player.climb == null:
+		return false
+	for index in range(player.get_slide_collision_count()):
+		var contact := player.get_slide_collision(index)
+		var body := contact.get_collider() as CollisionObject3D
+		if body == null or (body.collision_layer & Player.CLIMBABLE_LAYER) == 0:
+			continue
+		if player.climb.attach(body, contact.get_position(), contact.get_normal()):
+			print("PLAYGROUND_AIR_CATCH y=%.2f" % player.global_position.y)
+			return true
+	return false
 
 
 func _clear_climb_request() -> void:

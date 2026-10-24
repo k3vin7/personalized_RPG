@@ -43,10 +43,14 @@ func is_climbing() -> bool:
 	return player.state == Player.State.CLIMB or player.state == Player.State.MANTLE
 
 
-# DOC: only from the ground, by walking to the wall first. There is no catching
-# a wall out of the air in this stage.
+# From the ground after walking to the wall, or out of the air by pressing jump
+# while touching a climbable one. Never automatic: a wall you brush past on the
+# way somewhere else should not grab you.
+#
+# Catching costs no stamina. The cost is in hanging there, which drains the same
+# way a climb from the ground does.
 func attach(body: CollisionObject3D, contact: Vector3, normal: Vector3) -> bool:
-	if player.state != Player.State.IDLE and player.state != Player.State.MOVE:
+	if player.state != Player.State.IDLE and player.state != Player.State.MOVE and player.state != Player.State.AIRBORNE:
 		return false
 	var flat := Vector3(normal.x, 0.0, normal.z)
 	if flat.length_squared() < 0.01:

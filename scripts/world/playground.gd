@@ -314,6 +314,27 @@ func _run_stage4_checks(local: Player) -> void:
 	else:
 		print("PLAYGROUND_STAGE4_SIDE attach_failed")
 
+	# Jumping at a climbable wall and pressing jump again while touching it
+	# takes hold, and hanging there drains stamina without an entry fee.
+	await _settle(local, Vector3(-14.0, 1.0, 4.0))
+	local.global_position = Vector3(-14.0, 3.5, 3.0)
+	local.velocity = Vector3(0.0, 0.0, -4.0)
+	local.change_state(Player.State.AIRBORNE)
+	var caught := false
+	var stamina_at_catch := 0.0
+	for _tick in range(90):
+		await get_tree().physics_frame
+		if local.movement.try_air_catch():
+			caught = true
+			stamina_at_catch = local.stamina
+			break
+	await get_tree().create_timer(1.0).timeout
+	print("PLAYGROUND_STAGE4_AIRCATCH caught=%s state=%s stamina_at_catch=%.0f after_1s=%.0f" % [
+		caught, Player.State.keys()[local.state], stamina_at_catch, local.stamina])
+	if caught:
+		local.climb.detach()
+		await get_tree().create_timer(1.2).timeout
+
 	# Running out of stamina drops you off the wall.
 	var tired := await _attach_to(local, Vector3(-14.0, 1.0, 2.3), Vector3(0.0, 0.0, 1.0), Vector3(-14.0, 1.0, 5.0))
 	if tired:
