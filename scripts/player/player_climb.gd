@@ -82,12 +82,26 @@ func _classify_face() -> int:
 	return Face.FRONT_OR_BACK if absf(wall_normal.dot(forward)) > FACE_THRESHOLD else Face.SIDE
 
 
-# Where on the wall the cursor is pointing, solved on the plane.
+# Where on the wall the cursor is pointing.
+#
+# A front face is solved on the wall's own plane, which faces the camera and so
+# answers precisely. A side face cannot be solved that way: its plane is nearly
+# edge on to the view, so the ray meets it at a glancing angle and a pixel of
+# cursor movement swings the answer by metres. For those, the height is solved
+# against a plane through the body that squarely faces the camera, which is
+# well conditioned, and the horizontal part is discarded anyway.
 func aim_at(from: Vector3, direction: Vector3) -> void:
-	var point: Variant = wall_plane.intersects_ray(from, direction)
+	var solving := wall_plane
+	if face == Face.SIDE and player.camera != null:
+		solving = Plane(player.camera.get_camera_flat_forward(), player.global_position)
+	var point: Variant = solving.intersects_ray(from, direction)
 	if point == null:
 		return
 	set_wall_target(point as Vector3)
+
+
+func wall_target() -> Vector3:
+	return _target
 
 
 func set_wall_target(point: Vector3) -> void:

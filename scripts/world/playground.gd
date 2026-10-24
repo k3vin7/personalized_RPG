@@ -325,8 +325,17 @@ func _run_stage4_checks(local: Player) -> void:
 	var side := await _attach_to(local, side_face, Vector3(1.0, 0.0, 0.0), side_face + Vector3(2.0, -0.5, 0.0))
 	if side:
 		var before := local.global_position
-		local.climb.set_wall_target(side_face + Vector3(0.0, 2.5, 1.2))
 		await get_tree().create_timer(2.0).timeout
+		# Aiming at a chosen height on a side face has to land near it, not
+		# metres away: that plane is edge on to the camera.
+		var errors := PackedStringArray()
+		for wanted_y in [1.5, 3.0, 5.0]:
+			var aim_point := Vector3(side_face.x, wanted_y, side_face.z)
+			var origin := local.camera.camera.global_position
+			local.climb.aim_at(origin, (aim_point - origin).normalized())
+			errors.append("%.1f→%.2f" % [wanted_y, local.climb.wall_target().y])
+		print("PLAYGROUND_STAGE4_SIDE_AIM %s" % " ".join(errors))
+		local.climb.set_wall_target(side_face + Vector3(0.0, 2.5, 1.2))
 		print("PLAYGROUND_STAGE4_SIDE face=%s rose=%.2f sideways=%.2f" % [
 			PlayerClimb.Face.keys()[local.climb.face],
 			local.global_position.y - before.y,
