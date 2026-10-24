@@ -69,6 +69,7 @@ var _label: Label3D
 var _default_snap := 0.3
 var spawn_point := Vector3.ZERO
 var _respawn_left := 0.0
+var _stun_left := 0.0
 var weapon: int = WeaponKinds.Kind.NONE
 var _weapon_node: Node3D
 
@@ -164,6 +165,10 @@ func is_grounded_state() -> bool:
 func _physics_process(delta: float) -> void:
 	if is_local():
 		_check_death(delta)
+		if state == State.STUNNED:
+			_stun_left -= delta
+			if _stun_left <= 0.0:
+				change_state(State.IDLE)
 		if is_grounded_state():
 			stamina = minf(Tuning.values.stamina_max, stamina + Tuning.values.stamina_regen * delta)
 		sync_position = global_position
@@ -253,6 +258,61 @@ func _apply_weapon(kind: int) -> void:
 
 # Square on to the wall, facing into it, with no easing: the body is placed on
 # the wall in one step so the first frame of climbing already looks right.
+# Where every push in the game lands. ForceSystem routes here, and nothing else
+# writes this body's velocity from outside.
+func apply_force_event(event: Dictionary) -> void:
+	if not is_local():
+		return
+	var direction: Vector3 = event.get("direction", Vector3.ZERO)
+	var change := direction * ForceSystem.power_for(event, stats.total_weight())
+	var ally := bool(event.get("is_ally_source", false))
+	var damage := float(event.get("damage", 0.0))
+	if climb != null and climb.is_climbing():
+		# Knocked off the wall rather than pushed along it.
+		climb.detach(0.0)
+	if state == State.AIRBORNE:
+		# Already flying: the push bends the arc and costs nothing, which is
+		# what makes throwing a team mate a thing you can help with.
+		velocity += change
+		if not ally:
+			_take_damage(damage)
+	else:
+		velocity = change
+		if change.y > ForceSystem.UPWARD_LAUNCH:
+			change_state(State.AIRBORNE)
+		if not ally or Tuning.values.ally_ground_damage:
+			_take_damage(damage)
+		var stun := float(event.get("stun_time", 0.0))
+		if stun > 0.0 and (not ally or Tuning.values.ally_ground_stun):
+			_apply_stun(stun)
+	print("PLAYGROUND_FORCE peer=%s power=%.2f airborne=%s hp=%.0f" % [
+		name, change.length(), state == State.AIRBORNE, hp])
+
+
+func _take_damage(amount: float) -> void:
+	if amount <= 0.0:
+		return
+	hp = maxf(0.0, hp - amount)
+	if hp <= 0.0:
+		die()
+
+
+func _apply_stun(seconds: float) -> void:
+	_stun_left = seconds
+	if movement != null:
+		movement.cancel_target()
+	change_state(State.STUNNED)
+
+
+# Instant, unlike face_direction: a shove points the body where it was aimed
+# before the push goes out, not a few frames later.
+func snap_facing(direction: Vector3) -> void:
+	var flat := Vector3(direction.x, 0.0, direction.z)
+	if flat.length_squared() < 0.0004:
+		return
+	rotation.y = atan2(-flat.x, -flat.z)
+
+
 func look_at_wall(normal: Vector3) -> void:
 	rotation.y = atan2(normal.x, normal.z)
 

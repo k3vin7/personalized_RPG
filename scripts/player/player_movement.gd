@@ -24,6 +24,13 @@ const COYOTE_TIME := 0.1
 const CATCH_BUFFER := 0.3
 const CATCH_REACH := 0.3
 const CATCH_PROBES := 8
+# DOC: the stand in for a shield bash until there is a shield. Ground only.
+const SHOVE_REACH := 1.5
+const SHOVE_HALF_ANGLE := 45.0
+# Allies are given a little extra, so a push that looked connected on the
+# pusher's screen still counts after the trip over the network.
+const SHOVE_ALLY_BONUS := 0.3
+const SHOVE_COOLDOWN := 0.6
 
 var player: Player
 
@@ -39,6 +46,8 @@ var _drag_left := 0.0
 var _jump_buffer_left := 0.0
 var _coyote_left := 0.0
 var _catch_buffer_left := 0.0
+var _aim_override := Vector3.INF
+var _shove_cooldown_left := 0.0
 var _intent_direction := Vector3.ZERO
 var _intent_left := 0.0
 var _pending_air_target: Variant = null
@@ -149,6 +158,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		_click_to_target()
 		get_viewport().set_input_as_handled()
 		return
+	if event.is_action_pressed("debug_shove"):
+		shove()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("grab_throw"):
 		_interact()
 		get_viewport().set_input_as_handled()
@@ -177,6 +190,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_jump_buffer_left = maxf(0.0, _jump_buffer_left - delta)
 	_catch_buffer_left = maxf(0.0, _catch_buffer_left - delta)
+	_shove_cooldown_left = maxf(0.0, _shove_cooldown_left - delta)
 	_dash_cooldown_left = maxf(0.0, _dash_cooldown_left - delta)
 	_intent_left = maxf(0.0, _intent_left - delta)
 	if _intent_left == 0.0:
@@ -186,6 +200,10 @@ func _physics_process(delta: float) -> void:
 	else:
 		_coyote_left = maxf(0.0, _coyote_left - delta)
 
+	if player.state == Player.State.STUNNED:
+		# Physics keeps running while stunned; only the input stops.
+		_stunned_step(delta)
+		return
 	if player.state == Player.State.DASH:
 		_dash_step(delta)
 	elif player.state == Player.State.AIRBORNE:
@@ -247,19 +265,15 @@ func _launch_jump() -> void:
 	_catch_buffer_left = 0.0
 	_coyote_left = 0.0
 	var horizontal := Vector3(player.velocity.x, 0.0, player.velocity.z)
-	if horizontal.length() <= 0.1:
+	if Tuning.values.jump_aims_at_cursor:
+		horizontal = _cursor_jump_velocity(horizontal)
+	elif horizontal.length() <= 0.1:
 		# Standing still, but an order was blocked by a gap: jump the way the
 		# click was pointing.
 		if _intent_left > 0.0 and _intent_direction.length_squared() > 0.01:
 			horizontal = _intent_direction * player.get_move_speed()
 		else:
 			horizontal = Vector3.ZERO
-	# Only the heading changes with the toggle, never the speed, so the two
-	# rules can be compared with one variable between them.
-	if Tuning.values.jump_aims_at_cursor and horizontal.length() > 0.1:
-		var aim := cursor_direction()
-		if aim.length_squared() > 0.01:
-			horizontal = aim * horizontal.length()
 	_clear_intent()
 	# A jump is a new order of its own, so the click that was taking us
 	# somewhere is dropped rather than resumed on landing.
@@ -271,6 +285,70 @@ func _launch_jump() -> void:
 	player.floor_snap_length = 0.0
 	player.change_state(Player.State.AIRBORNE)
 	player.move_and_slide()
+
+
+func _stunned_step(delta: float) -> void:
+	if player.is_on_floor():
+		player.velocity.x = move_toward(player.velocity.x, 0.0, 10.0 * delta)
+		player.velocity.z = move_toward(player.velocity.z, 0.0, 10.0 * delta)
+		player.velocity.y = -0.5
+	else:
+		player.velocity.y -= Tuning.values.gravity * delta
+	player.move_and_slide()
+
+
+# Judged here, on the pusher's own client, as the authority table says. What it
+# sends is a request; the target's own machine works out what it does.
+func shove() -> int:
+	if not player.is_grounded_state() or _shove_cooldown_left > 0.0:
+		return 0
+	var forward := cursor_direction()
+	if forward.length_squared() < 0.01:
+		forward = -player.global_transform.basis.z
+		forward.y = 0.0
+		if forward.length_squared() < 0.01:
+			return 0
+		forward = forward.normalized()
+	_shove_cooldown_left = SHOVE_COOLDOWN
+	player.snap_facing(forward)
+
+	var shape := SphereShape3D.new()
+	shape.radius = SHOVE_REACH + SHOVE_ALLY_BONUS
+	var params := PhysicsShapeQueryParameters3D.new()
+	params.shape = shape
+	params.transform = Transform3D(Basis.IDENTITY, player.global_position)
+	params.collision_mask = Player.PLAYER_LAYER | Dummy.LAYER
+	params.collide_with_areas = false
+	params.exclude = [player.get_rid()]
+	var half_angle := deg_to_rad(SHOVE_HALF_ANGLE)
+	var hits := 0
+	for collision in player.get_world_3d().direct_space_state.intersect_shape(params, 8):
+		var body := collision.get("collider") as Node3D
+		if body == null or body == player:
+			continue
+		var offset := body.global_position - player.global_position
+		offset.y = 0.0
+		if offset.length_squared() < 0.0001:
+			continue
+		var is_ally := body is Player
+		var reach := SHOVE_REACH + (SHOVE_ALLY_BONUS if is_ally else 0.0)
+		if offset.length() > reach:
+			continue
+		if absf(forward.signed_angle_to(offset.normalized(), Vector3.UP)) > half_angle:
+			continue
+		var push := offset.normalized() + Vector3.UP * Tuning.values.shove_up_bias
+		ForceSystem.send(body, ForceSystem.make_event(
+			ForceSystem.Kind.SHOVE,
+			push,
+			Tuning.values.shove_power,
+			player.stats.strength,
+			player.get_multiplayer_authority(),
+			is_ally,
+			Tuning.values.shove_damage,
+			Tuning.values.shove_stun_time))
+		hits += 1
+	print("PLAYGROUND_SHOVE by=%s hits=%d" % [player.name, hits])
+	return hits
 
 
 func _air_step(delta: float) -> void:
@@ -293,6 +371,24 @@ func _air_step(delta: float) -> void:
 
 
 # DOC: ground only, cursor aimed, and never while already dashing or airborne.
+# The jump goes where the cursor points, carrying the speed already being
+# travelled, or a full run's worth from a standstill. The cursor resting on the
+# body itself is how a jump straight up is asked for, which there would
+# otherwise be no way to express.
+func _cursor_jump_velocity(current: Vector3) -> Vector3:
+	var point: Variant = _cursor_ground_point()
+	if point == null:
+		return current
+	var offset := (point as Vector3) - player.global_position
+	offset.y = 0.0
+	if offset.length() <= Tuning.values.jump_aim_deadzone:
+		return Vector3.ZERO
+	var speed := current.length()
+	if speed <= 0.1:
+		speed = player.get_move_speed()
+	return offset.normalized() * speed
+
+
 # One key for every object that offers something where you are standing. The
 # rack is the only one so far; grabbing arrives on this same key later.
 func _interact() -> bool:
@@ -431,7 +527,14 @@ func _face_cursor(delta: float) -> void:
 
 
 # Where the cursor meets the plane the body is standing on.
+# Lets a check stand in for the mouse, which headless does not have.
+func set_aim_override(point: Vector3) -> void:
+	_aim_override = point
+
+
 func _cursor_ground_point() -> Variant:
+	if _aim_override != Vector3.INF:
+		return _aim_override
 	if player.camera == null or player.camera.camera == null:
 		return null
 	var mouse := player.get_viewport().get_mouse_position()

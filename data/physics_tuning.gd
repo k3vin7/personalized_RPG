@@ -10,10 +10,12 @@ extends Resource
 @export var base_move_speed: float = 6.0
 @export var base_jump_height: float = 1.6
 @export var move_intent_timeout: float = 1.5
-# Off by default, which is the documented rule: a jump keeps the heading it was
-# already travelling on. Turned on, the jump goes where the cursor points at the
-# same speed, so the two can be compared without anything else changing.
-@export var jump_aims_at_cursor: bool = false
+# The jump goes where the cursor points. Turn it off for the documented rule,
+# where the jump keeps the heading it was already travelling on.
+@export var jump_aims_at_cursor: bool = true
+# Cursor within this of the body counts as pointing at yourself, which is how a
+# jump straight up is asked for.
+@export var jump_aim_deadzone: float = 1.2
 
 @export_group("Strength to weight")
 @export var ratio_k_jump: float = 0.35

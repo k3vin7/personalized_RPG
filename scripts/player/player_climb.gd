@@ -9,13 +9,11 @@ extends Node
 # from the click ray, so a physics query could not find the very wall being
 # climbed. The plane always can.
 
-enum Face {
-	FRONT_OR_BACK,
-	SIDE,
-}
-
 const HANG_DISTANCE := 0.35
-const FACE_THRESHOLD := 0.7
+# Below this the wall plane is too edge on to the view for a cursor ray to meet
+# it accurately. The map has no such walls, but a stray one must not become
+# unaimable, so the height is solved against a camera facing plane instead.
+const EDGE_ON_LIMIT := 0.35
 const ARRIVE := 0.25
 const MANTLE_TIME := 0.3
 const DETACH_PUSH := 2.0
@@ -26,7 +24,6 @@ var player: Player
 var wall: CollisionObject3D
 var wall_normal := Vector3.ZERO
 var wall_plane := Plane()
-var face := Face.FRONT_OR_BACK
 
 var _target: Vector3 = Vector3.ZERO
 var _has_target := false
@@ -61,7 +58,6 @@ func attach(body: CollisionObject3D, contact: Vector3, normal: Vector3) -> bool:
 	wall = body
 	wall_normal = flat.normalized()
 	wall_plane = Plane(wall_normal, contact)
-	face = _classify_face()
 	_has_target = false
 	player.velocity = Vector3.ZERO
 	# Hung off the face at the height the feet were already at.
@@ -69,30 +65,24 @@ func attach(body: CollisionObject3D, contact: Vector3, normal: Vector3) -> bool:
 	player.global_position = Vector3(hang.x, player.global_position.y, hang.z)
 	player.look_at_wall(wall_normal)
 	player.change_state(Player.State.CLIMB)
-	print("PLAYGROUND_CLIMB_ATTACH face=%s normal=%s" % [Face.keys()[face], wall_normal])
+	print("PLAYGROUND_CLIMB_ATTACH normal=%s edge_on=%.2f" % [wall_normal, _view_alignment()])
 	return true
 
 
-# DOC: a face pointing roughly at or away from the camera can be climbed in any
-# direction; one pointing sideways only up and down.
-func _classify_face() -> int:
+# How squarely this face meets the view. 1.0 is straight on, 0.0 is edge on.
+func _view_alignment() -> float:
 	if player.camera == null:
-		return Face.FRONT_OR_BACK
-	var forward := player.camera.get_camera_flat_forward()
-	return Face.FRONT_OR_BACK if absf(wall_normal.dot(forward)) > FACE_THRESHOLD else Face.SIDE
+		return 1.0
+	return absf(wall_normal.dot(player.camera.get_camera_flat_forward()))
 
 
-# Where on the wall the cursor is pointing.
-#
-# A front face is solved on the wall's own plane, which faces the camera and so
-# answers precisely. A side face cannot be solved that way: its plane is nearly
-# edge on to the view, so the ray meets it at a glancing angle and a pixel of
-# cursor movement swings the answer by metres. For those, the height is solved
-# against a plane through the body that squarely faces the camera, which is
-# well conditioned, and the horizontal part is discarded anyway.
+# Where on the wall the cursor is pointing, solved on the wall's own plane.
+# That plane faces the view on every wall this map has, so the ray meets it
+# squarely. Only a wall placed nearly edge on falls back to a camera facing
+# plane, which is well conditioned but gives height only.
 func aim_at(from: Vector3, direction: Vector3) -> void:
 	var solving := wall_plane
-	if face == Face.SIDE and player.camera != null:
+	if _view_alignment() < EDGE_ON_LIMIT and player.camera != null:
 		solving = Plane(player.camera.get_camera_flat_forward(), player.global_position)
 	var point: Variant = solving.intersects_ray(from, direction)
 	if point == null:
@@ -135,11 +125,6 @@ func _physics_process(delta: float) -> void:
 
 	if _has_target:
 		var to_target := _target - player.global_position
-		# Sideways movement only exists on a face you can traverse; a side face
-		# is climbed straight up and down.
-		if face == Face.SIDE:
-			var vertical := to_target.dot(Vector3.UP)
-			to_target = Vector3.UP * vertical
 		if to_target.length() <= ARRIVE:
 			_has_target = false
 			player.velocity = Vector3.ZERO

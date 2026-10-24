@@ -39,6 +39,12 @@ func _ready() -> void:
 	_build_walls()
 	_build_occluders()
 
+	for index in 2:
+		var dummy := Dummy.new()
+		dummy.setup(Vector3(-2.0 + float(index) * 4.0, 1.0, 2.0), "Dummy_%d" % index)
+		add_child(dummy)
+	_sign("허수아비 (E로 밀기)", Vector3(0.0, 2.6, 2.0), Color("ffe9b0"))
+
 	var rack := WeaponRack.new()
 	rack.name = "WeaponRack"
 	rack.position = Vector3(0.0, 0.0, 16.0)
@@ -243,6 +249,7 @@ func _run_smoke() -> void:
 
 	if multiplayer.is_server():
 		await _run_stage2_checks(local)
+		await _run_stage5_checks(local)
 		await _run_stage4_checks(local)
 		await _run_weapon_rack_check(local)
 		await _run_stage3_checks(local)
@@ -255,59 +262,94 @@ func _run_smoke() -> void:
 
 # Stage 2 gates. Each one is the outcome the work order asks for, measured
 # rather than argued from the numbers.
-# The toggle must change the heading and nothing else.
+# Cursor aimed jumps, and the deadzone that asks for a vertical one.
 func _run_jump_toggle_check(local: Player) -> void:
-	var results := {}
-	for aimed in [false, true]:
-		Tuning.values.jump_aims_at_cursor = aimed
-		await _settle(local, Vector3(0.0, 1.0, 11.0))
-		local.movement.set_target(Vector3(8.0, 0.0, 11.0))
-		await get_tree().create_timer(0.8).timeout
-		var travel := Vector2(local.velocity.x, local.velocity.z)
-		local.movement.request_jump()
-		await get_tree().physics_frame
-		await get_tree().physics_frame
-		var launch := Vector2(local.velocity.x, local.velocity.z)
-		results[aimed] = {"travel": travel, "launch": launch}
-		await get_tree().create_timer(1.2).timeout
-	Tuning.values.jump_aims_at_cursor = false
-	var off: Dictionary = results[false]
-	var on: Dictionary = results[true]
-	var cursor := local.movement.cursor_direction()
-	print("PLAYGROUND_JUMP_TOGGLE off_matches_travel=%.2f on_matches_cursor=%.2f speed_off=%.2f speed_on=%.2f" % [
-		(off["travel"] as Vector2).normalized().dot((off["launch"] as Vector2).normalized()),
-		Vector2(cursor.x, cursor.z).normalized().dot((on["launch"] as Vector2).normalized()),
-		(off["launch"] as Vector2).length(), (on["launch"] as Vector2).length()])
+	await _settle(local, Vector3(0.0, 1.0, 11.0))
+	local.movement.set_aim_override(local.global_position)
+	var start := local.global_position
+	local.movement.request_jump()
+	await get_tree().create_timer(1.2).timeout
+	var on_self := _flat(local.global_position - start)
+	await _settle(local, Vector3(0.0, 1.0, 11.0))
+	start = local.global_position
+	local.movement.set_aim_override(start + Vector3(5.0, 0.0, 0.0))
+	local.movement.request_jump()
+	await get_tree().create_timer(1.2).timeout
+	print("PLAYGROUND_JUMP_CURSOR on_self_drift=%.2f aimed_travel=%.2f aimed_x=%.2f" % [
+		on_self, _flat(local.global_position - start), local.global_position.x - start.x])
+	local.movement.set_aim_override(Vector3.INF)
 
 
-# Walk onto each pedestal in turn, the way a player would, and report what the
-# body ends up carrying.
-# What the face rule says about each wall in the ring. 45 degree faces sit at
-# 0.707 against a threshold of 0.7, so they count as front faces by one per
-# cent: worth seeing written down before tuning the threshold.
-func _print_ring_faces(local: Player) -> void:
-	var forward := local.camera.get_camera_flat_forward()
-	var rows := PackedStringArray()
-	for index in CLIMB_RING_WALLS:
-		var yaw := TAU * float(index) / float(CLIMB_RING_WALLS)
-		var outward := Vector3(sin(yaw), 0.0, cos(yaw))
-		var alignment := absf(outward.dot(forward))
-		rows.append("%d°:%.3f:%s" % [
-			roundi(rad_to_deg(yaw)),
-			alignment,
-			"FRONT" if alignment > PlayerClimb.FACE_THRESHOLD else "SIDE"])
-	print("PLAYGROUND_RING_FACES %s" % " ".join(rows))
+func _run_stage5_checks(local: Player) -> void:
+	var dummy := get_node_or_null("Dummy_0") as Dummy
+	if dummy == null:
+		print("PLAYGROUND_STAGE5 no_dummy")
+		return
+	var spot := dummy.global_position + Vector3(0.0, 0.0, 1.2)
+	await _settle(local, Vector3(spot.x, 1.0, spot.z))
+	local.movement.set_aim_override(dummy.global_position)
+	var before_hp := dummy.hp
+	var before_position := dummy.global_position
+	var hits := local.movement.shove()
+	await get_tree().create_timer(0.8).timeout
+	print("PLAYGROUND_STAGE5_SHOVE hits=%d moved=%.2f hp=%.0f-%.0f" % [
+		hits, _flat(dummy.global_position - before_position), before_hp, dummy.hp])
+
+	print("PLAYGROUND_STAGE5_COOLDOWN immediate=%d" % local.movement.shove())
+	await get_tree().create_timer(Tuning.values.shove_stun_time + 0.8).timeout
+
+	# Stronger arms throw it further: that is the formula doing its job.
+	await _settle(local, Vector3(spot.x, 1.0, spot.z))
+	local.movement.set_aim_override(dummy.global_position)
+	local.stats.strength = 30.0
+	before_position = dummy.global_position
+	local.movement.shove()
+	await get_tree().create_timer(0.8).timeout
+	print("PLAYGROUND_STAGE5_STRENGTH moved=%.2f" % _flat(dummy.global_position - before_position))
+	local.stats.strength = 10.0
+	local.movement.set_aim_override(Vector3.INF)
+	await get_tree().create_timer(3.5).timeout
+	print("PLAYGROUND_STAGE5_RETURN home_distance=%.2f hp=%.0f" % [
+		_flat(dummy.global_position - dummy.home), dummy.hp])
+
+	# A push onto a body standing on the ground: moved, hurt, and stunned.
+	await _settle(local, Vector3(0.0, 1.0, 11.0))
+	var hp_before := local.hp
+	var ally_push := ForceSystem.make_event(
+		ForceSystem.Kind.SHOVE, Vector3(1.0, 0.25, 0.0).normalized(),
+		Tuning.values.shove_power, 10.0, 1, true,
+		Tuning.values.shove_damage, Tuning.values.shove_stun_time)
+	ForceSystem.send(local, ally_push)
+	await get_tree().physics_frame
+	print("PLAYGROUND_STAGE5_GROUND state=%s hp=%.0f-%.0f speed=%.2f" % [
+		Player.State.keys()[local.state], hp_before, local.hp,
+		Vector2(local.velocity.x, local.velocity.z).length()])
+	await get_tree().create_timer(2.0).timeout
+
+	# The same push on a body already in the air: the arc bends and it costs
+	# nothing, which is what makes helping a team mate across possible.
+	await _settle(local, Vector3(0.0, 1.0, 11.0))
+	local.movement.set_aim_override(local.global_position)
+	local.movement.request_jump()
+	await get_tree().create_timer(0.3).timeout
+	hp_before = local.hp
+	var before_speed := Vector2(local.velocity.x, local.velocity.z).length()
+	ForceSystem.send(local, ally_push)
+	await get_tree().physics_frame
+	print("PLAYGROUND_STAGE5_AIR state=%s hp=%.0f-%.0f speed=%.2f-%.2f" % [
+		Player.State.keys()[local.state], hp_before, local.hp,
+		before_speed, Vector2(local.velocity.x, local.velocity.z).length()])
+	local.movement.set_aim_override(Vector3.INF)
+	await get_tree().create_timer(2.0).timeout
 
 
 func _run_stage4_checks(local: Player) -> void:
-	_print_ring_faces(local)
 	# Front facing wall A: free movement on the face.
 	# Ring wall at 0 degrees: its face points straight at the camera.
 	var front_face := CLIMB_RING_CENTRE + Vector3(0.0, 1.5, CLIMB_RING_RADIUS + 0.3)
 	var attached := await _attach_to(local, front_face, Vector3(0.0, 0.0, 1.0), front_face + Vector3(0.0, -0.5, 2.0))
-	print("PLAYGROUND_STAGE4_ATTACH wall=A attached=%s state=%s face=%s" % [
-		attached, Player.State.keys()[local.state],
-		PlayerClimb.Face.keys()[local.climb.face] if attached else "-"])
+	print("PLAYGROUND_STAGE4_ATTACH attached=%s state=%s" % [
+		attached, Player.State.keys()[local.state]])
 	if attached:
 		var before := local.global_position
 		local.climb.set_wall_target(front_face + Vector3(1.2, 2.5, 0.0))
@@ -320,9 +362,10 @@ func _run_stage4_checks(local: Player) -> void:
 		print("PLAYGROUND_STAGE4_DETACH state=%s" % Player.State.keys()[local.state])
 
 	# Side facing wall B: vertical only.
-	# Ring wall at 90 degrees: its face points sideways.
-	var side_face := CLIMB_RING_CENTRE + Vector3(CLIMB_RING_RADIUS + 0.3, 1.5, 0.0)
-	var side := await _attach_to(local, side_face, Vector3(1.0, 0.0, 0.0), side_face + Vector3(2.0, -0.5, 0.0))
+	# Ring wall at 45 degrees: the most slanted face the map still has.
+	var slant := Vector3(sin(deg_to_rad(45.0)), 0.0, cos(deg_to_rad(45.0)))
+	var side_face := CLIMB_RING_CENTRE + slant * (CLIMB_RING_RADIUS + 0.3) + Vector3.UP * 1.5
+	var side := await _attach_to(local, side_face, slant, side_face + slant * 2.0 - Vector3.UP * 0.5)
 	if side:
 		var before := local.global_position
 		await get_tree().create_timer(2.0).timeout
@@ -334,11 +377,10 @@ func _run_stage4_checks(local: Player) -> void:
 			var origin := local.camera.camera.global_position
 			local.climb.aim_at(origin, (aim_point - origin).normalized())
 			errors.append("%.1f→%.2f" % [wanted_y, local.climb.wall_target().y])
-		print("PLAYGROUND_STAGE4_SIDE_AIM %s" % " ".join(errors))
-		local.climb.set_wall_target(side_face + Vector3(0.0, 2.5, 1.2))
+		print("PLAYGROUND_STAGE4_AIM %s" % " ".join(errors))
+		local.climb.set_wall_target(side_face + Vector3.UP * 2.5)
 		await get_tree().create_timer(2.0).timeout
-		print("PLAYGROUND_STAGE4_SIDE face=%s rose=%.2f sideways=%.2f" % [
-			PlayerClimb.Face.keys()[local.climb.face],
+		print("PLAYGROUND_STAGE4_DIAGONAL rose=%.2f sideways=%.2f" % [
 			local.global_position.y - before.y,
 			absf(local.global_position.z - before.z)])
 		local.climb.detach()
@@ -754,17 +796,18 @@ func _build_gaps() -> void:
 
 const CLIMB_RING_CENTRE := Vector3(-8.0, 0.0, 6.0)
 const CLIMB_RING_RADIUS := 6.0
-const CLIMB_RING_WALLS := 8
+# 90 and 270 degrees are left out on purpose: a face pointing across the view
+# cannot be aimed at properly, and since the camera never rotates it is the
+# level's job never to place one.
+const CLIMB_RING_ANGLES := [0.0, 45.0, 135.0, 180.0, 225.0, 315.0]
 
 
 func _build_walls() -> void:
-	# Eight climbable faces in a ring, one every 45 degrees. The face rule is
-	# |normal . camera forward| > 0.7, and 45 degrees lands on 0.707, so this
-	# ring puts a wall on each side of that threshold as well as squarely on
-	# it. Replaces the three separate walls the work order lists: those were
-	# front, side and back, which this contains.
-	for index in CLIMB_RING_WALLS:
-		var yaw := TAU * float(index) / float(CLIMB_RING_WALLS)
+	# Climbable faces in a ring, minus the two that would point across the view.
+	# Every wall here meets the camera squarely enough to aim at, so climbing
+	# works the same on all of them and the side face rule is gone entirely.
+	for degrees in CLIMB_RING_ANGLES:
+		var yaw := deg_to_rad(float(degrees))
 		var outward := Vector3(sin(yaw), 0.0, cos(yaw))
 		var wall := _box(
 			"ClimbWall_%d" % roundi(rad_to_deg(yaw)),
