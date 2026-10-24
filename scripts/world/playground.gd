@@ -336,6 +336,7 @@ func _run_stage4_checks(local: Player) -> void:
 			errors.append("%.1f→%.2f" % [wanted_y, local.climb.wall_target().y])
 		print("PLAYGROUND_STAGE4_SIDE_AIM %s" % " ".join(errors))
 		local.climb.set_wall_target(side_face + Vector3(0.0, 2.5, 1.2))
+		await get_tree().create_timer(2.0).timeout
 		print("PLAYGROUND_STAGE4_SIDE face=%s rose=%.2f sideways=%.2f" % [
 			PlayerClimb.Face.keys()[local.climb.face],
 			local.global_position.y - before.y,
