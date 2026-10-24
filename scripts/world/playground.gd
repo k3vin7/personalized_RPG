@@ -243,6 +243,7 @@ func _run_smoke() -> void:
 
 	if multiplayer.is_server():
 		await _run_stage2_checks(local)
+		await _run_stage4_checks(local)
 		await _run_weapon_rack_check(local)
 		await _run_stage3_checks(local)
 		await _run_jump_toggle_check(local)
@@ -281,6 +282,86 @@ func _run_jump_toggle_check(local: Player) -> void:
 
 # Walk onto each pedestal in turn, the way a player would, and report what the
 # body ends up carrying.
+func _run_stage4_checks(local: Player) -> void:
+	# Front facing wall A: free movement on the face.
+	var attached := await _attach_to(local, Vector3(-14.0, 1.5, 2.3), Vector3(0.0, 0.0, 1.0), Vector3(-14.0, 1.0, 5.0))
+	print("PLAYGROUND_STAGE4_ATTACH wall=A attached=%s state=%s face=%s" % [
+		attached, Player.State.keys()[local.state],
+		PlayerClimb.Face.keys()[local.climb.face] if attached else "-"])
+	if attached:
+		var before := local.global_position
+		local.climb.set_wall_target(Vector3(-12.5, 4.0, 2.3))
+		await get_tree().create_timer(2.0).timeout
+		print("PLAYGROUND_STAGE4_FRONT rose=%.2f sideways=%.2f stamina=%.0f" % [
+			local.global_position.y - before.y,
+			absf(local.global_position.x - before.x), local.stamina])
+		local.climb.detach()
+		await get_tree().create_timer(1.2).timeout
+		print("PLAYGROUND_STAGE4_DETACH state=%s" % Player.State.keys()[local.state])
+
+	# Side facing wall B: vertical only.
+	var side := await _attach_to(local, Vector3(-8.7, 1.5, 2.0), Vector3(1.0, 0.0, 0.0), Vector3(-6.5, 1.0, 2.0))
+	if side:
+		var before := local.global_position
+		local.climb.set_wall_target(Vector3(-8.7, 4.0, 4.5))
+		await get_tree().create_timer(2.0).timeout
+		print("PLAYGROUND_STAGE4_SIDE face=%s rose=%.2f sideways=%.2f" % [
+			PlayerClimb.Face.keys()[local.climb.face],
+			local.global_position.y - before.y,
+			absf(local.global_position.z - before.z)])
+		local.climb.detach()
+		await get_tree().create_timer(1.2).timeout
+	else:
+		print("PLAYGROUND_STAGE4_SIDE attach_failed")
+
+	# Running out of stamina drops you off the wall.
+	var tired := await _attach_to(local, Vector3(-14.0, 1.0, 2.3), Vector3(0.0, 0.0, 1.0), Vector3(-14.0, 1.0, 5.0))
+	if tired:
+		local.stamina = 8.0
+		local.climb.set_wall_target(Vector3(-14.0, 5.5, 2.3))
+		await get_tree().create_timer(1.2).timeout
+		print("PLAYGROUND_STAGE4_STAMINA stamina=%.0f state=%s" % [
+			local.stamina, Player.State.keys()[local.state]])
+		await get_tree().create_timer(1.5).timeout
+
+	# A smooth wall refuses.
+	var smooth := get_node_or_null("NavigationRegion3D/SmoothWall") as CollisionObject3D
+	print("PLAYGROUND_STAGE4_SMOOTH attached=%s" % [
+		local.climb.attach(smooth, Vector3(16.0, 2.0, 2.3), Vector3(0.0, 0.0, 1.0)) if smooth != null else "no_wall"])
+
+	# Climbing to the top steps onto it.
+	var top := await _attach_to(local, Vector3(-14.0, 1.0, 2.3), Vector3(0.0, 0.0, 1.0), Vector3(-14.0, 1.0, 5.0))
+	if top:
+		local.climb.set_wall_target(Vector3(-14.0, 5.9, 2.3))
+		await get_tree().create_timer(5.0).timeout
+		print("PLAYGROUND_STAGE4_MANTLE y=%.2f state=%s stamina=%.0f" % [
+			local.global_position.y, Player.State.keys()[local.state], local.stamina])
+
+
+func _attach_to(local: Player, contact: Vector3, normal: Vector3, stand: Vector3) -> bool:
+	await _settle(local, stand)
+	var wall := _wall_at(contact, normal)
+	if wall == null:
+		return false
+	local.movement.order_climb(wall, contact, normal)
+	var waited := 0.0
+	while waited < 4.0:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		if local.climb.is_climbing():
+			return true
+	print("PLAYGROUND_STAGE4_NOATTACH distance=%.2f limit=%.2f" % [
+		local.movement.climb_request_distance(), Tuning.values.climb_attach_distance])
+	return false
+
+
+func _wall_at(contact: Vector3, normal: Vector3) -> CollisionObject3D:
+	var from := contact + normal * 1.5
+	var query := PhysicsRayQueryParameters3D.create(from, contact - normal * 0.5, CLIMBABLE_LAYER | WALL_LAYER)
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	return hit.get("collider") as CollisionObject3D if not hit.is_empty() else null
+
+
 func _run_weapon_rack_check(local: Player) -> void:
 	var rack := get_node_or_null("WeaponRack") as Node3D
 	if rack == null:

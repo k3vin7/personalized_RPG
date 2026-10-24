@@ -59,6 +59,8 @@ var sync_gear_weight := 0.0
 var sync_weapon: int = WeaponKinds.Kind.NONE
 
 var movement: PlayerMovement
+var climb: PlayerClimb
+var stamina := 100.0
 var camera: QuarterCamera
 
 var _visual: Node3D
@@ -83,6 +85,7 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	stats = (load("res://data/default_stats.tres") as CharacterStats).duplicate(true)
 	hp = stats.max_hp
+	stamina = Tuning.values.stamina_max
 	collision_layer = PLAYER_LAYER
 	collision_mask = WORLD_LAYER | WALL_LAYER | CLIMBABLE_LAYER | PLAYER_LAYER
 	floor_snap_length = _default_snap
@@ -95,6 +98,11 @@ func _ready() -> void:
 		movement.name = "PlayerMovement"
 		add_child(movement)
 		movement.setup(self)
+
+		climb = PlayerClimb.new()
+		climb.name = "PlayerClimb"
+		add_child(climb)
+		climb.setup(self)
 
 		camera = QuarterCamera.new()
 		camera.name = "QuarterCamera"
@@ -156,6 +164,8 @@ func is_grounded_state() -> bool:
 func _physics_process(delta: float) -> void:
 	if is_local():
 		_check_death(delta)
+		if is_grounded_state():
+			stamina = minf(Tuning.values.stamina_max, stamina + Tuning.values.stamina_regen * delta)
 		sync_position = global_position
 		sync_yaw = rotation.y
 		sync_state = state
@@ -208,6 +218,7 @@ func respawn() -> void:
 	global_position = spawn_point
 	velocity = Vector3.ZERO
 	hp = stats.max_hp
+	stamina = Tuning.values.stamina_max
 	floor_snap_length = _default_snap
 	_respawn_left = 0.0
 	if movement != null:
@@ -238,6 +249,12 @@ func _apply_weapon(kind: int) -> void:
 	# At the hand, pointing the way the body faces.
 	_weapon_node.position = Vector3(0.34, 0.1, -0.1)
 	_visual.add_child(_weapon_node)
+
+
+# Square on to the wall, facing into it, with no easing: the body is placed on
+# the wall in one step so the first frame of climbing already looks right.
+func look_at_wall(normal: Vector3) -> void:
+	rotation.y = atan2(normal.x, normal.z)
 
 
 func face_direction(direction: Vector3, delta: float, turn_speed: float = 16.0) -> void:

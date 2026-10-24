@@ -155,7 +155,7 @@ func _refresh_readout() -> void:
 		"이동 속도: %.2f m/s" % player.get_move_speed(),
 		"이동 의도: %.2f초 남음" % (movement.intent_seconds_left() if movement != null else 0.0),
 		"HP: %.0f / %.0f" % [player.hp, player.stats.max_hp],
-		"지구력: 단계 4에서 추가",
+		"지구력: %.0f / %.0f" % [player.stamina, Tuning.values.stamina_max],
 	]))
 
 

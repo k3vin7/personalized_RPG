@@ -38,6 +38,9 @@ var _pending_air_target: Variant = null
 var _dash_left := 0.0
 var _dash_direction := Vector3.ZERO
 var _dash_cooldown_left := 0.0
+var _climb_wall: CollisionObject3D
+var _climb_point := Vector3.ZERO
+var _climb_normal := Vector3.ZERO
 
 
 func setup(owner_player: Player) -> void:
@@ -117,6 +120,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		player.respawn()
 		get_viewport().set_input_as_handled()
 		return
+	if player.climb != null and player.climb.is_climbing():
+		# On a wall the same two buttons mean different things: aim on the wall
+		# face, or let go of it.
+		if event.is_action_pressed("move_click"):
+			var mouse := player.get_viewport().get_mouse_position()
+			var camera := player.camera.camera
+			player.climb.aim_at(camera.project_ray_origin(mouse), camera.project_ray_normal(mouse))
+			get_viewport().set_input_as_handled()
+		elif event.is_action_pressed("jump"):
+			player.climb.detach()
+			get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("cancel"):
 		cancel_target()
 		_clear_intent()
@@ -146,6 +161,9 @@ func _physics_process(delta: float) -> void:
 		return
 	if player.state == Player.State.DEAD:
 		# Nothing moves while dead; the body waits where it fell.
+		return
+	if player.climb != null and player.climb.is_climbing():
+		# The wall owns the body until it lets go.
 		return
 	_jump_buffer_left = maxf(0.0, _jump_buffer_left - delta)
 	_dash_cooldown_left = maxf(0.0, _dash_cooldown_left - delta)
@@ -209,6 +227,8 @@ func _ground_step(delta: float) -> void:
 		# Walked off something. Coyote time is already running, so a jump
 		# pressed a frame late still goes.
 		player.change_state(Player.State.AIRBORNE)
+		return
+	_try_attach_climb()
 
 
 func _launch_jump() -> void:
@@ -260,6 +280,45 @@ func _interact() -> bool:
 		if node.has_method("interact") and node.interact(player):
 			return true
 	return false
+
+
+# The click path and anything else that wants a climb go through here, so a
+# test exercises exactly what the button does.
+func order_climb(body: CollisionObject3D, contact: Vector3, normal: Vector3) -> void:
+	_climb_wall = body
+	_climb_point = contact
+	_climb_normal = normal
+	# DOC: walk to a spot 0.4 m out along the face normal.
+	set_target(contact + normal * 0.4)
+
+
+# Gap between the body and the wall face, not between their centres. The
+# navigation surface is eroded by agent_radius, so a centre to centre measure
+# can never come under the documented attach distance however close the body
+# actually gets.
+func climb_request_distance() -> float:
+	if _climb_wall == null:
+		return -1.0
+	var plane := Plane(_climb_normal, _climb_point)
+	return absf(plane.distance_to(player.global_position)) - Player.BODY_RADIUS
+
+
+func _clear_climb_request() -> void:
+	_climb_wall = null
+
+
+# Close enough to the spot that was clicked on the wall, so take hold of it.
+func _try_attach_climb() -> void:
+	if _climb_wall == null or player.climb == null:
+		return
+	if climb_request_distance() > Tuning.values.climb_attach_distance:
+		return
+	var body := _climb_wall
+	var point := _climb_point
+	var normal := _climb_normal
+	_clear_climb_request()
+	cancel_target()
+	player.climb.attach(body, point, normal)
 
 
 func request_dash() -> bool:
@@ -357,9 +416,10 @@ func _click_to_target() -> void:
 	var normal := hit.get("normal", Vector3.ZERO) as Vector3
 	var collider := hit.get("collider") as CollisionObject3D
 	if collider != null and (collider.collision_layer & Player.CLIMBABLE_LAYER) != 0:
-		# Climbing arrives in stage 4. For now, walk to the floor in front.
-		set_target(hit["position"] as Vector3 + normal * 0.5)
+		# Walk to the foot of the wall first; the attach happens on arrival.
+		order_climb(collider, hit["position"] as Vector3, normal)
 		return
+	_clear_climb_request()
 	if normal.dot(Vector3.UP) < 0.6:
 		return
 	set_target(hit["position"] as Vector3)
