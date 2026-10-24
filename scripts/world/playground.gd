@@ -282,15 +282,35 @@ func _run_jump_toggle_check(local: Player) -> void:
 
 # Walk onto each pedestal in turn, the way a player would, and report what the
 # body ends up carrying.
+# What the face rule says about each wall in the ring. 45 degree faces sit at
+# 0.707 against a threshold of 0.7, so they count as front faces by one per
+# cent: worth seeing written down before tuning the threshold.
+func _print_ring_faces(local: Player) -> void:
+	var forward := local.camera.get_camera_flat_forward()
+	var rows := PackedStringArray()
+	for index in CLIMB_RING_WALLS:
+		var yaw := TAU * float(index) / float(CLIMB_RING_WALLS)
+		var outward := Vector3(sin(yaw), 0.0, cos(yaw))
+		var alignment := absf(outward.dot(forward))
+		rows.append("%d°:%.3f:%s" % [
+			roundi(rad_to_deg(yaw)),
+			alignment,
+			"FRONT" if alignment > PlayerClimb.FACE_THRESHOLD else "SIDE"])
+	print("PLAYGROUND_RING_FACES %s" % " ".join(rows))
+
+
 func _run_stage4_checks(local: Player) -> void:
+	_print_ring_faces(local)
 	# Front facing wall A: free movement on the face.
-	var attached := await _attach_to(local, Vector3(-14.0, 1.5, 2.3), Vector3(0.0, 0.0, 1.0), Vector3(-14.0, 1.0, 5.0))
+	# Ring wall at 0 degrees: its face points straight at the camera.
+	var front_face := CLIMB_RING_CENTRE + Vector3(0.0, 1.5, CLIMB_RING_RADIUS + 0.3)
+	var attached := await _attach_to(local, front_face, Vector3(0.0, 0.0, 1.0), front_face + Vector3(0.0, -0.5, 2.0))
 	print("PLAYGROUND_STAGE4_ATTACH wall=A attached=%s state=%s face=%s" % [
 		attached, Player.State.keys()[local.state],
 		PlayerClimb.Face.keys()[local.climb.face] if attached else "-"])
 	if attached:
 		var before := local.global_position
-		local.climb.set_wall_target(Vector3(-12.5, 4.0, 2.3))
+		local.climb.set_wall_target(front_face + Vector3(1.2, 2.5, 0.0))
 		await get_tree().create_timer(2.0).timeout
 		print("PLAYGROUND_STAGE4_FRONT rose=%.2f sideways=%.2f stamina=%.0f" % [
 			local.global_position.y - before.y,
@@ -300,10 +320,12 @@ func _run_stage4_checks(local: Player) -> void:
 		print("PLAYGROUND_STAGE4_DETACH state=%s" % Player.State.keys()[local.state])
 
 	# Side facing wall B: vertical only.
-	var side := await _attach_to(local, Vector3(-8.7, 1.5, 2.0), Vector3(1.0, 0.0, 0.0), Vector3(-6.5, 1.0, 2.0))
+	# Ring wall at 90 degrees: its face points sideways.
+	var side_face := CLIMB_RING_CENTRE + Vector3(CLIMB_RING_RADIUS + 0.3, 1.5, 0.0)
+	var side := await _attach_to(local, side_face, Vector3(1.0, 0.0, 0.0), side_face + Vector3(2.0, -0.5, 0.0))
 	if side:
 		var before := local.global_position
-		local.climb.set_wall_target(Vector3(-8.7, 4.0, 4.5))
+		local.climb.set_wall_target(side_face + Vector3(0.0, 2.5, 1.2))
 		await get_tree().create_timer(2.0).timeout
 		print("PLAYGROUND_STAGE4_SIDE face=%s rose=%.2f sideways=%.2f" % [
 			PlayerClimb.Face.keys()[local.climb.face],
@@ -316,8 +338,8 @@ func _run_stage4_checks(local: Player) -> void:
 
 	# Jumping at a climbable wall and pressing jump again while touching it
 	# takes hold, and hanging there drains stamina without an entry fee.
-	await _settle(local, Vector3(-14.0, 1.0, 4.0))
-	local.global_position = Vector3(-14.0, 4.0, 4.6)
+	await _settle(local, front_face + Vector3(0.0, -0.5, 2.0))
+	local.global_position = front_face + Vector3(0.0, 2.5, 2.3)
 	local.velocity = Vector3(0.0, 0.0, -4.0)
 	local.change_state(Player.State.AIRBORNE)
 	# Let coyote time lapse first. Pressed inside it, the key is still a jump,
@@ -342,10 +364,10 @@ func _run_stage4_checks(local: Player) -> void:
 		await get_tree().create_timer(1.2).timeout
 
 	# Running out of stamina drops you off the wall.
-	var tired := await _attach_to(local, Vector3(-14.0, 1.0, 2.3), Vector3(0.0, 0.0, 1.0), Vector3(-14.0, 1.0, 5.0))
+	var tired := await _attach_to(local, front_face, Vector3(0.0, 0.0, 1.0), front_face + Vector3(0.0, -0.5, 2.0))
 	if tired:
 		local.stamina = 8.0
-		local.climb.set_wall_target(Vector3(-14.0, 5.5, 2.3))
+		local.climb.set_wall_target(front_face + Vector3(0.0, 4.0, 0.0))
 		await get_tree().create_timer(1.2).timeout
 		print("PLAYGROUND_STAGE4_STAMINA stamina=%.0f state=%s" % [
 			local.stamina, Player.State.keys()[local.state]])
@@ -357,9 +379,9 @@ func _run_stage4_checks(local: Player) -> void:
 		local.climb.attach(smooth, Vector3(16.0, 2.0, 2.3), Vector3(0.0, 0.0, 1.0)) if smooth != null else "no_wall"])
 
 	# Climbing to the top steps onto it.
-	var top := await _attach_to(local, Vector3(-14.0, 1.0, 2.3), Vector3(0.0, 0.0, 1.0), Vector3(-14.0, 1.0, 5.0))
+	var top := await _attach_to(local, front_face, Vector3(0.0, 0.0, 1.0), front_face + Vector3(0.0, -0.5, 2.0))
 	if top:
-		local.climb.set_wall_target(Vector3(-14.0, 5.9, 2.3))
+		local.climb.set_wall_target(front_face + Vector3(0.0, 4.4, 0.0))
 		await get_tree().create_timer(5.0).timeout
 		print("PLAYGROUND_STAGE4_MANTLE y=%.2f state=%s stamina=%.0f" % [
 			local.global_position.y, Player.State.keys()[local.state], local.stamina])
@@ -720,17 +742,38 @@ func _build_gaps() -> void:
 		_sign("GAP %.0fm" % width, Vector3(lane, 1.6, gap_start + 1.0), Color("d9f3ff"))
 
 
+const CLIMB_RING_CENTRE := Vector3(-8.0, 0.0, 6.0)
+const CLIMB_RING_RADIUS := 6.0
+const CLIMB_RING_WALLS := 8
+
+
 func _build_walls() -> void:
-	# Climbable, 6 x 6. A faces the camera, B faces sideways, C faces away.
-	_box("ClimbWallA", Vector3(-14.0, 3.0, 2.0), Vector3(6.0, 6.0, 0.6), Color("7a8f7a"), CLIMBABLE_LAYER)
-	# Clear of the x=-5 gap lane: a wall beside a lane eats the run up, because
-	# agent_radius keeps the walkable surface half a metre off it.
-	_box("ClimbWallB", Vector3(-9.0, 3.0, 2.0), Vector3(0.6, 6.0, 6.0), Color("7a8f7a"), CLIMBABLE_LAYER)
-	_box("ClimbWallC", Vector3(6.0, 3.0, 2.0), Vector3(6.0, 6.0, 0.6), Color("7a8f7a"), CLIMBABLE_LAYER)
-	_sign("CLIMB A / B / C", Vector3(-9.0, 7.0, 2.0), Color("c8ffc8"))
-	# Smooth wall: looks the same, cannot be climbed.
+	# Eight climbable faces in a ring, one every 45 degrees. The face rule is
+	# |normal . camera forward| > 0.7, and 45 degrees lands on 0.707, so this
+	# ring puts a wall on each side of that threshold as well as squarely on
+	# it. Replaces the three separate walls the work order lists: those were
+	# front, side and back, which this contains.
+	for index in CLIMB_RING_WALLS:
+		var yaw := TAU * float(index) / float(CLIMB_RING_WALLS)
+		var outward := Vector3(sin(yaw), 0.0, cos(yaw))
+		var wall := _box(
+			"ClimbWall_%d" % roundi(rad_to_deg(yaw)),
+			CLIMB_RING_CENTRE + outward * CLIMB_RING_RADIUS + Vector3.UP * 3.0,
+			Vector3(3.0, 6.0, 0.6),
+			Color("6f9a63"),
+			CLIMBABLE_LAYER,
+			false,
+			yaw)
+		# The label says which way it points, so the rule can be read off the
+		# map rather than worked out.
+		_sign(
+			"%d°" % roundi(rad_to_deg(yaw)),
+			wall.position + Vector3.UP * 3.6,
+			Color("c8ffc8"))
+	_sign("CLIMB RING (8면)", CLIMB_RING_CENTRE + Vector3.UP * 8.0, Color("c8ffc8"))
+	# Smooth wall: looks similar, cannot be climbed.
 	_box("SmoothWall", Vector3(16.0, 2.0, 2.0), Vector3(6.0, 4.0, 0.6), Color("555b62"), WALL_LAYER)
-	_sign("SMOOTH", Vector3(16.0, 5.0, 2.0), Color.WHITE)
+	_sign("SMOOTH (등반 불가)", Vector3(16.0, 5.0, 2.0), Color.WHITE)
 
 
 func _build_occluders() -> void:
@@ -748,10 +791,12 @@ func _box(
 		size: Vector3,
 		color: Color,
 		layer: int,
-		occluder := false) -> StaticBody3D:
+		occluder := false,
+		yaw := 0.0) -> StaticBody3D:
 	var body := StaticBody3D.new()
 	body.name = box_name
 	body.position = at_position
+	body.rotation.y = yaw
 	body.collision_layer = layer
 	var collision := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
@@ -774,8 +819,9 @@ func _box(
 		shader_material.set_shader_parameter("fade", 1.0)
 		mesh_instance.material_override = shader_material
 		# The face nearest the camera. The view never rotates, so the camera
-		# side is simply the larger z.
-		body.set_meta("near_z", at_position.z + size.z * 0.5)
+		# side is simply the larger z, taken from the rotated footprint.
+		var reach_z := (absf(sin(yaw)) * size.x + absf(cos(yaw)) * size.z) * 0.5
+		body.set_meta("near_z", at_position.z + reach_z)
 		body.add_to_group(OcclusionFader.WALL_GROUP)
 		if occluder:
 			body.add_to_group(OcclusionFader.OCCLUDER_GROUP)
