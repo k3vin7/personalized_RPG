@@ -18,11 +18,12 @@ enum State {
 	DEAD,
 }
 
-const WORLD_LAYER := 1
-const WALL_LAYER := 2
-const CLIMBABLE_LAYER := 4
-const PLAYER_LAYER := 8
-const THROWABLE_LAYER := 16
+# Names kept for the call sites; the numbers live in Layers and nowhere else.
+const WORLD_LAYER := Layers.WORLD
+const WALL_LAYER := Layers.WALL
+const CLIMBABLE_LAYER := Layers.CLIMBABLE
+const PLAYER_LAYER := Layers.PLAYER
+const THROWABLE_LAYER := Layers.THROWABLE
 
 const BODY_RADIUS := 0.4
 const BODY_HALF_HEIGHT := 0.9
@@ -109,7 +110,7 @@ func _ready() -> void:
 	collision_layer = PLAYER_LAYER
 	# Rocks are included: a rock you can walk through is not a thing you would
 	# bother picking up, and a thrown one has to be able to knock you about.
-	collision_mask = WORLD_LAYER | WALL_LAYER | CLIMBABLE_LAYER | PLAYER_LAYER | THROWABLE_LAYER
+	collision_mask = Layers.SOLID_PLAYER
 	floor_snap_length = _default_snap
 	_build_body()
 	sync_position = global_position

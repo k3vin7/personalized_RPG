@@ -5,13 +5,13 @@ extends Node3D
 # hand in the scene: the dimensions are the point of this map, and a table is
 # the only form where they can be read and checked against the work order.
 
-const WORLD_LAYER := 1
-const WALL_LAYER := 2
-const CLIMBABLE_LAYER := 4
+const WORLD_LAYER := Layers.WORLD
+const WALL_LAYER := Layers.WALL
+const CLIMBABLE_LAYER := Layers.CLIMBABLE
 # Seen by the navigation bake and by nothing else. A bridge on this layer makes
 # a gap look like continuous ground to pathfinding while bodies pass straight
 # through it, so walking at the far side walks you off the edge and down.
-const NAV_BRIDGE_LAYER := 128
+const NAV_BRIDGE_LAYER := Layers.NAV_BRIDGE
 
 # A navigation surface is eroded by agent_radius from every edge, so any top a
 # character is meant to stand on needs a short side wider than twice that plus a
@@ -177,7 +177,9 @@ func _run_smoke() -> void:
 	if Net.auto_only != "":
 		# One stage on its own, for iterating. The full suite is the default.
 		if multiplayer.is_server():
-			if Net.auto_only == "8":
+			if Net.auto_only == "audit":
+				await _run_audit(local)
+			elif Net.auto_only == "8":
 				await _run_stage8_checks(local)
 			elif Net.auto_only == "7":
 				await _run_stage7_checks(local)
@@ -983,6 +985,85 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 		Vector3(TimeBoundary.SEAM.x, 1.0, face_z + 8.0))
 
 
+# Numbers that have to agree with each other but live in different files.
+#
+# A diff review cannot catch this class: every file is self consistent, and the
+# disagreement only exists between them. Rocks fell at the project's 9.8 while
+# every character fell at the tuned 22, and a player and a dummy each left the
+# other out of their mask, so they passed through one another. Both read fine
+# in isolation. So they get measured instead, in one table, every run.
+func _run_audit(local: Player) -> void:
+	print("PLAYGROUND_AUDIT_GRAVITY tuned=%.2f project=%.2f" % [
+		Tuning.values.gravity,
+		float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8))])
+	for node in get_tree().get_nodes_in_group(Rock.GROUP):
+		var rock := node as Rock
+		if rock != null:
+			print("PLAYGROUND_AUDIT_GRAVITY rock=%s effective=%.2f" % [
+				rock.name,
+				rock.gravity_scale * float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8))])
+
+	# Numbers that are written out twice, in files that do not import each
+	# other. They agree today; printed so that the day they stop agreeing is a
+	# line in the log rather than a thing someone notices in play.
+	print("PLAYGROUND_AUDIT_SHARED hold_grace rock=%.2f grab=%.2f | state_interval rock=%.2f dummy=%.2f | dummy_weight=%.1f" % [
+		Rock.HOLD_GRACE, PlayerGrab.HOLD_GRACE,
+		Rock.STATE_INTERVAL, Dummy.STATE_INTERVAL,
+		Dummy.MAX_HP * 0.2])
+
+	# Everything that can be stood on, pushed or thrown, with what it collides
+	# with. A pair that appears in neither mask passes through.
+	var bodies: Array[CollisionObject3D] = []
+	_collect_bodies(self, bodies)
+	var moving: Array[CollisionObject3D] = []
+	for body in bodies:
+		var layer := body.collision_layer
+		print("PLAYGROUND_AUDIT_BODY name=%s type=%s layer=%d mask=%d" % [
+			body.name, body.get_class(), layer, body.collision_mask])
+		if body is CharacterBody3D or body is RigidBody3D:
+			moving.append(body)
+
+	for index in moving.size():
+		for other_index in range(index + 1, moving.size()):
+			var a := moving[index]
+			var b := moving[other_index]
+			# Godot needs the pair in one direction only, so this is a miss
+			# exactly when neither side knows about the other.
+			if (a.collision_mask & b.collision_layer) == 0 and (b.collision_mask & a.collision_layer) == 0:
+				print("PLAYGROUND_AUDIT_PASSTHROUGH %s(%d/%d) <-> %s(%d/%d)" % [
+					a.name, a.collision_layer, a.collision_mask,
+					b.name, b.collision_layer, b.collision_mask])
+
+	# And the same thing measured rather than read off the masks: walk into a
+	# dummy and see whether it stops us.
+	var dummy := get_node_or_null("Dummy_0") as Dummy
+	if dummy == null:
+		return
+	var approach := dummy.global_position + Vector3(0.0, 0.0, 3.0)
+	await _settle(local, Vector3(approach.x, 1.0, approach.z))
+	local.movement.set_target(dummy.global_position + Vector3(0.0, 0.0, -1.5))
+	var closest := INF
+	var waited := 0.0
+	while waited < 4.0:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		closest = minf(closest, _flat(local.global_position - dummy.global_position))
+	# Two capsules of radius 0.4 cannot be closer than 0.8 apart if they are
+	# solid to each other.
+	print("PLAYGROUND_AUDIT_WALKINTO closest=%.2f solid_at=%.2f passed_through=%s dummy_moved=%.2f" % [
+		closest, Player.BODY_RADIUS * 2.0, closest < Player.BODY_RADIUS * 2.0 - 0.05,
+		_flat(dummy.global_position - dummy.home)])
+	local.movement.cancel_target()
+
+
+func _collect_bodies(node: Node, into: Array[CollisionObject3D]) -> void:
+	for child in node.get_children():
+		var body := child as CollisionObject3D
+		if body != null:
+			into.append(body)
+		_collect_bodies(child, into)
+
+
 func _ground_y(space: PhysicsDirectSpaceState3D, from: Vector3) -> float:
 	var query := PhysicsRayQueryParameters3D.create(
 		from, from + Vector3.DOWN * 12.0, WORLD_LAYER | CLIMBABLE_LAYER)
@@ -1024,10 +1105,12 @@ func _run_stage7_checks(local: Player) -> void:
 	var dummy := get_node_or_null("Dummy_0") as Dummy
 	var rock_0 := get_node_or_null("Rock_0") as Rock
 	if dummy != null and rock_0 != null:
-		# Nine metres back. The hand is 2.6 m up and a dummy is 1.9 m tall, so a
-		# flat throw has to be given enough distance to come down into it; at
-		# seven metres it passed two centimetres over the shoulder.
-		await _settle(local, Vector3(dummy.global_position.x, 1.0, dummy.global_position.z + 9.0))
+		# Five metres back. The hand is 2.6 m up and a dummy is 1.9 m tall, so a
+		# flat throw needs enough distance to come down into it and not so much
+		# that it lands short. This distance is a function of gravity: it was
+		# nine metres while rocks were still falling at the project's 9.8, and
+		# at nine metres under the tuned 22 the rock now lands in front of it.
+		await _settle(local, Vector3(dummy.global_position.x, 1.0, dummy.global_position.z + 5.0))
 		# Brought to hand rather than walked to: the throw is what is under test.
 		rock_0.host_grab(1)
 		local.grab.on_rock_answer(rock_0, true)
@@ -1143,6 +1226,8 @@ func _run_stage7_team(local: Player) -> void:
 		print("PLAYGROUND_STAGE7_TEAM no_remote_peer")
 		return
 
+	await _run_rock_vs_player(local, remote)
+
 	# Heavier team mate, shorter throw. The weight lives on their machine, so
 	# they are asked to set it, and both bodies are placed in the same clear
 	# lane each time: the z=8 line is open plaza from the west edge to the east,
@@ -1225,6 +1310,60 @@ func _run_stage7_team(local: Player) -> void:
 		await get_tree().create_timer(4.0).timeout
 		print("PLAYGROUND_STAGE7_DISCONNECT held_by=%d after_leave_holder=%d players=%d" % [
 			held_by, rock_2.holder_peer, _players_root.get_child_count()])
+
+
+# Does a thrown rock actually hit a person? The dummy check throws flat on
+# purpose, so it never answered this: at the documented 35 degrees the rock
+# leaves a hand 2.6 m up, and a body is 1.8 m tall. Measured at three distances,
+# because a throw that clears a head at three metres can still come down on one
+# at nine.
+#
+# Reported as the closest the rock ever came to the body and how high it was
+# passing at that moment, so a miss and a pass through cannot be confused: a
+# rock that goes over reads as a wide gap with a positive height, and a rock
+# that ignores the body reads as a gap near zero with no damage.
+func _run_rock_vs_player(local: Player, remote: Player) -> void:
+	var rock := get_node_or_null("Rock_0") as Rock
+	if rock == null:
+		return
+	# A hit means the two surfaces met: sphere radius plus the capsule's 0.4.
+	var touching := Rock.radius_for(rock.weight) + Player.BODY_RADIUS
+	for distance in [3.0, 6.0, 9.0]:
+		if local.state == Player.State.DEAD:
+			local.respawn()
+		await _settle(local, THROW_LANE)
+		place_remote.rpc_id(String(remote.name).to_int(), THROW_LANE + Vector3(distance, 0.0, 0.0))
+		await get_tree().create_timer(1.0).timeout
+		# Brought to hand rather than walked to: the throw is what is under test.
+		rock.host_grab(1)
+		local.grab.on_rock_answer(rock, true)
+		for _frame in range(6):
+			await get_tree().physics_frame
+		var hp_before := remote.hp
+		var stood := remote.global_position
+		local.movement.set_aim_override(remote.global_position)
+		local.movement.interact()
+		var closest := INF
+		var passing_height := 0.0
+		var sampled := 0.0
+		while sampled < 2.0:
+			await get_tree().physics_frame
+			sampled += get_physics_process_delta_time()
+			var gap := rock.global_position.distance_to(remote.global_position)
+			if gap < closest:
+				closest = gap
+				passing_height = rock.global_position.y - remote.global_position.y
+		local.movement.set_aim_override(Vector3.INF)
+		print("PLAYGROUND_ROCK_VS_PLAYER distance=%.0f angle=%.0f closest=%.2f touching_at=%.2f passing_height=%.2f hp=%.0f-%.0f moved=%.2f" % [
+			distance, Tuning.values.throw_up_angle_deg, closest, touching, passing_height,
+			hp_before, remote.hp, _flat(remote.global_position - stood)])
+		# The harness putting a prop back on its mark, not game logic: the next
+		# leg has to start from the same place, and a rock left lying beside the
+		# team mate would be grabbed instead of them.
+		rock.global_position = rock.home
+		rock.linear_velocity = Vector3.ZERO
+		rock.angular_velocity = Vector3.ZERO
+		await get_tree().create_timer(1.0).timeout
 
 
 # Stands next to them and takes hold. Returns whether the hold actually

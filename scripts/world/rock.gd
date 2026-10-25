@@ -9,7 +9,7 @@ extends RigidBody3D
 # contact states disagree every frame, which reads as a rock that shakes.
 
 const GROUP := "rock"
-const LAYER := 16
+const LAYER := Layers.THROWABLE
 
 # Below this it is a rock rolling into your shins, not a rock hitting you.
 const HIT_SPEED := 3.0
@@ -55,8 +55,9 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	mass = weight
 	collision_layer = LAYER
-	collision_mask = Playground.WORLD_LAYER | Playground.WALL_LAYER | Playground.CLIMBABLE_LAYER \
-		| Player.PLAYER_LAYER | Dummy.LAYER
+	# Rocks were left out of their own mask, so one thrown at another went
+	# through it.
+	collision_mask = Layers.SOLID_ROCK
 	add_to_group(GROUP)
 	home = global_position
 	# A sphere on a flat plane rolls for ever without these, and a thrown rock
@@ -64,6 +65,8 @@ func _ready() -> void:
 	# Angular damping and a rough surface are what stop a roll; linear damping
 	# would also shorten the flight, which is the thing being measured.
 	angular_damp = 2.0
+	_apply_gravity()
+	Tuning.tuning_changed.connect(_apply_gravity)
 	var surface := PhysicsMaterial.new()
 	surface.friction = 1.0
 	surface.rough = true
@@ -104,6 +107,19 @@ func _ready() -> void:
 		freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
 		freeze = true
 	set_physics_process(true)
+
+
+# A rigid body falls under the project's gravity, which is Godot's 9.8, while
+# every character in this game falls under PhysicsTuning.gravity. Nobody chose
+# that: it meant a thrown rock hung in the air more than twice as long as a
+# thrown person and flew 22 m, and the debug panel's gravity slider moved people
+# without moving rocks. The work order has one gravity, so this scales the
+# body's to match it and follows the slider.
+func _apply_gravity() -> void:
+	var project_gravity := float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8))
+	if project_gravity <= 0.0:
+		return
+	gravity_scale = Tuning.values.gravity / project_gravity
 
 
 static func radius_for(rock_weight: float) -> float:

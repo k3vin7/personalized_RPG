@@ -8,7 +8,10 @@ extends Node
 # waypoint and the character stalls on top of it.
 
 const DRAG_RETARGET_INTERVAL := 0.1
-const CLICK_MASK := 1 | 2 | 4 | 16  # World, Wall, Climbable, Throwable
+# DOC: the click ray checks layers 1, 2, 3 and 5 only - ground, walls, climb
+# walls and rocks. Players and dummies are deliberately not in it: you aim at
+# the ground behind them.
+const CLICK_MASK := Layers.TERRAIN | Layers.THROWABLE
 const ARRIVE_TOLERANCE := 0.3
 const PATH_LOOKAHEAD := 0.75
 const PATH_QUERY_RETRIES := 4

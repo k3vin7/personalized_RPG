@@ -5,7 +5,7 @@ extends CharacterBody3D
 # anything that is not a player's own body, and it walks itself back to where it
 # started so the next shove starts from the same place.
 
-const LAYER := 32
+const LAYER := Layers.DUMMY
 const RETURN_DELAY := 2.0
 const RETURN_SPEED := 2.0
 const MAX_HP := 60.0
@@ -41,7 +41,9 @@ func _ready() -> void:
 	home = global_position
 	sync_position = global_position
 	collision_layer = LAYER
-	collision_mask = Playground.WORLD_LAYER | Playground.WALL_LAYER | Playground.CLIMBABLE_LAYER
+	# Was terrain only, which is why a player walked straight through a
+	# scarecrow and two scarecrows could stand in the same spot.
+	collision_mask = Layers.SOLID_DUMMY
 
 	var collision := CollisionShape3D.new()
 	var shape := CapsuleShape3D.new()

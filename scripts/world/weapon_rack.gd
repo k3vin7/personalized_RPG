@@ -7,7 +7,7 @@ extends Node3D
 
 const INTERACT_GROUP := "interactable"
 
-const PICKUP_LAYER := 64
+const PICKUP_LAYER := Layers.PICKUP
 const SPACING := 2.2
 
 var _zones: Array[Area3D] = []
@@ -87,7 +87,7 @@ func _build_zone(kind: int, offset: Vector3, size: Vector3) -> void:
 	area.position = offset + Vector3(0.0, size.y * 0.5, 0.0)
 	# Watches the player layer; it is not something anything collides with.
 	area.collision_layer = PICKUP_LAYER
-	area.collision_mask = Player.PLAYER_LAYER
+	area.collision_mask = Layers.PLAYER
 	var collision := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
 	shape.size = size

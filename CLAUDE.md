@@ -52,6 +52,26 @@ Godot 4.7.1 / GDScript 정적 타입 / Jolt / 물리 120Hz.
 손은 `BODY_HALF_HEIGHT + 0.8` = 약 2.6m. 1.9m 표적을 향해 평사로
 던지면 **가까운 거리에서 머리 위를 넘어간다**. 거리별로 각도를 확인한다.
 
+### 8. 파일 간에 맞아야 하는 숫자는 한 곳에 두고, 매번 측정한다
+같은 숫자가 두 파일에 복사돼 있으면 **코드 리뷰로는 절대 안 잡힌다**.
+파일 하나만 보면 전부 자기 자신과는 일관되기 때문이다. 실제로 터진 것:
+- 돌(`RigidBody3D`)은 프로젝트 기본 중력 9.8로, 사람은 `Tuning.gravity`
+  22로 떨어지고 있었다. 돌이 2배 멀리 날아가고 디버그 패널의 중력
+  슬라이더가 돌에는 안 먹었다.
+- 레이어 번호가 `player.gd` / `playground.gd` / `dummy.gd` / `rock.gd`에
+  따로 적혀 있어서, 사람과 허수아비가 **서로를 마스크에서 빼먹고 통과**했다.
+  돌끼리도 통과했다.
+
+→ 레이어는 `scripts/world/layers.gd`(`class_name Layers`) 한 곳에만 둔다.
+→ 새 바디를 만들면 `Layers.SOLID_*`에 추가한다.
+→ 다음을 돌려서 통과 쌍이 0인지 확인한다. 리뷰가 아니라 측정이다.
+
+```
+godot --headless --path . -- --auto-host --auto-smoke --auto-only=audit --auto-quit=50
+```
+`PLAYGROUND_AUDIT_PASSTHROUGH`가 한 줄이라도 나오면 그 둘은 서로 통과한다.
+`AUDIT_GRAVITY`의 effective가 tuned과 다르면 그 바디는 다른 세계에 있다.
+
 ## 검증 절차 (단계마다 동일)
 
 ```
