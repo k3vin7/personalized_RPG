@@ -924,10 +924,13 @@ func _run_stage8_checks(local: Player) -> void:
 	await _run_stage8_throw(local, face_z)
 
 
-# Being thrown onto the sand. The stand off distance is the throw's own apex
-# distance, worked out from the same numbers the throw uses, so the attempt is
-# the best one the current angle and power can make rather than an arbitrary
-# spot that happens to fail.
+# Being thrown onto the sand. The throw does not have to clear the lip for the
+# gate to be good, but who can and who cannot is worth knowing, so this sweeps
+# the thrower's strength against a 10 kg team mate.
+#
+# The stand off distance is the throw's own apex distance, worked out from the
+# same numbers the throw uses, so each attempt is the best one that strength
+# can make rather than an arbitrary spot that happens to fail.
 func _run_stage8_throw(local: Player, face_z: float) -> void:
 	var remote: Player = null
 	for child in _players_root.get_children():
@@ -941,16 +944,22 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 	var angle := deg_to_rad(Tuning.values.throw_up_angle_deg)
 	# Clearing the lip means the body's centre, not its feet.
 	var wanted := TimeBoundary.TOP_Y + Player.BODY_HALF_HEIGHT
-	for weight in [10.0, 5.0]:
-		var speed: float = Tuning.values.throw_power * Tuning.ratio_mult(
-			local.stats.strength / weight, Tuning.values.ratio_k_jump)
+	var was_strength: float = local.stats.strength
+	var mate_weight := 10.0
+	set_remote_weight.rpc_id(String(remote.name).to_int(), mate_weight)
+	# 10 is the default and fails; 18 is where the arithmetic says it starts to
+	# work; 25 is past the point where ratio_mult_max caps the multiplier, so it
+	# is also the best throw the game can produce at all.
+	for strength in [10.0, 18.0, 25.0]:
+		local.stats.strength = strength
+		var mult: float = Tuning.ratio_mult(strength / mate_weight, Tuning.values.ratio_k_jump)
+		var speed: float = Tuning.values.throw_power * mult
 		var rise := speed * sin(angle)
 		var apex_at := speed * cos(angle) * (rise / Tuning.values.gravity)
-		set_remote_weight.rpc_id(String(remote.name).to_int(), weight)
 		await get_tree().create_timer(0.5).timeout
 		var lane := Vector3(TimeBoundary.SEAM.x, 1.0, face_z + apex_at)
 		if not await _grab_remote(local, remote, lane):
-			print("PLAYGROUND_STAGE8_THROW grab_failed weight=%.0f" % weight)
+			print("PLAYGROUND_STAGE8_THROW grab_failed strength=%.0f" % strength)
 			continue
 		await get_tree().create_timer(0.4).timeout
 		# Read from the hand that is about to let go, so the predicted apex is
@@ -960,12 +969,12 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 		local.movement.interact()
 		await get_tree().create_timer(3.0).timeout
 		local.movement.set_aim_override(Vector3.INF)
-		print("PLAYGROUND_STAGE8_THROW weight=%.0f speed=%.1f stand_off=%.2f predicted_apex=%.2f needed=%.2f landed_y=%.2f landed_z=%.2f on_top=%s" % [
-			weight, speed, apex_at, apex, wanted,
+		print("PLAYGROUND_STAGE8_THROW strength=%.0f mate=%.0fkg mult=%.2f speed=%.1f stand_off=%.2f predicted_apex=%.2f needed=%.2f landed_y=%.2f landed_z=%.2f on_top=%s" % [
+			strength, mate_weight, mult, speed, apex_at, apex, wanted,
 			remote.global_position.y, remote.global_position.z,
 			remote.global_position.y > TimeBoundary.TOP_Y])
 		await get_tree().create_timer(1.0).timeout
-	set_remote_weight.rpc_id(String(remote.name).to_int(), 10.0)
+	local.stats.strength = was_strength
 	# Parked out on the grass, not in the throwing lane. Stage 7 teleports our
 	# own body into that lane to measure rock throws, and a team mate left
 	# standing in it is something to land on: the rocks came down on their head
