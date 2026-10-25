@@ -114,7 +114,7 @@ func _progress(colour: Color, with_bed: bool) -> ProgressBar:
 
 
 func _process(delta: float) -> void:
-	if not is_instance_valid(player):
+	if not is_instance_valid(player) or not player.is_inside_tree():
 		return
 	var max_hp: float = maxf(player.stats.max_hp, 0.01)
 	var max_stamina: float = maxf(Tuning.values.stamina_max, 0.01)

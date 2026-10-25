@@ -1328,6 +1328,10 @@ func _client_support(local: Player) -> void:
 	while waited < 200.0:
 		await get_tree().create_timer(0.12).timeout
 		waited += 0.12
+		# This loop sleeps across the shutdown, so the body it was watching can
+		# be gone by the time it wakes.
+		if not is_instance_valid(local):
+			return
 		if local.state == Player.State.GRABBED and not reported_mutual:
 			reported_mutual = true
 			# 7-6: being held refuses a grab of your own.

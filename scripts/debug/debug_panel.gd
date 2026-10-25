@@ -39,7 +39,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _process(_delta: float) -> void:
-	if not is_instance_valid(player):
+	if not is_instance_valid(player) or not player.is_inside_tree():
 		return
 	if visible:
 		_refresh_readout()
@@ -172,7 +172,7 @@ func _build_arc() -> void:
 
 
 func _refresh_arc() -> void:
-	if not is_instance_valid(_arc):
+	if not is_instance_valid(_arc) or not _arc.is_inside_tree():
 		return
 	if not _arc_enabled or not player.is_grounded_state():
 		_arc.visible = false

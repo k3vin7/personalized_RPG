@@ -39,7 +39,10 @@ func set_target(value: Node3D) -> void:
 
 
 func _process(delta: float) -> void:
-	if not is_instance_valid(target):
+	# Valid is not enough: during a teardown the body is out of the tree for a
+	# frame before it is freed, and a global transform read in that frame is an
+	# error rather than a stale value.
+	if not is_instance_valid(target) or not target.is_inside_tree() or not is_inside_tree():
 		return
 	# Position only. The character drifts a little off centre while moving and
 	# recentres when it stops, which is the follow lag showing itself honestly

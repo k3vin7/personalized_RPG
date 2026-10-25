@@ -72,6 +72,8 @@ var stamina := 100.0
 var camera: QuarterCamera
 
 var _visual: Node3D
+# The camera, the HUD bars and the debug panel: ours to free when we go.
+var _owned_views: Array[Node] = []
 var _material: StandardMaterial3D
 var _label: Label3D
 var _default_snap := 0.3
@@ -150,7 +152,27 @@ func _ready() -> void:
 		panel.name = "DebugPanel"
 		get_tree().current_scene.add_child(panel)
 		panel.setup(self)
+
+		# The camera, the bars and the panel hang off the scene rather than off
+		# this body, because the body's parent is the spawner's path and
+		# anything living there is treated as a replicated player. Nothing else
+		# owns them, so this body does: without it, a local player that is
+		# despawned (quit, or a disconnect) leaves three nodes behind that go on
+		# reading a freed body for a frame, which is where the shutdown's
+		# "!is_inside_tree()" errors came from.
+		_owned_views.assign([camera, bars, panel])
+		tree_exiting.connect(_free_views)
 	set_physics_process(true)
+
+
+func _free_views() -> void:
+	for node in _owned_views:
+		if is_instance_valid(node):
+			# Queued, not freed on the spot: this runs while the tree is pulling
+			# itself apart, and taking a node out from under that loop is how a
+			# tidy up turns into a crash.
+			node.queue_free()
+	_owned_views.clear()
 
 
 func is_local() -> bool:
