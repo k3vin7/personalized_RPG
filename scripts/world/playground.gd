@@ -32,6 +32,7 @@ var spawn_points: Array[Vector3] = []
 var _region: NavigationRegion3D
 var _spawner: MultiplayerSpawner
 var _players_root: Node3D
+var _boundary: TimeBoundary
 # Set by the host over RPC, read by the client's half of the stage 7 checks.
 var _escape_drill := false
 var _disconnect_rock := NodePath()
@@ -49,6 +50,7 @@ func _ready() -> void:
 	_build_gaps()
 	_build_walls()
 	_build_occluders()
+	_build_time_boundary()
 
 	for index in 2:
 		var dummy := Dummy.new()
@@ -175,7 +177,9 @@ func _run_smoke() -> void:
 	if Net.auto_only != "":
 		# One stage on its own, for iterating. The full suite is the default.
 		if multiplayer.is_server():
-			if Net.auto_only == "7":
+			if Net.auto_only == "8":
+				await _run_stage8_checks(local)
+			elif Net.auto_only == "7":
 				await _run_stage7_checks(local)
 			elif Net.auto_only == "6":
 				await _run_stage6_checks(local)
@@ -298,6 +302,7 @@ func _run_smoke() -> void:
 		await _run_jump_toggle_check(local)
 		await _run_stage6_checks(local)
 		await _run_respawn_checks(local)
+		await _run_stage8_checks(local)
 		await _run_stage7_checks(local)
 		# Long enough that the other process has really gone, not merely queued.
 		await get_tree().create_timer(9.0).timeout
@@ -846,6 +851,136 @@ func _jump_towards(local: Player, from: Vector3, target: Vector3) -> Vector3:
 	return local.global_position
 
 
+# Stage 8 gates. The seam is mostly something to look at, so what gets measured
+# is the geometry under the look and the two ways over it: climbing the cut
+# face, and being thrown onto it. The looking itself is the user's call.
+func _run_stage8_checks(local: Player) -> void:
+	if _boundary == null:
+		print("PLAYGROUND_STAGE8 missing_boundary")
+		return
+	var seam_x := TimeBoundary.SEAM.x
+	var face_z := _boundary.face_z()
+	var space := get_world_3d().direct_space_state
+
+	# 8-1: the two grounds at the heights the work order asks for, sampled
+	# across the width rather than at one spot, and no crack at the join. A ray
+	# dropped just behind the face has to land on the sand at 3 m: anything
+	# lower is a gap the seam would show daylight through.
+	var grass_tops := PackedStringArray()
+	var sand_tops := PackedStringArray()
+	var worst_seam := 0.0
+	for offset in [-9.0, -4.0, 1.0, 6.0, 9.0]:
+		var x: float = seam_x + offset
+		grass_tops.append("%.2f" % _ground_y(space, Vector3(x, 6.0, face_z + 2.0)))
+		sand_tops.append("%.2f" % _ground_y(space, Vector3(x, 6.0, face_z - 3.0)))
+		var at_seam := _ground_y(space, Vector3(x, 6.0, face_z - 0.05))
+		worst_seam = maxf(worst_seam, absf(at_seam - TimeBoundary.TOP_Y))
+	print("PLAYGROUND_STAGE8_GEOM grass=[%s] sand=[%s] seam_error=%.3f" % [
+		", ".join(grass_tops), ", ".join(sand_tops), worst_seam])
+
+	# The face itself: what a click from the grass side would meet first, and
+	# on which layer. Climbable is the gate; anything else and the seam is
+	# scenery you cannot get over.
+	var probe := PhysicsRayQueryParameters3D.create(
+		Vector3(seam_x, 1.5, face_z + 3.0),
+		Vector3(seam_x, 1.5, face_z - 1.0),
+		WORLD_LAYER | WALL_LAYER | CLIMBABLE_LAYER)
+	var hit := space.intersect_ray(probe)
+	var face_body := hit.get("collider") as CollisionObject3D
+	print("PLAYGROUND_STAGE8_FACE hit=%s layer=%d climbable=%s at_z=%.2f" % [
+		face_body.name if face_body != null else "none",
+		face_body.collision_layer if face_body != null else 0,
+		face_body != null and (face_body.collision_layer & CLIMBABLE_LAYER) != 0,
+		(hit["position"] as Vector3).z if not hit.is_empty() else 0.0])
+
+	# 8-2: a jump does not get you up it. This is the whole point of the gate.
+	var stand := Vector3(seam_x, 1.0, face_z + 1.2)
+	await _settle(local, stand)
+	local.movement.set_aim_override(Vector3(seam_x, local.global_position.y, face_z - 2.0))
+	local.movement.request_jump()
+	var peak := local.global_position.y
+	for _tick in range(150):
+		await get_tree().physics_frame
+		peak = maxf(peak, local.global_position.y)
+	local.movement.set_aim_override(Vector3.INF)
+	print("PLAYGROUND_STAGE8_JUMPGATE peak_y=%.2f top_y=%.2f over=%s rested_y=%.2f" % [
+		peak, TimeBoundary.TOP_Y, peak > TimeBoundary.TOP_Y + Player.BODY_HALF_HEIGHT,
+		local.global_position.y])
+
+	# 8-3: climbing it puts you on the sand.
+	var contact := Vector3(seam_x, 1.2, face_z)
+	var attached := await _attach_to(local, contact, Vector3(0.0, 0.0, 1.0), Vector3(seam_x, 1.0, face_z + 1.6))
+	if attached:
+		local.climb.set_wall_target(Vector3(seam_x, TimeBoundary.TOP_Y + 0.6, face_z))
+		await get_tree().create_timer(5.0).timeout
+		print("PLAYGROUND_STAGE8_CLIMB y=%.2f z=%.2f state=%s stamina=%.0f on_top=%s" % [
+			local.global_position.y, local.global_position.z,
+			Player.State.keys()[local.state], local.stamina,
+			local.global_position.y > TimeBoundary.TOP_Y + Player.BODY_HALF_HEIGHT - 0.2])
+	else:
+		print("PLAYGROUND_STAGE8_CLIMB attach_failed")
+	await _settle(local, Vector3(seam_x, 1.0, face_z + 4.0))
+
+	await _run_stage8_throw(local, face_z)
+
+
+# Being thrown onto the sand. The stand off distance is the throw's own apex
+# distance, worked out from the same numbers the throw uses, so the attempt is
+# the best one the current angle and power can make rather than an arbitrary
+# spot that happens to fail.
+func _run_stage8_throw(local: Player, face_z: float) -> void:
+	var remote: Player = null
+	for child in _players_root.get_children():
+		var player := child as Player
+		if player != null and not player.is_local():
+			remote = player
+	if remote == null:
+		print("PLAYGROUND_STAGE8_THROW no_remote_peer")
+		return
+
+	var angle := deg_to_rad(Tuning.values.throw_up_angle_deg)
+	# Clearing the lip means the body's centre, not its feet.
+	var wanted := TimeBoundary.TOP_Y + Player.BODY_HALF_HEIGHT
+	for weight in [10.0, 5.0]:
+		var speed: float = Tuning.values.throw_power * Tuning.ratio_mult(
+			local.stats.strength / weight, Tuning.values.ratio_k_jump)
+		var rise := speed * sin(angle)
+		var apex_at := speed * cos(angle) * (rise / Tuning.values.gravity)
+		set_remote_weight.rpc_id(String(remote.name).to_int(), weight)
+		await get_tree().create_timer(0.5).timeout
+		var lane := Vector3(TimeBoundary.SEAM.x, 1.0, face_z + apex_at)
+		if not await _grab_remote(local, remote, lane):
+			print("PLAYGROUND_STAGE8_THROW grab_failed weight=%.0f" % weight)
+			continue
+		await get_tree().create_timer(0.4).timeout
+		# Read from the hand that is about to let go, so the predicted apex is
+		# a world height and can be put beside the lip it has to clear.
+		var apex: float = local.hand_position().y + rise * rise / (2.0 * Tuning.values.gravity)
+		local.movement.set_aim_override(local.global_position + Vector3(0.0, 0.0, -20.0))
+		local.movement.interact()
+		await get_tree().create_timer(3.0).timeout
+		local.movement.set_aim_override(Vector3.INF)
+		print("PLAYGROUND_STAGE8_THROW weight=%.0f speed=%.1f stand_off=%.2f predicted_apex=%.2f needed=%.2f landed_y=%.2f landed_z=%.2f on_top=%s" % [
+			weight, speed, apex_at, apex, wanted,
+			remote.global_position.y, remote.global_position.z,
+			remote.global_position.y > TimeBoundary.TOP_Y])
+		await get_tree().create_timer(1.0).timeout
+	set_remote_weight.rpc_id(String(remote.name).to_int(), 10.0)
+	# Parked out on the grass, not in the throwing lane. Stage 7 teleports our
+	# own body into that lane to measure rock throws, and a team mate left
+	# standing in it is something to land on: the rocks came down on their head
+	# and measured 0.3 m.
+	place_remote.rpc_id(String(remote.name).to_int(),
+		Vector3(TimeBoundary.SEAM.x, 1.0, face_z + 8.0))
+
+
+func _ground_y(space: PhysicsDirectSpaceState3D, from: Vector3) -> float:
+	var query := PhysicsRayQueryParameters3D.create(
+		from, from + Vector3.DOWN * 12.0, WORLD_LAYER | CLIMBABLE_LAYER)
+	var hit := space.intersect_ray(query)
+	return (hit["position"] as Vector3).y if not hit.is_empty() else -99.0
+
+
 # Stage 7 gates. The rock half runs on the host alone; the team mate half needs
 # the second peer, which co-operates from _client_support.
 func _run_stage7_checks(local: Player) -> void:
@@ -1351,6 +1486,25 @@ func _build_walls() -> void:
 	# Smooth wall: looks similar, cannot be climbed.
 	_box("SmoothWall", Vector3(16.0, 2.0, 2.0), Vector3(6.0, 4.0, 0.6), Color("555b62"), WALL_LAYER)
 	_sign("SMOOTH (등반 불가)", Vector3(16.0, 5.0, 2.0), Color.WHITE)
+
+
+func _build_time_boundary() -> void:
+	_boundary = TimeBoundary.new()
+	_boundary.name = "TimeBoundary"
+	add_child(_boundary)
+	_boundary.build(_region)
+	_sign("\uc2dc\uac04 \uacbd\uacc4 \u2014 \ub4f1\ubc18 / \ub358\uc9c0\uae30\ub85c \ub118\uc5b4\uac04\ub2e4",
+		Vector3(TimeBoundary.SEAM.x, TimeBoundary.TOP_Y + 2.0, TimeBoundary.SEAM.z + 1.2),
+		Color("bfe9ff"))
+	_sign("\ubaa8\ub798 3m",
+		Vector3(TimeBoundary.SEAM.x, TimeBoundary.TOP_Y + 1.0, TimeBoundary.SEAM.z - 5.0),
+		Color("ffe6b8"))
+	# Printed on every peer, host and client alike: the seam is built from a
+	# table rather than replicated, so the only way to know the two screens
+	# agree is to compare what each one built.
+	print("PLAYGROUND_BOUNDARY peer=%d %s" % [
+		multiplayer.get_unique_id() if multiplayer.has_multiplayer_peer() else 0,
+		_boundary.signature()])
 
 
 func _build_occluders() -> void:

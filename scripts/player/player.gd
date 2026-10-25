@@ -141,6 +141,11 @@ func _ready() -> void:
 		camera.add_child(fader)
 		fader.setup(camera, self)
 
+		var bars := StatusBars.new()
+		bars.name = "StatusBars"
+		get_tree().current_scene.add_child(bars)
+		bars.setup(self)
+
 		var panel := DebugPanel.new()
 		panel.name = "DebugPanel"
 		get_tree().current_scene.add_child(panel)
