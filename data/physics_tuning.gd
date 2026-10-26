@@ -27,7 +27,6 @@ extends Resource
 @export var dash_distance: float = 4.0
 @export var dash_duration: float = 0.18
 @export var dash_cooldown: float = 1.0
-@export var allow_dash_jump: bool = false
 
 @export_group("Climb")
 @export var climb_speed: float = 2.0
@@ -35,7 +34,6 @@ extends Resource
 @export var stamina_max: float = 100.0
 @export var stamina_climb_drain: float = 15.0
 @export var stamina_regen: float = 25.0
-@export var wall_jump_enabled: bool = false
 
 @export_group("Force")
 @export var shove_power: float = 7.0
@@ -43,6 +41,7 @@ extends Resource
 @export var throw_power: float = 11.0
 @export var throw_up_angle_deg: float = 35.0
 @export var grab_range: float = 1.5
+@export var lift_per_strength: float = 2.0
 @export var grabbed_escape_presses: int = 5
 @export var grabbed_escape_window: float = 2.0
 @export var shove_damage: float = 3.0

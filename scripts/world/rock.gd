@@ -39,6 +39,7 @@ var _state_left := 0.0
 var _sync_position := Vector3.ZERO
 var _sync_rotation := Vector3.ZERO
 var _has_state := false
+var _snap_state := false
 var _label: Label3D
 
 
@@ -130,8 +131,13 @@ func _physics_process(delta: float) -> void:
 	if not is_multiplayer_authority():
 		if _has_state:
 			# Shown, not simulated.
-			global_position = global_position.lerp(_sync_position, 1.0 - exp(-18.0 * delta))
-			rotation = rotation.lerp(_sync_rotation, 1.0 - exp(-18.0 * delta))
+			if _snap_state:
+				global_position = _sync_position
+				rotation = _sync_rotation
+				_snap_state = false
+			else:
+				global_position = global_position.lerp(_sync_position, 1.0 - exp(-18.0 * delta))
+				rotation = rotation.lerp(_sync_rotation, 1.0 - exp(-18.0 * delta))
 		return
 
 	if global_position.y < Tuning.values.kill_plane_y:
@@ -174,10 +180,7 @@ func push_state(at_position: Vector3, at_rotation: Vector3, held_by: int) -> voi
 	_sync_rotation = at_rotation
 	holder_peer = held_by
 	if not _has_state:
-		# First packet lands the rock rather than easing it in from wherever the
-		# scene put it.
-		global_position = at_position
-		rotation = at_rotation
+		_snap_state = true
 	_has_state = true
 
 
@@ -187,7 +190,11 @@ func host_grab(by_peer: int) -> bool:
 	if not is_multiplayer_authority() or holder_peer != 0:
 		return false
 	var holder := _peer_player(by_peer)
-	if holder == null:
+	if holder == null or not holder.is_grounded_state():
+		return false
+	if holder.global_position.distance_to(global_position) > Tuning.values.grab_range + Player.BODY_RADIUS:
+		return false
+	if not is_finite(holder.stats.strength) or weight > holder.stats.strength * Tuning.values.lift_per_strength:
 		return false
 	holder_peer = by_peer
 	_hold_grace = HOLD_GRACE
@@ -198,9 +205,13 @@ func host_grab(by_peer: int) -> bool:
 	return true
 
 
-func host_throw(by_peer: int, direction: Vector3, strength: float) -> void:
+func host_throw(by_peer: int, direction: Vector3) -> void:
 	if not is_multiplayer_authority() or holder_peer != by_peer:
 		return
+	var holder := _peer_player(by_peer)
+	if holder == null or not direction.is_finite():
+		return
+	var strength := holder.stats.strength
 	holder_peer = 0
 	freeze = false
 	# Heavier rock, shorter throw: the same strength to weight rule the jump
@@ -229,6 +240,12 @@ func request_grab() -> void:
 	if not is_multiplayer_authority():
 		return
 	var by_peer := multiplayer.get_remote_sender_id()
+	Net.queue_physics(_answer_grab_request.bind(by_peer))
+
+
+func _answer_grab_request(by_peer: int) -> void:
+	if not multiplayer.get_peers().has(by_peer):
+		return
 	answer_grab.rpc_id(by_peer, host_grab(by_peer))
 
 
@@ -236,17 +253,17 @@ func request_grab() -> void:
 func answer_grab(approved: bool) -> void:
 	var local := _peer_player(multiplayer.get_unique_id())
 	if local != null and local.grab != null:
-		local.grab.on_rock_answer(self, approved)
+		Net.queue_physics(local.grab.on_rock_answer.bind(self, approved))
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func request_throw(direction: Vector3, strength: float) -> void:
-	host_throw(multiplayer.get_remote_sender_id(), direction, strength)
+func request_throw(direction: Vector3) -> void:
+	Net.queue_physics(host_throw.bind(multiplayer.get_remote_sender_id(), direction))
 
 
 @rpc("any_peer", "call_remote", "reliable")
 func request_release() -> void:
-	host_release(multiplayer.get_remote_sender_id())
+	Net.queue_physics(host_release.bind(multiplayer.get_remote_sender_id()))
 
 
 # Judged on the host, as the work order says, and routed through the single

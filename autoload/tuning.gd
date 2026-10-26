@@ -7,6 +7,13 @@ extends Node
 const TUNING_PATH := "res://data/physics_tuning.tres"
 
 signal tuning_changed()
+signal debug_boundaries_changed()
+
+# Presentation preference, never imported from the host's physics tuning.
+var debug_boundaries_visible := true:
+	set(value):
+		debug_boundaries_visible = value
+		debug_boundaries_changed.emit()
 
 var values: PhysicsTuning
 

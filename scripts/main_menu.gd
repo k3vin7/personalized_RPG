@@ -73,6 +73,7 @@ func _ready() -> void:
 	quit_button.text = "종료"
 	quit_button.pressed.connect(get_tree().quit)
 	column.add_child(quit_button)
+	_set_status(Net.leave_message)
 
 
 var _address: LineEdit

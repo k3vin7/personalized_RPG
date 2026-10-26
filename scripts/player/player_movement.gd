@@ -138,14 +138,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not player.is_local():
 		return
 	if event.is_action_pressed("restart"):
-		player.respawn()
+		Net.queue_physics(player.respawn)
 		get_viewport().set_input_as_handled()
 		return
 	if player.grab != null and player.grab.is_held():
 		# Held in someone's hands: Space is the only input that still does
 		# anything, and it means "let me go".
 		if event.is_action_pressed("jump"):
-			player.grab.escape_press()
+			Net.queue_physics(player.grab.escape_press)
 		get_viewport().set_input_as_handled()
 		return
 	if player.climb != null and player.climb.is_climbing():
@@ -157,7 +157,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			player.climb.aim_at(camera.project_ray_origin(mouse), camera.project_ray_normal(mouse))
 			get_viewport().set_input_as_handled()
 		elif event.is_action_pressed("jump"):
-			player.climb.detach()
+			Net.queue_physics(player.climb.detach)
 			get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("cancel"):
@@ -170,15 +170,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("debug_shove"):
-		shove()
+		Net.queue_physics(shove)
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("grab_throw"):
-		interact()
+		Net.queue_physics(interact)
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("dash"):
-		request_dash()
+		Net.queue_physics(request_dash)
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("jump"):
@@ -279,6 +279,17 @@ func _launch_jump() -> void:
 	_jump_buffer_left = 0.0
 	_catch_buffer_left = 0.0
 	_coyote_left = 0.0
+	var launch := jump_launch_velocity()
+	_clear_intent()
+	cancel_target()
+	player.velocity = launch
+	player.floor_snap_length = 0.0
+	player.change_state(Player.State.AIRBORNE)
+	player.move_and_slide()
+
+
+# The preview and the real launch share cursor, deadzone and intent rules.
+func jump_launch_velocity() -> Vector3:
 	var horizontal := Vector3(player.velocity.x, 0.0, player.velocity.z)
 	if Tuning.values.jump_aims_at_cursor:
 		horizontal = _cursor_jump_velocity(horizontal)
@@ -289,17 +300,8 @@ func _launch_jump() -> void:
 			horizontal = _intent_direction * player.get_move_speed()
 		else:
 			horizontal = Vector3.ZERO
-	_clear_intent()
-	# A jump is a new order of its own, so the click that was taking us
-	# somewhere is dropped rather than resumed on landing.
-	cancel_target()
-	player.velocity.x = horizontal.x
-	player.velocity.z = horizontal.z
-	player.velocity.y = player.get_jump_velocity()
-	# Snapping would pull us straight back down on the launch frame.
-	player.floor_snap_length = 0.0
-	player.change_state(Player.State.AIRBORNE)
-	player.move_and_slide()
+	horizontal.y = player.get_jump_velocity()
+	return horizontal
 
 
 func _stunned_step(delta: float) -> void:

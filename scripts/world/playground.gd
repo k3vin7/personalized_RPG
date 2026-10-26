@@ -151,6 +151,13 @@ func begin_smoke() -> void:
 
 
 func _run_smoke() -> void:
+	if Net.auto_only == "B-a":
+		var checks := preload("res://scripts/tests/ba_checks.gd").new()
+		checks.name = "BaChecks"
+		# Lives through the host-disconnect scene change to verify cleanup.
+		get_tree().root.add_child(checks)
+		checks.run(self)
+		return
 	# Replication is the thing worth checking: the host spawns, every peer ends
 	# up with the same players, and each peer sees the other one move. Both
 	# characters walk back and forth for the whole window, because the two
@@ -1645,12 +1652,10 @@ func _build_time_boundary() -> void:
 	_boundary.name = "TimeBoundary"
 	add_child(_boundary)
 	_boundary.build(_region)
-	_sign("\uc2dc\uac04 \uacbd\uacc4 \u2014 \ub4f1\ubc18 / \ub358\uc9c0\uae30\ub85c \ub118\uc5b4\uac04\ub2e4",
-		Vector3(TimeBoundary.SEAM.x, TimeBoundary.TOP_Y + 2.0, TimeBoundary.SEAM.z + 1.2),
-		Color("bfe9ff"))
-	_sign("\ubaa8\ub798 3m",
-		Vector3(TimeBoundary.SEAM.x, TimeBoundary.TOP_Y + 1.0, TimeBoundary.SEAM.z - 5.0),
-		Color("ffe6b8"))
+	_sign("등반 단차 3m", Vector3(TimeBoundary.SEAM.x, TimeBoundary.TOP_Y + 2.0, TimeBoundary.SEAM.z + 1.2), Color("c8ffc8"))
+	var overlay := preload("res://scripts/debug/boundary_overlay.gd").new()
+	overlay.name = "BoundaryOverlay"
+	add_child(overlay)
 	# Printed on every peer, host and client alike: the seam is built from a
 	# table rather than replicated, so the only way to know the two screens
 	# agree is to compare what each one built.

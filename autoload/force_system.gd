@@ -45,21 +45,46 @@ func send(target: Node, event: Dictionary) -> void:
 		return
 	var authority := target.get_multiplayer_authority()
 	if authority == multiplayer.get_unique_id() or not multiplayer.has_multiplayer_peer():
-		_apply(target, event)
+		Net.queue_physics(_apply.bind(target, event.duplicate(true)))
 		return
 	receive_force.rpc_id(authority, target.get_path(), event)
 
 
 @rpc("any_peer", "call_remote", "reliable")
 func receive_force(path: NodePath, event: Dictionary) -> void:
+	if not valid_sender(multiplayer.get_remote_sender_id(), event):
+		print("PLAYGROUND_FORCE_REJECTED sender=%d" % multiplayer.get_remote_sender_id())
+		return
 	var target := get_node_or_null(path)
 	if target == null or target.get_multiplayer_authority() != multiplayer.get_unique_id():
 		return
-	_apply(target, event)
+	Net.queue_physics(_apply.bind(target, event.duplicate(true)))
+
+
+# B-a authenticates the existing owner-to-owner protocol. B-b/c will replace
+# client result messages with server-approved results and intent requests.
+func valid_sender(sender: int, event: Dictionary) -> bool:
+	if sender <= 0:
+		return false
+	var direction: Variant = event.get("direction")
+	if not direction is Vector3 or not (direction as Vector3).is_finite():
+		return false
+	for field in ["base_power", "source_strength", "damage", "stun_time"]:
+		var value: Variant = event.get(field)
+		if not (value is float or value is int) or not is_finite(float(value)) or float(value) < 0.0:
+			return false
+	if sender == 1:
+		return true
+	if int(event.get("source_peer", 0)) != sender or not int(event.get("kind", -1)) in [Kind.SHOVE, Kind.THROW]:
+		return false
+	if not is_instance_valid(Net.spawn_root):
+		return false
+	var source := Net.spawn_root.get_node_or_null(str(sender)) as Player
+	return source != null and source.state != Player.State.DEAD
 
 
 func _apply(target: Node, event: Dictionary) -> void:
-	if target.has_method("apply_force_event"):
+	if is_instance_valid(target) and target.has_method("apply_force_event"):
 		target.apply_force_event(event)
 
 

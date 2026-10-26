@@ -24,6 +24,25 @@ var auto_smoke := false
 # minutes long, which is too slow to iterate one stage against.
 var auto_only := ""
 var _spawn_index := 0
+var leave_message := ""
+var _leaving := false
+var _physics_requests: Array[Callable] = []
+
+
+# Input and RPC callbacks enqueue work; only a physics tick changes bodies.
+func queue_physics(request: Callable) -> void:
+	if not _leaving:
+		_physics_requests.append(request)
+
+
+func _physics_process(_delta: float) -> void:
+	var requests := _physics_requests.duplicate()
+	_physics_requests.clear()
+	for request: Callable in requests:
+		if _leaving or not multiplayer.has_multiplayer_peer():
+			break
+		if request.is_valid():
+			request.call()
 
 
 func _ready() -> void:
@@ -66,6 +85,7 @@ func _parse_cmdline() -> void:
 
 func host(port: int) -> bool:
 	_reset_peer()
+	leave_message = ""
 	_peer = ENetMultiplayerPeer.new()
 	var error := _peer.create_server(port, MAX_PEERS - 1)
 	if error != OK:
@@ -80,6 +100,7 @@ func host(port: int) -> bool:
 
 func join(address: String, port: int) -> bool:
 	_reset_peer()
+	leave_message = ""
 	_peer = ENetMultiplayerPeer.new()
 	var error := _peer.create_client(address, port)
 	if error != OK:
@@ -92,8 +113,24 @@ func join(address: String, port: int) -> bool:
 
 
 func leave(message: String) -> void:
+	if _leaving:
+		return
+	_leaving = true
+	leave_message = message
+	_physics_requests.clear()
+	var scene := get_tree().current_scene
+	if scene != null:
+		scene.process_mode = Node.PROCESS_MODE_DISABLED
+	_finish_leave.call_deferred()
+
+
+func _finish_leave() -> void:
+	# Detach the old world before removing its multiplayer peer. Its physics
+	# callbacks must never run with a missing peer, including during teardown.
+	get_tree().change_scene_to_file("res://scenes/main.tscn")
 	_reset_peer()
-	session_left.emit(message)
+	_leaving = false
+	session_left.emit(leave_message)
 
 
 # Called by the playground once it is in the tree and knows where players go.
@@ -152,7 +189,7 @@ func _on_peer_connected(peer_id: int) -> void:
 
 
 func _on_peer_disconnected(peer_id: int) -> void:
-	if not multiplayer.is_server() or spawn_root == null:
+	if _leaving or not multiplayer.has_multiplayer_peer() or not multiplayer.is_server() or not is_instance_valid(spawn_root):
 		return
 	var node := spawn_root.get_node_or_null(str(peer_id))
 	if node != null:
@@ -176,6 +213,9 @@ func _on_server_disconnected() -> void:
 func _reset_peer() -> void:
 	is_hosting = false
 	spawn_root = null
+	spawner = null
+	spawn_points.clear()
+	_physics_requests.clear()
 	if multiplayer.multiplayer_peer != null:
 		multiplayer.multiplayer_peer.close()
 	multiplayer.multiplayer_peer = null

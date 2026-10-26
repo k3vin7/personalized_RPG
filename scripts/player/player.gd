@@ -92,6 +92,7 @@ var _weapon_node: Node3D
 # off the body.
 var overhead_note := ""
 var _teleport_blind_left := 0.0
+var _respawning := false
 
 
 func _enter_tree() -> void:
@@ -183,9 +184,13 @@ func is_local() -> bool:
 func change_state(new_state: int) -> void:
 	if state == new_state:
 		return
+	if is_local() and state == State.DEAD and not _respawning:
+		return
 	var previous := state
 	state = new_state
 	_update_fall_tracking(previous, new_state)
+	if state != new_state:
+		return # Landing damage may have entered DEAD recursively.
 	_update_hold(previous, new_state)
 	_apply_state_colour()
 	state_changed.emit(new_state)
@@ -345,7 +350,9 @@ func respawn() -> void:
 	if movement != null:
 		movement.cancel_target()
 	_fall_tracking = false
+	_respawning = true
 	change_state(State.IDLE)
+	_respawning = false
 	print("PLAYGROUND_RESPAWN peer=%s at=%s" % [name, global_position])
 
 
@@ -399,7 +406,7 @@ func _apply_weapon(kind: int) -> void:
 # Where every push in the game lands. ForceSystem routes here, and nothing else
 # writes this body's velocity from outside.
 func apply_force_event(event: Dictionary) -> void:
-	if not is_local():
+	if not is_local() or state == State.DEAD:
 		return
 	var direction: Vector3 = event.get("direction", Vector3.ZERO)
 	var change := direction * ForceSystem.power_for(event, stats.total_weight())
@@ -424,6 +431,8 @@ func apply_force_event(event: Dictionary) -> void:
 			change_state(State.AIRBORNE)
 		if not ally or Tuning.values.ally_ground_damage:
 			_take_damage(damage)
+		if state == State.DEAD:
+			return
 		var stun := float(event.get("stun_time", 0.0))
 		if stun > 0.0 and (not ally or Tuning.values.ally_ground_stun):
 			_apply_stun(stun)
@@ -440,6 +449,8 @@ func _take_damage(amount: float) -> void:
 
 
 func _apply_stun(seconds: float) -> void:
+	if state == State.DEAD:
+		return
 	_stun_left = seconds
 	if movement != null:
 		movement.cancel_target()
@@ -476,14 +487,21 @@ func accept_grab(by_peer: int) -> bool:
 	var holder := _peer_player(by_peer)
 	if holder == null or grab == null:
 		return false
+	if not holder.is_grounded_state() or holder.global_position.distance_to(global_position) > Tuning.values.grab_range + BODY_RADIUS:
+		return false
 	grab.become_held(holder)
 	return true
 
 
 @rpc("any_peer", "call_remote", "reliable")
 func request_grab(by_peer: int) -> void:
-	if not is_local():
+	var sender := multiplayer.get_remote_sender_id()
+	if not is_local() or sender <= 0 or sender != by_peer:
 		return
+	Net.queue_physics(_answer_grab_request.bind(sender))
+
+
+func _answer_grab_request(by_peer: int) -> void:
 	var answer := accept_grab(by_peer)
 	var asker := _peer_player(by_peer)
 	if asker != null:
@@ -494,7 +512,12 @@ func request_grab(by_peer: int) -> void:
 func grab_answer(target_path: NodePath, approved: bool) -> void:
 	if not is_local() or grab == null:
 		return
-	grab.on_player_answer(get_node_or_null(target_path) as Player, approved)
+	var target := get_node_or_null(target_path) as Player
+	# Until B-c moves approval to the server, only the requested body's owner
+	# may answer this particular outstanding request.
+	if target == null or multiplayer.get_remote_sender_id() != target.get_multiplayer_authority():
+		return
+	Net.queue_physics(grab.on_player_answer.bind(target, approved))
 
 
 func _peer_player(peer_id: int) -> Player:

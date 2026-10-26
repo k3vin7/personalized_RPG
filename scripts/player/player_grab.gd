@@ -22,6 +22,7 @@ var held: Node3D
 var holder: Player
 
 var _pending_rock: Rock
+var _pending_player: Player
 var _hold_grace := 0.0
 var _escape_presses := 0
 var _escape_left := 0.0
@@ -43,7 +44,7 @@ func is_held() -> bool:
 # DOC: ground only, inside grab_range, and of everything in reach the one
 # nearest the cursor. Nothing in reach means nothing happens.
 func grab() -> bool:
-	if is_holding() or is_held() or not player.is_grounded_state():
+	if is_holding() or is_held() or not player.is_grounded_state() or is_instance_valid(_pending_rock) or is_instance_valid(_pending_player):
 		return false
 	var aim := player.movement.cursor_point()
 	var best: Node3D = null
@@ -88,32 +89,43 @@ func _candidates() -> Array[Node3D]:
 # the same function decides either way.
 func _ask_rock(rock: Rock) -> void:
 	var me := player.get_multiplayer_authority()
+	_pending_rock = rock
 	if rock.is_multiplayer_authority() or not multiplayer.has_multiplayer_peer():
 		on_rock_answer(rock, rock.host_grab(me))
 		return
-	_pending_rock = rock
 	rock.request_grab.rpc_id(1)
 
 
 func on_rock_answer(rock: Rock, approved: bool) -> void:
+	if not is_instance_valid(rock) or _pending_rock != rock:
+		return
 	_pending_rock = null
-	if not approved or is_holding():
+	if not approved:
 		print("PLAYGROUND_GRAB by=%s rock=%s refused" % [player.name, rock.name])
+		return
+	if is_holding() or not player.is_grounded_state():
+		if multiplayer.is_server():
+			rock.host_release(player.get_multiplayer_authority())
+		else:
+			rock.request_release.rpc_id(1)
 		return
 	_take_hold(rock)
 
 
 # A player is asked on their own machine, which is where the refusals live.
 func _ask_player(target: Player) -> void:
+	_pending_player = target
 	if target.is_local() or not multiplayer.has_multiplayer_peer():
-		if target.accept_grab(player.get_multiplayer_authority()):
-			_take_hold(target)
+		on_player_answer(target, target.accept_grab(player.get_multiplayer_authority()))
 		return
 	target.request_grab.rpc_id(target.get_multiplayer_authority(), player.get_multiplayer_authority())
 
 
 func on_player_answer(target: Player, approved: bool) -> void:
-	if not approved or target == null or is_holding():
+	if not is_instance_valid(target) or _pending_player != target:
+		return
+	_pending_player = null
+	if not approved or is_holding() or not player.is_grounded_state():
 		return
 	_take_hold(target)
 
@@ -153,9 +165,9 @@ func throw() -> bool:
 	if target is Rock:
 		var rock := target as Rock
 		if rock.is_multiplayer_authority() or not multiplayer.has_multiplayer_peer():
-			rock.host_throw(player.get_multiplayer_authority(), direction, player.stats.strength)
+			rock.host_throw(player.get_multiplayer_authority(), direction)
 		else:
-			rock.request_throw.rpc_id(1, direction, player.stats.strength)
+			rock.request_throw.rpc_id(1, direction)
 	else:
 		# A thrown team mate arrives in the air with no damage, which is what
 		# lets a third player push them again on the way.
