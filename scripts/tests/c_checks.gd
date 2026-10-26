@@ -229,6 +229,11 @@ func _jump_checks() -> void:
 		(onto["landed"] as Vector3).y, onto["miss"], (onto["plan"] as Dictionary).get("apex", 0.0), onto["speed"]])
 	expect((onto["landed"] as Vector3).y > 1.5, "the_jump_got_up_onto_the_step")
 	expect(float(onto["miss"]) < 0.6, "and_landed_near_the_cursor_on_top_of_it")
+	# A target this body can actually reach is never drawn as the limit: that
+	# was the bug -- a 1 m step asked for an apex the budget could not pay for,
+	# so the ring went orange while the jump worked, and the ring was drawn at
+	# the cursor while the body landed short of it.
+	expect(not bool((onto["plan"] as Dictionary).get("clamped", true)), "a_reachable_step_is_not_marked_as_the_limit")
 
 	# What the height actually buys, measured on the level's own step ladder.
 	# Reported rather than asserted: which steps a jump should reach is a
@@ -240,9 +245,11 @@ func _jump_checks() -> void:
 		var rung_top := Vector3(rung.global_position.x, float(height) + Player.BODY_HALF_HEIGHT, rung.global_position.z)
 		var tried := await _jump_at(Vector3(rung_top.x, 0.9, 11.0), rung_top)
 		var landed_on: bool = (tried["landed"] as Vector3).y > float(height) + 0.5
-		note("step ladder: %.1f m rung -> landed y=%.2f on_top=%s apex asked %.2f speed %.2f/%.2f" % [
+		var rung_plan: Dictionary = tried["plan"]
+		note("step ladder: %.1f m rung -> landed y=%.2f on_top=%s | apex %.2f launch %.2f/%.2f at_limit=%s" % [
 			float(height), (tried["landed"] as Vector3).y, landed_on,
-			(tried["plan"] as Dictionary).get("apex", 0.0), tried["speed"], cap])
+			rung_plan.get("apex", 0.0), tried["plan_speed"], cap,
+			rung_plan.get("clamped", false)])
 
 	expect(float(near["plan_speed"]) <= cap + 0.01 and float(far["plan_speed"]) <= cap + 0.01
 		and float(standing["plan_speed"]) <= cap + 0.01 and float(beyond["plan_speed"]) <= cap + 0.01

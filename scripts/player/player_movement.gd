@@ -429,6 +429,18 @@ func _ground_step(delta: float) -> void:
 #
 # Returns the launch velocity, where that lands, and whether the cursor was out
 # of reach (which is what the ring is for).
+# The two speeds that reach (distance, rise) over the given apex: how fast
+# along the heading, and how fast up. Up comes out of the apex, forward out of
+# how long the whole arc lasts. Returned without a heading because the plan
+# below is the thing that knows which way it is facing.
+func _launch_for(apex: float, distance: float, rise: float) -> Vector2:
+	var gravity: float = maxf(Tuning.values.gravity, 0.01)
+	var up_speed := sqrt(2.0 * gravity * maxf(apex, 0.0))
+	var fall := maxf(apex - rise, 0.0)
+	var flight := up_speed / gravity + sqrt(2.0 * fall / gravity)
+	return Vector2(distance / maxf(flight, 0.01), up_speed)
+
+
 func jump_plan(aim: Vector3) -> Dictionary:
 	var gravity: float = maxf(Tuning.values.gravity, 0.01)
 	var from := player.global_position
@@ -455,34 +467,68 @@ func jump_plan(aim: Vector3) -> Dictionary:
 		}
 
 	var reach := player.leap_max_range()
-	var clamped := distance > reach
-	if clamped:
-		# Out of reach: the same direction, as far as the budget goes. The
-		# landing height is unknown out there, so it is taken as our own.
-		flat = flat.normalized() * reach
-		distance = reach
-		to = from + flat
 	var rise := to.y - from.y
+
+	# Whether a target can be hit at all has an exact answer, and it is not
+	# "is it inside the flat range": a launch at speed v can reach (d, rise)
+	# only if
+	#
+	#     v^2  >=  g * (rise + sqrt(d^2 + rise^2))
+	#
+	# which for rise = 0 is exactly the flat range, and for a step is stricter.
+	# The cheapest arc that hits it has its apex half way up that same figure.
+	var clamped := false
+	var span := sqrt(distance * distance + rise * rise)
+	if gravity * (rise + span) > cap * cap:
+		# Out of reach. The far end along this heading is where the cheapest arc
+		# runs out of budget, and that is where the ring belongs -- the cursor
+		# is not somewhere this body can land.
+		clamped = true
+		var budget := cap * cap / gravity
+		var level := budget - rise
+		if level <= absf(rise):
+			# Higher than anything this body can reach, however it is thrown.
+			# Straight up, as high as the budget goes.
+			return {
+				"launch": Vector3(0.0, cap, 0.0),
+				"landing": from,
+				"clamped": true,
+				"apex": cap * cap / (2.0 * gravity),
+			}
+		distance = sqrt(maxf(level * level - rise * rise, 0.0))
+		to = from + flat.normalized() * distance + Vector3.UP * rise
+		span = sqrt(distance * distance + rise * rise)
 
 	var t: float = clampf(distance / maxf(reach, 0.01), 0.0, 1.0)
 	var apex_at_reach := reach * 0.25
 	var apex: float = lerpf(Tuning.values.jump_min_hop_height, apex_at_reach, t)
 	# Over the lip rather than into it.
 	apex = maxf(apex, rise + Tuning.values.jump_min_hop_height)
-
-	var up_speed := sqrt(2.0 * gravity * apex)
-	var fall := maxf(apex - rise, 0.0)
-	var flight := up_speed / gravity + sqrt(2.0 * fall / gravity)
-	var forward := distance / maxf(flight, 0.01)
-	var launch := flat.normalized() * forward
-	launch.y = up_speed
-
-	# The budget has the last word. Scaling the whole launch keeps the shape of
-	# the arc and lands short, which is the honest failure.
+	# The height the distance asks for is a preference, not a requirement. When
+	# it costs more than the budget -- which a step always eventually does,
+	# because clearing it needs the apex above it -- the cheapest launch that
+	# hits the same spot is taken instead. The landing does not move, so the
+	# ring stays honest and stays green: this is a reachable jump, just a
+	# flatter one than the distance rule would have picked.
+	#
+	# That launch is the minimum-speed one: 45 degrees, tilted by half the
+	# slope to the target. Its apex is the vertical half of it, not the whole
+	# of v^2/2g -- reading it as the whole sent the arc up twice as high as it
+	# should have gone, which then did not fit either and was scaled down,
+	# landing a metre short of the ring.
+	var pair := _launch_for(apex, distance, rise)
+	if pair.length() > cap:
+		var optimum := PI * 0.25 + 0.5 * atan2(rise, maxf(distance, 0.001))
+		var cheapest := sqrt(gravity * (rise + span))
+		pair = Vector2(cheapest * cos(optimum), cheapest * sin(optimum))
+		apex = pair.y * pair.y / (2.0 * gravity)
+	var launch := flat.normalized() * pair.x
+	launch.y = pair.y
+	# Arithmetic, not a ruling: the cheapest arc is inside the budget by
+	# construction, so anything left over here is rounding.
 	var speed := launch.length()
 	if speed > cap:
 		launch *= cap / speed
-		clamped = true
 	return {
 		"launch": launch,
 		"landing": to,
