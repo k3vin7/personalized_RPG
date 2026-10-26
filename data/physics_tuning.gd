@@ -10,10 +10,11 @@ extends Resource
 @export var base_move_speed: float = 6.0
 @export var base_jump_height: float = 1.6
 @export var move_intent_timeout: float = 1.5
-# Stage C, the variable jump. A press always launches at the full height; let go
-# before jump_hold_time and the rise is cut to this share of it.
-@export var jump_tap_height_ratio: float = 0.55
-@export var jump_hold_time: float = 0.15
+# Stage C-2: the jump goes to the cursor. Inside this radius the cursor means
+# "straight up", which is a hard edge on purpose -- just outside it is the
+# lowest hop there is.
+@export var jump_inplace_radius: float = 0.8
+@export var jump_min_hop_height: float = 0.4
 # The jump goes where the cursor points. Turn it off for the documented rule,
 # where the jump keeps the heading it was already travelling on.
 @export var jump_aims_at_cursor: bool = true
@@ -28,12 +29,13 @@ extends Resource
 @export var ratio_mult_max: float = 1.3
 
 @export_group("Dash")
-# Stage C: the dash goes to the cursor, between these two, with the far end
-# scaled by the strength multiplier. dash_distance was one fixed number; it is
-# gone rather than kept beside these, so there is nothing to disagree with.
+# Stage C-2: the dash is the leap budget spent entirely sideways. Its speed is
+# v_cap times this, so strength is already in it and is not applied again; the
+# far end is that speed held for dash_time_max, and the time a dash takes comes
+# out of distance divided by speed rather than being fixed.
 @export var dash_min_distance: float = 1.2
-@export var dash_max_distance_base: float = 4.0
-@export var dash_duration: float = 0.18
+@export var dash_time_max: float = 0.4
+@export var dash_speed_mult: float = 1.0
 @export var dash_cooldown: float = 1.0
 
 @export_group("Climb")
@@ -74,6 +76,12 @@ extends Resource
 @export var server_speed_tolerance: float = 1.25
 @export var ally_ground_damage: bool = true
 @export var ally_ground_stun: bool = true
+
+@export_group("Controls")
+# 5-chapter smart key, shared by the jump and the dash (and whatever gets a
+# cursor target later). Off: the key shows the range and the landing spot and
+# the left button casts. On: the key casts at once.
+@export var smart_key_enabled: bool = false
 
 @export_group("Survival")
 @export var fall_damage_min_height: float = 4.0

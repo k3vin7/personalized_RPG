@@ -209,6 +209,13 @@ func _ready() -> void:
 	set_physics_process(true)
 
 
+# Anything the local view builds and nobody else owns. The body owns their
+# lifetime, because its parent is the spawner's path and a despawn would
+# otherwise leave them reading a freed body.
+func add_owned_view(node: Node) -> void:
+	_owned_views.append(node)
+
+
 func _free_views() -> void:
 	for node in _owned_views:
 		if is_instance_valid(node):
@@ -292,6 +299,28 @@ func get_jump_height() -> float:
 
 func get_jump_velocity() -> float:
 	return sqrt(2.0 * Tuning.values.gravity * get_jump_height())
+
+
+# DOC (4-chapter, stage C-2): one budget for every leap, and three ways to
+# spend it -- all of it up is a standing jump, half and half is the longest
+# jump, all of it sideways is the dash. It lives here rather than in the
+# movement script because the server judges speeds with it too, and a number
+# two files work out for themselves is a number they will eventually disagree
+# about.
+func leap_speed_cap() -> float:
+	var jump_max := get_jump_velocity()
+	var move_max := get_move_speed()
+	return sqrt(jump_max * jump_max + move_max * move_max)
+
+
+# The farthest a leap can reach: a launch at the cap, at 45 degrees.
+func leap_max_range() -> float:
+	var cap := leap_speed_cap()
+	return cap * cap / maxf(Tuning.values.gravity, 0.01)
+
+
+func dash_speed() -> float:
+	return leap_speed_cap() * Tuning.values.dash_speed_mult
 
 
 func get_move_speed() -> float:

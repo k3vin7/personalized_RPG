@@ -814,8 +814,10 @@ func harness_forgive_move() -> void:
 # together would either excuse a sideways sprint or accuse an honest fall.
 func move_allowance(player: Player) -> Vector2:
 	var tolerance: float = Tuning.values.server_speed_tolerance
-	var dash_speed: float = Tuning.values.dash_max_distance_base / maxf(Tuning.values.dash_duration, 0.01)
-	var horizontal := maxf(player.get_move_speed(), dash_speed)
+	# Stage C-2: the dash is the leap budget spent sideways, so the fastest a
+	# body may legitimately travel is that, worked out from the same function
+	# the body itself uses.
+	var horizontal := maxf(player.get_move_speed(), player.dash_speed())
 	# Vertical has two honest sources: our own jump, and gravity acting over
 	# the height the server watched this body reach.
 	var peer := player.get_multiplayer_authority()
