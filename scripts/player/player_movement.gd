@@ -433,8 +433,15 @@ func jump_plan(aim: Vector3) -> Dictionary:
 	var cap := player.leap_speed_cap()
 
 	if distance <= Tuning.values.jump_inplace_radius:
-		# Straight up, at the standing height.
-		var up := player.get_jump_velocity()
+		# Straight up, and the whole budget goes into it: "all of it up is a
+		# standing jump" from the same chapter. That makes a standing jump the
+		# highest thing a body can do, which it was not while this used
+		# base_jump_height on its own -- a jump aimed at a ledge three metres
+		# off asked for a 2.40 m apex while pointing at your own feet gave
+		# 1.64 m, so the cursor rewarded aiming away from where you wanted to
+		# go. base_jump_height now sets the vertical half of the budget rather
+		# than this height directly.
+		var up := player.leap_speed_cap()
 		return {
 			"launch": Vector3(0.0, up, 0.0),
 			"landing": from,

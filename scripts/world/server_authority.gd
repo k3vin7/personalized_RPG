@@ -823,7 +823,9 @@ func move_allowance(player: Player) -> Vector2:
 	var peer := player.get_multiplayer_authority()
 	var watch: Dictionary = _fall_watch.get(peer, {})
 	var drop := maxf(0.0, float(watch.get("peak", player.global_position.y)) - player.global_position.y)
-	var vertical := maxf(player.get_jump_velocity(), sqrt(2.0 * Tuning.values.gravity * drop))
+	# A standing jump now spends the whole budget upward, so the fastest a body
+	# may legitimately be climbing is the cap itself, not its jump velocity.
+	var vertical := maxf(player.leap_speed_cap(), sqrt(2.0 * Tuning.values.gravity * drop))
 	# What the server knows of a remote body's apex is a packet old, so the drop
 	# it computes can be short of the real one and an honest fall then reads as
 	# too fast. One sample's worth of gravity covers that gap. (Measured: a team

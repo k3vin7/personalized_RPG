@@ -150,7 +150,12 @@ func _jump_at(home: Vector3, aim: Vector3) -> Dictionary:
 	return {
 		"height": peak - floor_y,
 		"launch": launch,
+		# Sampled on the first airborne frame, by which time the air step has
+		# taken a step or two of gravity off it (22 m/s^2 / 120 Hz = 0.18 each).
+		# The plan's launch is the exact one, so the cap is compared with that
+		# and the sampled figure is reported beside it.
 		"speed": launch.length(),
+		"plan_speed": (_plan.get("launch", Vector3.ZERO) as Vector3).length(),
 		"landed": landed,
 		"miss": Vector2(landed.x - aim.x, landed.z - aim.z).length(),
 		"travel": Vector2(landed.x - home.x, landed.z - home.z).length(),
@@ -165,18 +170,22 @@ func _jump_checks() -> void:
 	# both have to land where the cursor was.
 	var near := await _jump_at(HOME, HOME + Vector3(2.0, 0.0, 0.0))
 	var far := await _jump_at(HOME, HOME + Vector3(4.0, 0.0, 0.0))
-	note("cursor jump: 2 m -> height %.2f miss %.2f speed %.2f | 4 m -> height %.2f miss %.2f speed %.2f (cap %.2f, reach %.2f)" % [
-		near["height"], near["miss"], near["speed"],
-		far["height"], far["miss"], far["speed"], cap, reach])
+	note("cursor jump: 2 m -> height %.2f miss %.2f launch %.2f | 4 m -> height %.2f miss %.2f launch %.2f (cap %.2f, reach %.2f)" % [
+		near["height"], near["miss"], near["plan_speed"],
+		far["height"], far["miss"], far["plan_speed"], cap, reach])
 	expect(float(near["height"]) < float(far["height"]) - 0.1, "a_nearer_cursor_is_a_lower_jump")
 	expect(float(near["miss"]) < 0.3, "the_two_metre_jump_landed_on_the_cursor")
 	expect(float(far["miss"]) < 0.3, "the_four_metre_jump_landed_on_the_cursor")
 
 	# Under the feet: straight up, at the standing height.
 	var standing := await _jump_at(HOME, HOME)
-	note("cursor under the feet: height %.2f travel %.2f speed %.2f (inplace_radius %.2f)" % [
-		standing["height"], standing["travel"], standing["speed"], Tuning.values.jump_inplace_radius])
-	expect(absf(float(standing["height"]) - _local.get_jump_height()) < 0.15, "the_in_place_jump_keeps_its_height")
+	note("cursor under the feet: height %.2f travel %.2f launch %.2f (sampled %.2f) (cap %.2f -> apex %.2f, inplace_radius %.2f)" % [
+		standing["height"], standing["travel"], standing["plan_speed"], standing["speed"], cap,
+		cap * cap / (2.0 * Tuning.values.gravity), Tuning.values.jump_inplace_radius])
+	# The whole budget, upward: the apex a launch at the cap reaches.
+	var cap_apex := cap * cap / (2.0 * Tuning.values.gravity)
+	expect(absf(float(standing["height"]) - cap_apex) < 0.2, "the_in_place_jump_spends_the_whole_budget")
+	expect(absf(float(standing["plan_speed"]) - cap) < 0.05, "and_launches_at_the_cap")
 	expect(float(standing["travel"]) < 0.3, "the_in_place_jump_goes_nowhere_sideways")
 	expect(float(standing["height"]) > float(far["height"]), "the_in_place_jump_is_the_highest")
 
@@ -215,9 +224,23 @@ func _jump_checks() -> void:
 	expect((onto["landed"] as Vector3).y > 1.5, "the_jump_got_up_onto_the_step")
 	expect(float(onto["miss"]) < 0.6, "and_landed_near_the_cursor_on_top_of_it")
 
-	expect(float(near["speed"]) <= cap + 0.2 and float(far["speed"]) <= cap + 0.2
-		and float(standing["speed"]) <= cap + 0.2 and float(beyond["speed"]) <= cap + 0.2
-		and float(onto["speed"]) <= cap + 0.2, "every_launch_is_inside_the_cap")
+	# What the height actually buys, measured on the level's own step ladder.
+	# Reported rather than asserted: which steps a jump should reach is a
+	# tuning decision, and this is the number it should be made from.
+	for height in [0.5, 1.0, 1.5, 2.0]:
+		var rung := _world.find_child("Step_%s" % String.num(float(height), 1).replace(".", "_"), true, false) as Node3D
+		if rung == null:
+			continue
+		var rung_top := Vector3(rung.global_position.x, float(height) + Player.BODY_HALF_HEIGHT, rung.global_position.z)
+		var tried := await _jump_at(Vector3(rung_top.x, 0.9, 11.0), rung_top)
+		var landed_on: bool = (tried["landed"] as Vector3).y > float(height) + 0.5
+		note("step ladder: %.1f m rung -> landed y=%.2f on_top=%s apex asked %.2f speed %.2f/%.2f" % [
+			float(height), (tried["landed"] as Vector3).y, landed_on,
+			(tried["plan"] as Dictionary).get("apex", 0.0), tried["speed"], cap])
+
+	expect(float(near["plan_speed"]) <= cap + 0.01 and float(far["plan_speed"]) <= cap + 0.01
+		and float(standing["plan_speed"]) <= cap + 0.01 and float(beyond["plan_speed"]) <= cap + 0.01
+		and float(onto["plan_speed"]) <= cap + 0.01, "every_launch_is_inside_the_cap")
 
 
 # ------------------------------------------------- the dash is the same budget

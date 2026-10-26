@@ -8,6 +8,9 @@ extends Resource
 @export_group("Movement")
 @export var gravity: float = 22.0
 @export var base_move_speed: float = 6.0
+# The vertical half of the leap budget: v_cap is built from this and the move
+# speed. Since stage C-2 it is not the standing jump's height on its own -- a
+# standing jump spends the whole budget upward and goes higher than this.
 @export var base_jump_height: float = 1.6
 @export var move_intent_timeout: float = 1.5
 # Stage C-2: the jump goes to the cursor. Inside this radius the cursor means
