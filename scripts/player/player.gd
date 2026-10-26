@@ -84,7 +84,6 @@ var _material: StandardMaterial3D
 var _label: Label3D
 var _default_snap := 0.3
 var spawn_point := Vector3.ZERO
-var _respawn_left := 0.0
 var _stun_left := 0.0
 # Fall measurement. The peak is tracked rather than the launch height: a push
 # that throws you up and then down has to count the whole drop.
@@ -101,13 +100,17 @@ var overhead_note := ""
 var holder_peer := 0
 var _teleport_blind_left := 0.0
 var _respawning := false
+# See _physics_process: how long a stale "you are dead" copy is ignored after
+# the server has told this body to come back.
+const RESPAWN_ECHO_GRACE := 0.5
+var _respawn_echo_left := 0.0
 
 
-# B-d flips this to true and HP stops being the owner's to write: the Vitals
-# synchronizer's authority becomes the server, _take_damage/die move behind a
-# server ruling, and the owner keeps only the pose on the other synchronizer.
-# Everything needed for that switch is already split in two; this is the switch.
-const VITALS_OWNED_BY_SERVER := false
+# B-d threw this switch. HP and the alive flag are written by the server and
+# replicated out by the Vitals synchronizer; the pose stays on the other
+# synchronizer and stays the owner's. Nothing here writes hp any more: damage,
+# death, the fall and the way back are all rulings, and this file applies them.
+const VITALS_OWNED_BY_SERVER := true
 
 
 func _enter_tree() -> void:
@@ -222,7 +225,7 @@ func change_state(new_state: int) -> void:
 	state = new_state
 	_update_fall_tracking(previous, new_state)
 	if state != new_state:
-		return # Landing damage may have entered DEAD recursively.
+		return # A nested change (a landing, a hold) got there first.
 	_update_hold(previous, new_state)
 	_apply_state_colour()
 	state_changed.emit(new_state)
@@ -257,16 +260,17 @@ func _update_fall_tracking(previous: int, new_state: int) -> void:
 	# Caught a wall, grabbed, stunned or dead: nothing landed, so nothing hurts.
 
 
+# B-d: the drop is reported, not charged. The owner is the one that sampled
+# every frame of it, so it says where it fell from and where it landed; the
+# server checks that against the height it watched and sets the damage.
 func _resolve_fall_damage() -> void:
 	last_fall_height = maxf(0.0, _fall_peak_y - global_position.y)
-	if not Tuning.values.fall_damage_enabled:
+	if last_fall_height <= 0.0:
 		return
-	if last_fall_height <= Tuning.values.fall_damage_min_height:
-		return
-	var damage: float = (last_fall_height - Tuning.values.fall_damage_min_height) * Tuning.values.fall_damage_per_meter
-	_take_damage(damage)
-	print("PLAYGROUND_FALL_DAMAGE peer=%s height=%.2f damage=%.1f hp=%.0f" % [
-		name, last_fall_height, damage, hp])
+	ServerAuthority.submit_intent(self, ServerAuthority.Intent.FALL, {
+		"peak": _fall_peak_y,
+		"land": global_position.y,
+	})
 
 
 # The one place the strength to weight numbers turn into movement. Nothing
@@ -297,7 +301,14 @@ func is_grounded_state() -> bool:
 
 func _physics_process(delta: float) -> void:
 	if is_local():
-		_check_death(delta)
+		# The server owns the flag; this is the body catching up with it, which
+		# covers a death ruled while the result message was still in flight.
+		# The grace is the other direction: the respawn result is reliable and
+		# can arrive before the flag packet that cleared the death, and without
+		# it the body stood up and was put straight back down as dead.
+		_respawn_echo_left = maxf(0.0, _respawn_echo_left - delta)
+		if sync_dead and state != State.DEAD and _respawn_echo_left <= 0.0:
+			enter_dead_now()
 		if state == State.STUNNED:
 			_stun_left -= delta
 			if _stun_left <= 0.0:
@@ -309,7 +320,6 @@ func _physics_process(delta: float) -> void:
 		sync_position = global_position
 		sync_yaw = rotation.y
 		sync_state = state
-		sync_dead = state == State.DEAD
 		sync_strength = stats.strength
 		sync_race_weight = stats.race_weight
 		sync_gear_weight = stats.gear_weight
@@ -343,42 +353,50 @@ func _physics_process(delta: float) -> void:
 		change_state(sync_state)
 
 
-# Falling out of the world is not a special case anywhere else: the body dies
-# and comes back, and everything that was in progress is dropped.
-func _check_death(delta: float) -> void:
-	if state == State.DEAD:
-		_respawn_left -= delta
-		if _respawn_left <= 0.0:
-			respawn()
-		return
-	if global_position.y < Tuning.values.kill_plane_y:
-		die()
-
-
-func die() -> void:
+# Told by the server. The body is stopped and put in the state here, because
+# the pose is still the owner's to write; whether it died at all was decided in
+# one place, which is what B-a's "nothing overwrites DEAD" needed.
+func enter_dead_now() -> void:
 	if not is_local() or state == State.DEAD:
 		return
 	velocity = Vector3.ZERO
-	_respawn_left = Tuning.values.respawn_delay
 	if movement != null:
 		movement.cancel_target()
 	change_state(State.DEAD)
-	print("PLAYGROUND_DIED peer=%s at=(%.1f, %.1f, %.1f) velocity=(%.1f, %.1f, %.1f)" % [
-		name, global_position.x, global_position.y, global_position.z,
-		velocity.x, velocity.y, velocity.z])
 
 
 # Also the R key: a restart is the same thing as coming back from a fall, so
-# there is one path rather than two that can drift apart.
+# there is one path rather than two that can drift apart. The vitals half is
+# the server's, the mark and the state are ours.
 func respawn() -> void:
 	if not is_local():
 		return
+	if vitals_are_mine():
+		ServerAuthority.instance.server_respawn(self)
+		return
+	ServerAuthority.submit_intent(self, ServerAuthority.Intent.RESPAWN, {})
+	if not sync_dead:
+		# Alive, so this is the debug "back to a mark", and a mark is pose --
+		# which is still ours to write. It happens now and the server's half,
+		# topping the HP back up, arrives on its own.
+		#
+		# A dead body does not get this: leaving DEAD is the server's ruling and
+		# its clock, which is what keeps a death decided once.
+		apply_respawn()
+
+
+# The owner's half of a respawn, run once the server has cleared the vitals.
+func apply_respawn() -> void:
+	if not is_local():
+		return
+	# Our copy of the server's flag, brought forward by one packet. The server
+	# set it false before sending this; the replica confirms it a moment later.
+	sync_dead = false
+	_respawn_echo_left = RESPAWN_ECHO_GRACE
 	global_position = _free_spawn_point()
 	velocity = Vector3.ZERO
-	hp = stats.max_hp
 	stamina = Tuning.values.stamina_max
 	floor_snap_length = _default_snap
-	_respawn_left = 0.0
 	if movement != null:
 		movement.cancel_target()
 	_fall_tracking = false
@@ -438,12 +456,10 @@ func _apply_weapon(kind: int) -> void:
 # Where every push in the game lands. ForceSystem routes here, and nothing else
 # writes this body's velocity from outside.
 func apply_force_event(event: Dictionary) -> void:
-	if not is_local() or state == State.DEAD:
+	if not is_local() or state == State.DEAD or sync_dead:
 		return
 	var direction: Vector3 = event.get("direction", Vector3.ZERO)
 	var change := direction * ForceSystem.power_for(event, stats.total_weight())
-	var ally := bool(event.get("is_ally_source", false))
-	var damage := float(event.get("damage", 0.0))
 	if grab != null:
 		# 7-6: being pushed frees a held body and empties a holder's hands. The
 		# force then applies to whatever state that left us in.
@@ -455,34 +471,22 @@ func apply_force_event(event: Dictionary) -> void:
 		# Already flying: the push bends the arc and costs nothing, which is
 		# what makes throwing a team mate a thing you can help with.
 		velocity += change
-		if not ally:
-			_take_damage(damage)
 	else:
 		velocity = change
 		if change.y > ForceSystem.UPWARD_LAUNCH:
 			change_state(State.AIRBORNE)
-		if not ally or Tuning.values.ally_ground_damage:
-			_take_damage(damage)
-		if state == State.DEAD:
-			return
-		var stun := float(event.get("stun_time", 0.0))
-		if stun > 0.0 and (not ally or Tuning.values.ally_ground_stun):
+		# B-d: whether this hurt, and whether it stuns, was decided by the
+		# server before the event was sent. stun_apply is that verdict.
+		var stun := float(event.get("stun_apply", 0.0))
+		if stun > 0.0:
 			_apply_stun(stun)
 	print("PLAYGROUND_FORCE peer=%s power=%.2f airborne=%s hp=%.0f vel=(%.2f, %.2f, %.2f) y=%.2f" % [
 		name, change.length(), state == State.AIRBORNE, hp,
 		velocity.x, velocity.y, velocity.z, global_position.y])
 
 
-func _take_damage(amount: float) -> void:
-	if amount <= 0.0:
-		return
-	hp = maxf(0.0, hp - amount)
-	if hp <= 0.0:
-		die()
-
-
 func _apply_stun(seconds: float) -> void:
-	if state == State.DEAD:
+	if state == State.DEAD or sync_dead:
 		return
 	_stun_left = seconds
 	if movement != null:

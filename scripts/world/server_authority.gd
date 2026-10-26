@@ -24,6 +24,10 @@ enum Intent {
 	THROW,
 	DROP,
 	ESCAPE,
+	# B-d: a fall is reported, not claimed. The owner says where it fell from
+	# and where it landed; the server checks that against what it watched.
+	FALL,
+	RESPAWN,
 }
 
 # Anything that can be picked up joins this group and offers
@@ -51,6 +55,16 @@ const INTENT_RANGE_SLACK := 1.5
 # A scarecrow has no stats resource of its own.
 const DUMMY_WEIGHT := 12.0
 
+# How far a reported fall may differ from the one the server watched before the
+# server stops believing it. A client's own peak is the better number -- it is
+# the one that owns the body and samples every frame -- so it is used unless it
+# disagrees with the replicated history by more than this.
+const FALL_REPORT_TOLERANCE := 1.5
+
+# A landing seen by the server keeps its peak around this long, because the
+# owner's report can arrive either side of the server seeing the landing.
+const FALL_PEAK_HOLD := 0.6
+
 # Found by the player scripts, which are spawned under Players and have no
 # scene-tree relationship to this node.
 static var instance: ServerAuthority
@@ -72,6 +86,13 @@ var _heartbeat_left := 0.0
 
 # peer -> seconds of shove cooldown left. The server's, not the client's.
 var _shove_cooldown := {}
+
+# B-d vitals bookkeeping, all server side.
+# peer -> {peak: float, tracking: bool, hold: float}
+var _fall_watch := {}
+# peer -> seconds until the body comes back
+var _respawn_left := {}
+var fall_mismatches := 0
 
 
 func _ready() -> void:
@@ -277,6 +298,10 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 			result = _rule_drop(actor)
 		Intent.ESCAPE:
 			result = _rule_escape(actor)
+		Intent.FALL:
+			result = _rule_fall(actor, payload)
+		Intent.RESPAWN:
+			result = _rule_respawn(actor)
 	if result == null:
 		return _refuse(sender, kind, "refused")
 	granted_intents += 1
@@ -298,8 +323,12 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 			return _direction_of(payload) != Vector3.ZERO
 		Intent.GRAB:
 			return _target_for(payload) != null
-		Intent.DROP, Intent.ESCAPE:
+		Intent.DROP, Intent.ESCAPE, Intent.RESPAWN:
 			return true
+		Intent.FALL:
+			return payload.has("peak") and payload.has("land") \
+				and is_finite(float(payload.get("peak", INF))) \
+				and is_finite(float(payload.get("land", INF)))
 	return false
 
 
@@ -511,7 +540,188 @@ func send_force(target: Node, event: Dictionary) -> void:
 		var person_peer := (target as Player).get_multiplayer_authority()
 		if _holds.has(person_peer):
 			_end_hold(person_peer, "holder_pushed")
+		# B-d: the damage and the stun are decided here and the HP is written
+		# here. What goes out to the owner is the push, and a stun to apply.
+		_rule_hurt(target as Player, event)
 	ForceSystem.send(target, event)
+
+
+# 4-chapter damage table. A team mate is any other player while the playground
+# is all field; party membership arrives in stage D.
+func _rule_hurt(target: Player, event: Dictionary) -> void:
+	event["stun_apply"] = 0.0
+	if target.sync_dead:
+		return
+	var ally := bool(event.get("is_ally_source", false))
+	var damage := float(event.get("damage", 0.0))
+	if target.state == Player.State.AIRBORNE:
+		# Already flying: a team mate's push is free, anyone else's hurts, and
+		# nothing stuns in the air.
+		if not ally:
+			server_damage(target, damage, "force")
+		return
+	if not ally or Tuning.values.ally_ground_damage:
+		server_damage(target, damage, "force")
+	if target.sync_dead:
+		return
+	var stun := float(event.get("stun_time", 0.0))
+	if stun > 0.0 and (not ally or Tuning.values.ally_ground_stun):
+		event["stun_apply"] = stun
+
+
+# ------------------------------------------------------------------ vitals
+# B-d: HP and the alive flag are the server's to write, and the Vitals
+# synchronizer replicates them outward. The owner still writes its own pose,
+# so a death is "the server says you are dead" plus "your machine puts the
+# body in the DEAD state".
+
+func server_set_hp(player: Player, value: float) -> void:
+	if player == null or not is_judge():
+		return
+	player.hp = clampf(value, 0.0, player.stats.max_hp)
+
+
+func server_damage(player: Player, amount: float, cause: String) -> void:
+	if player == null or not is_judge() or amount <= 0.0 or player.sync_dead:
+		return
+	server_set_hp(player, player.hp - amount)
+	if player.hp <= 0.0:
+		server_kill(player, cause)
+
+
+# The one place a body dies, and it only happens once: B-a's rule that nothing
+# overwrites DEAD now has a single writer to go with it.
+func server_kill(player: Player, cause: String) -> void:
+	if player == null or not is_judge() or player.sync_dead:
+		return
+	var peer := player.get_multiplayer_authority()
+	server_set_hp(player, 0.0)
+	player.sync_dead = true
+	_respawn_left[peer] = Tuning.values.respawn_delay
+	if _holds.has(peer):
+		_end_hold(peer, "holder_died")
+	var holder_peer := holder_of(player)
+	if holder_peer != 0:
+		_end_hold(holder_peer, "target_dead")
+	print("PLAYGROUND_DIED peer=%s cause=%s at=(%.1f, %.1f, %.1f)" % [
+		player.name, cause, player.global_position.x, player.global_position.y,
+		player.global_position.z])
+	if player.is_local():
+		player.enter_dead_now()
+	else:
+		enter_dead.rpc_id(peer)
+
+
+# tell_owner is false only when the owner has already put the body on a mark
+# itself: a mark is pose, and pose is the owner's. Telling it again would move
+# the body a second time, a round trip later, over whatever it was doing by
+# then -- which is exactly what it did before this argument existed.
+func server_respawn(player: Player, tell_owner := true) -> void:
+	if player == null or not is_judge():
+		return
+	var peer := player.get_multiplayer_authority()
+	server_set_hp(player, player.stats.max_hp)
+	player.sync_dead = false
+	_respawn_left.erase(peer)
+	_fall_watch.erase(peer)
+	if _holds.has(peer):
+		_end_hold(peer, "holder_respawned")
+	if not tell_owner:
+		return
+	if player.is_local():
+		player.apply_respawn()
+	else:
+		apply_respawn.rpc_id(peer)
+
+
+# Server -> owner. The body's own machine puts it in the state and stops it,
+# because the pose is still the owner's.
+@rpc("any_peer", "call_remote", "reliable")
+func enter_dead() -> void:
+	if not result_is_server_sent("enter_dead", multiplayer.get_remote_sender_id()):
+		return
+	var actor := actor_for(multiplayer.get_unique_id())
+	if actor != null and actor.is_local():
+		Net.queue_physics(actor.enter_dead_now)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func apply_respawn() -> void:
+	if not result_is_server_sent("apply_respawn", multiplayer.get_remote_sender_id()):
+		return
+	var actor := actor_for(multiplayer.get_unique_id())
+	if actor != null and actor.is_local():
+		Net.queue_physics(actor.apply_respawn)
+
+
+# R, and the way back from a fall. The owner asked for this one: an alive body
+# has already moved itself, so only the vitals need clearing, while a dead one
+# is waiting to be told -- leaving DEAD is this ruling and nothing else.
+func _rule_respawn(actor: Player) -> Variant:
+	server_respawn(actor, actor.sync_dead)
+	return true
+
+
+# The owner reports where it fell from and where it landed. The server checks
+# that against the height it watched the body reach, and the damage is its own.
+func _rule_fall(actor: Player, payload: Dictionary) -> Variant:
+	if actor.sync_dead:
+		return null
+	var peer := actor.get_multiplayer_authority()
+	var claimed := maxf(0.0, float(payload["peak"]) - float(payload["land"]))
+	var watch: Dictionary = _fall_watch.get(peer, {})
+	var watched_peak := float(watch.get("peak", actor.global_position.y))
+	var observed := maxf(0.0, watched_peak - actor.global_position.y)
+	var height := claimed
+	if absf(claimed - observed) > FALL_REPORT_TOLERANCE:
+		# The report does not match the body the server watched. The history
+		# wins and the disagreement is a line in the log.
+		height = observed
+		fall_mismatches += 1
+		print("PLAYGROUND_FALL_MISMATCH peer=%s claimed=%.2f observed=%.2f used=%.2f" % [
+			actor.name, claimed, observed, height])
+	actor.last_fall_height = height
+	if not Tuning.values.fall_damage_enabled or height <= Tuning.values.fall_damage_min_height:
+		return true
+	var damage: float = (height - Tuning.values.fall_damage_min_height) * Tuning.values.fall_damage_per_meter
+	server_damage(actor, damage, "fall")
+	print("PLAYGROUND_FALL_DAMAGE peer=%s height=%.2f damage=%.1f hp=%.0f" % [
+		actor.name, height, damage, actor.hp])
+	return true
+
+
+# Watched once per physics step, for every body: the height it reached, whether
+# it has fallen out of the world, and when a dead one comes back.
+func _watch_vitals(delta: float) -> void:
+	if not is_instance_valid(Net.spawn_root):
+		return
+	for node in Net.spawn_root.get_children():
+		var player := node as Player
+		if player == null:
+			continue
+		var peer := player.get_multiplayer_authority()
+		var y := player.global_position.y
+		var watch: Dictionary = _fall_watch.get(peer, {"peak": y, "tracking": false, "hold": 0.0})
+		if player.state == Player.State.AIRBORNE:
+			watch["peak"] = maxf(float(watch["peak"]), y) if bool(watch["tracking"]) else y
+			watch["tracking"] = true
+			watch["hold"] = FALL_PEAK_HOLD
+		else:
+			watch["tracking"] = false
+			watch["hold"] = maxf(0.0, float(watch["hold"]) - delta)
+			if float(watch["hold"]) <= 0.0:
+				watch["peak"] = y
+		_fall_watch[peer] = watch
+
+		if player.sync_dead:
+			_respawn_left[peer] = maxf(0.0, float(_respawn_left.get(peer, 0.0)) - delta)
+			if float(_respawn_left[peer]) <= 0.0:
+				server_respawn(player)
+			continue
+		# Out of the world. Checked here rather than on the owner so that one
+		# place decides a death, from the position the server has.
+		if y < Tuning.values.kill_plane_y:
+			server_kill(player, "kill_plane")
 
 
 # ------------------------------------------------------------ the exceptions
@@ -524,6 +734,7 @@ func _physics_process(delta: float) -> void:
 	for peer: int in _shove_cooldown.keys():
 		_shove_cooldown[peer] = maxf(0.0, float(_shove_cooldown[peer]) - delta)
 	_enforce_holds(delta)
+	_watch_vitals(delta)
 	if _view_dirty:
 		_rebuild_view()
 		_push_view()

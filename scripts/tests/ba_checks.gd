@@ -85,15 +85,25 @@ func _local_checks() -> void:
 		kill_slider.value = -24.0
 		expect(is_equal_approx(Tuning.values.kill_plane_y, -24.0), "negative_slider_updates_resource")
 		kill_slider.value = -20.0
-	await tick_request(func() -> void:
-		_local.hp = 1.0
-		_local.apply_force_event(ForceSystem.make_event(ForceSystem.Kind.DEBUG, Vector3.RIGHT, 1.0, 0.0, 1, false, 2.0, 1.0))
-		_local.change_state(Player.State.STUNNED)
-		expect(_local.state == Player.State.DEAD and _local.hp == 0.0, "lethal_force_stays_dead")
-		_local.apply_force_event(ForceSystem.make_event(ForceSystem.Kind.DEBUG, Vector3.UP, 10.0, 0.0, 1, false))
-		expect(_local.state == Player.State.DEAD and _local.velocity == Vector3.ZERO, "dead_body_ignores_force")
-		_local.respawn()
-		expect(_local.state == Player.State.IDLE and _local.hp == _local.stats.max_hp, "explicit_respawn_still_works"))
+	# B-a's rule -- lethal damage lands on DEAD and nothing overwrites it -- is
+	# unchanged, but B-d moved the ruling: damage is written by the judge when
+	# it sends a force, so the force is sent through the judge rather than
+	# handed to the body. That makes this a server-side check; the same rule
+	# for a client's body is measured in bd_checks, where the server rules on
+	# a death and the owner is told.
+	if multiplayer.is_server():
+		var judge := ServerAuthority.instance
+		await tick_request(func() -> void:
+			judge.server_set_hp(_local, 1.0)
+			judge.send_force(_local, ForceSystem.make_event(
+				ForceSystem.Kind.DEBUG, Vector3.RIGHT, 1.0, 0.0, 1, false, 2.0, 1.0))
+			_local.change_state(Player.State.STUNNED)
+			expect(_local.state == Player.State.DEAD and _local.hp == 0.0, "lethal_force_stays_dead")
+			judge.send_force(_local, ForceSystem.make_event(
+				ForceSystem.Kind.DEBUG, Vector3.UP, 10.0, 0.0, 1, false))
+			expect(_local.state == Player.State.DEAD and _local.velocity == Vector3.ZERO, "dead_body_ignores_force")
+			_local.respawn()
+			expect(_local.state == Player.State.IDLE and _local.hp == _local.stats.max_hp, "explicit_respawn_still_works"))
 	var terrain := _world.get_node("TimeBoundary") as TimeBoundary
 	var overlay := _world.get_node("BoundaryOverlay") as Node3D
 	expect(terrain.get_node_or_null("SeamPane") == null and terrain.get_node_or_null("SeamDust") == null, "old_boundary_effects_removed")

@@ -165,6 +165,12 @@ func _run_smoke() -> void:
 		get_tree().root.add_child(checks)
 		checks.run(self)
 		return
+	if Net.auto_only == "B-d":
+		var bd := preload("res://scripts/tests/bd_checks.gd").new()
+		bd.name = "BdChecks"
+		get_tree().root.add_child(bd)
+		bd.run(self)
+		return
 	if Net.auto_only == "B-c":
 		var bc := preload("res://scripts/tests/bc_checks.gd").new()
 		bc.name = "BcChecks"
@@ -211,6 +217,10 @@ func _run_smoke() -> void:
 				await _run_stage7_checks(local)
 			elif Net.auto_only == "6":
 				await _run_stage6_checks(local)
+				# The kill plane and R were only reachable from the full suite,
+				# which is minutes long. B-d rules on both, so the one stage
+				# that measures them is reachable on its own now.
+				await _run_respawn_checks(local)
 			elif Net.auto_only == "2":
 				await _run_stage2_checks(local)
 		else:
@@ -651,6 +661,8 @@ func _run_stage6_checks(local: Player) -> void:
 		peak = maxf(peak, local.global_position.y)
 		if local.is_grounded_state():
 			break
+	for _frame in range(4):
+		await get_tree().physics_frame
 	print("PLAYGROUND_STAGE6_THROWN peak=%.2f hp=%.0f-%.0f-%.0f fall=%.2f" % [
 		peak, before_hp, after_launch, local.hp, local.last_fall_height])
 	local.hp = local.stats.max_hp
@@ -672,6 +684,10 @@ func _drop_from(local: Player, height: float) -> Dictionary:
 		waited += get_physics_process_delta_time()
 		if local.is_grounded_state():
 			break
+	# B-d: the landing is reported to the judge, which rules on the damage in
+	# the next physics step. Read on the landing frame the HP is still full.
+	for _frame in range(4):
+		await get_tree().physics_frame
 	return {"before": before, "after": local.hp, "fall": local.last_fall_height}
 
 

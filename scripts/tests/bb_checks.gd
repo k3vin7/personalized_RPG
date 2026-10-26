@@ -89,11 +89,13 @@ func _structure_checks() -> void:
 		vitals_fields.has(".:hp") and vitals_fields.has(".:sync_dead") and not pose_fields.has(".:hp"),
 		"hp_replicated_separately_from_pose")
 	expect(pose_fields.has(".:sync_position") and pose_fields.has(".:sync_state"), "pose_fields_unchanged")
-	# B-b keeps the owner writing both; B-d flips only the Vitals one.
+	# B-b made the seam; B-d threw the switch. The pose synchronizer is still
+	# the owner's and the Vitals one is the server's, which is the split this
+	# check exists to hold on to.
 	expect(
-		_local.vitals_authority() == _local.get_multiplayer_authority()
-			and vitals.get_multiplayer_authority() == _local.get_multiplayer_authority(),
-		"vitals_still_owner_written_in_b_b")
+		vitals.get_multiplayer_authority() == 1 and _local.vitals_authority() == 1
+			and pose.get_multiplayer_authority() == _local.get_multiplayer_authority(),
+		"vitals_server_written_pose_owner_written")
 	await get_tree().physics_frame
 
 

@@ -234,7 +234,10 @@ func _on_body_entered(body: Node) -> void:
 	direction.y = maxf(direction.y, 0.15)
 	# No one's strength behind it once it has left the hand: a rock in flight is
 	# an environmental force, so source_strength is 0.
-	ForceSystem.send(body, ForceSystem.make_event(
+	# Through the judge, not straight at the force system: B-d made the damage
+	# a ruling, and send_force() is where it is made. Sent directly, a rock hit
+	# knocked a person about and cost them nothing.
+	ServerAuthority.instance.send_force(body, ForceSystem.make_event(
 		ForceSystem.Kind.KNOCKBACK,
 		direction,
 		speed * HIT_POWER_PER_SPEED,
