@@ -72,6 +72,13 @@ func _ready() -> void:
 	rack.position = Vector3(0.0, 0.0, 16.0)
 	add_child(rack)
 
+	# 3-chapter structure: the judge is a sibling of Players, not a child of a
+	# player. Every peer carries it so the intent path resolves on both ends;
+	# only the server peer rules on anything.
+	var authority := ServerAuthority.new()
+	authority.name = "ServerAuthority"
+	add_child(authority)
+
 	_players_root = Node3D.new()
 	_players_root.name = "Players"
 	add_child(_players_root)
@@ -157,6 +164,12 @@ func _run_smoke() -> void:
 		# Lives through the host-disconnect scene change to verify cleanup.
 		get_tree().root.add_child(checks)
 		checks.run(self)
+		return
+	if Net.auto_only == "B-b":
+		var bb := preload("res://scripts/tests/bb_checks.gd").new()
+		bb.name = "BbChecks"
+		get_tree().root.add_child(bb)
+		bb.run(self)
 		return
 	# Replication is the thing worth checking: the host spawns, every peer ends
 	# up with the same players, and each peer sees the other one move. Both

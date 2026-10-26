@@ -249,8 +249,12 @@ func _answer_grab_request(by_peer: int) -> void:
 	answer_grab.rpc_id(by_peer, host_grab(by_peer))
 
 
-@rpc("authority", "call_remote", "reliable")
+# A result message: only the host decides whether a rock was taken, so a
+# client sending this is refused in our own code rather than only by the engine.
+@rpc("any_peer", "call_remote", "reliable")
 func answer_grab(approved: bool) -> void:
+	if not ServerAuthority.result_is_server_sent("answer_grab", multiplayer.get_remote_sender_id()):
+		return
 	var local := _peer_player(multiplayer.get_unique_id())
 	if local != null and local.grab != null:
 		Net.queue_physics(local.grab.on_rock_answer.bind(self, approved))

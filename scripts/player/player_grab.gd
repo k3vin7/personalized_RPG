@@ -23,6 +23,7 @@ var holder: Player
 
 var _pending_rock: Rock
 var _pending_player: Player
+var _pending_left := 0.0
 var _hold_grace := 0.0
 var _escape_presses := 0
 var _escape_left := 0.0
@@ -43,6 +44,10 @@ func is_held() -> bool:
 
 # DOC: ground only, inside grab_range, and of everything in reach the one
 # nearest the cursor. Nothing in reach means nothing happens.
+#
+# B-b: picking the target is still the client's (it is the one with the cursor),
+# but the pick is now stated as an intent and the hold only starts if the
+# server lets it through.
 func grab() -> bool:
 	if is_holding() or is_held() or not player.is_grounded_state() or is_instance_valid(_pending_rock) or is_instance_valid(_pending_player):
 		return false
@@ -61,10 +66,40 @@ func grab() -> bool:
 	if best == null:
 		print("PLAYGROUND_GRAB by=%s none_in_reach" % player.name)
 		return false
-	if best is Rock:
-		_ask_rock(best as Rock)
+	# Marked pending at submit time so a second G cannot ask twice while the
+	# first intent is still in the air. Nothing answers a refusal, so the mark
+	# is cleared by INTENT_TIMEOUT below.
+	_mark_pending(best)
+	ServerAuthority.submit_intent(
+		player, ServerAuthority.Intent.GRAB, {"target": best.get_path()})
+	return true
+
+
+func _mark_pending(target: Node3D) -> void:
+	_pending_left = ServerAuthority.INTENT_TIMEOUT
+	if target is Rock:
+		_pending_rock = target as Rock
 	else:
-		_ask_player(best as Player)
+		_pending_player = target as Player
+
+
+func _clear_pending() -> void:
+	_pending_rock = null
+	_pending_player = null
+	_pending_left = 0.0
+
+
+# Authorised: runs on the owner's machine inside a physics step. The owner-side
+# approval below (the rock's host, or the grabbed player's own machine) stays
+# where it is until B-c moves it into ServerAuthority.
+func begin_hold(target: Node3D) -> bool:
+	if not is_instance_valid(target) or is_holding() or is_held() or not player.is_grounded_state():
+		_clear_pending()
+		return false
+	if target is Rock:
+		_ask_rock(target as Rock)
+	else:
+		_ask_player(target as Player)
 	return true
 
 
@@ -90,6 +125,7 @@ func _candidates() -> Array[Node3D]:
 func _ask_rock(rock: Rock) -> void:
 	var me := player.get_multiplayer_authority()
 	_pending_rock = rock
+	_pending_left = ServerAuthority.INTENT_TIMEOUT
 	if rock.is_multiplayer_authority() or not multiplayer.has_multiplayer_peer():
 		on_rock_answer(rock, rock.host_grab(me))
 		return
@@ -100,6 +136,7 @@ func on_rock_answer(rock: Rock, approved: bool) -> void:
 	if not is_instance_valid(rock) or _pending_rock != rock:
 		return
 	_pending_rock = null
+	_pending_left = 0.0
 	if not approved:
 		print("PLAYGROUND_GRAB by=%s rock=%s refused" % [player.name, rock.name])
 		return
@@ -115,6 +152,7 @@ func on_rock_answer(rock: Rock, approved: bool) -> void:
 # A player is asked on their own machine, which is where the refusals live.
 func _ask_player(target: Player) -> void:
 	_pending_player = target
+	_pending_left = ServerAuthority.INTENT_TIMEOUT
 	if target.is_local() or not multiplayer.has_multiplayer_peer():
 		on_player_answer(target, target.accept_grab(player.get_multiplayer_authority()))
 		return
@@ -125,6 +163,7 @@ func on_player_answer(target: Player, approved: bool) -> void:
 	if not is_instance_valid(target) or _pending_player != target:
 		return
 	_pending_player = null
+	_pending_left = 0.0
 	if not approved or is_holding() or not player.is_grounded_state():
 		return
 	_take_hold(target)
@@ -155,10 +194,25 @@ func become_held(by: Player) -> void:
 
 
 # DOC: direction is the cursor's heading, tilted up by throw_up_angle_deg.
+# B-b: the aim is the client's, the release is the server's to allow.
 func throw() -> bool:
 	if not is_holding():
 		return false
 	var direction := throw_direction()
+	if direction == Vector3.ZERO:
+		return false
+	var allowed: Variant = ServerAuthority.submit_intent(
+		player, ServerAuthority.Intent.THROW, {"direction": direction})
+	# A client's throw lands a round trip later; the host's is already done.
+	return allowed if allowed is bool else true
+
+
+# Authorised: runs on the owner's machine inside a physics step.
+func release_throw(direction: Vector3) -> bool:
+	if not is_holding():
+		return false
+	if direction == Vector3.ZERO:
+		direction = throw_direction()
 	var target := held
 	held = null
 	player.change_state(Player.State.IDLE)
@@ -212,7 +266,16 @@ func drop() -> void:
 
 
 # DOC: Space, grabbed_escape_presses times inside grabbed_escape_window.
+# B-b: each press is an intent; the server allows it and the count is kept on
+# the held body's own machine until B-c owns the contest.
 func escape_press() -> void:
+	if not is_held():
+		return
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.ESCAPE, {})
+
+
+# Authorised: runs on the owner's machine inside a physics step.
+func count_escape_press() -> void:
 	if not is_held():
 		return
 	if _escape_left <= 0.0:
@@ -259,6 +322,12 @@ func _physics_process(delta: float) -> void:
 	if not player.is_local():
 		return
 	_hold_grace = maxf(0.0, _hold_grace - delta)
+	if _pending_left > 0.0:
+		_pending_left -= delta
+		if _pending_left <= 0.0:
+			# Refused, or the answer was lost. Either way the hand is free to
+			# try again rather than stuck pending for the rest of the session.
+			_clear_pending()
 
 	if is_held():
 		if not is_instance_valid(holder) or (_hold_grace == 0.0 and holder.state != Player.State.GRABBING):

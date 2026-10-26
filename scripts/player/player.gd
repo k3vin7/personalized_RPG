@@ -59,6 +59,11 @@ var hp: float = 100.0
 var sync_position := Vector3.ZERO
 var sync_yaw := 0.0
 var sync_state: int = State.IDLE
+
+# Replicated by the Vitals synchronizer, alongside hp, rather than by the pose
+# one. It says the same thing as sync_state == DEAD today; in B-d it becomes
+# the server's word on it and sync_state keeps only the pose.
+var sync_dead := false
 # The stats travel too: a shove is worked out from the pusher's strength
 # against the target's weight, so every peer needs the target's numbers.
 var sync_strength := 10.0
@@ -95,6 +100,13 @@ var _teleport_blind_left := 0.0
 var _respawning := false
 
 
+# B-d flips this to true and HP stops being the owner's to write: the Vitals
+# synchronizer's authority becomes the server, _take_damage/die move behind a
+# server ruling, and the owner keeps only the pose on the other synchronizer.
+# Everything needed for that switch is already split in two; this is the switch.
+const VITALS_OWNED_BY_SERVER := false
+
+
 func _enter_tree() -> void:
 	# The node is named after the peer, so every peer works out the authority
 	# for itself with no extra message.
@@ -102,6 +114,22 @@ func _enter_tree() -> void:
 	# already in the scene as a child, and a synchronizer created in code during
 	# spawn processing never gets a network id at all.
 	set_multiplayer_authority(name.to_int())
+	# Pose and vitals are replicated by two separate synchronizers so the two
+	# can have different owners. Today both belong to the owning client, which
+	# is the behaviour B-b keeps; the seam is what B-b adds.
+	var vitals := get_node_or_null("Vitals")
+	if vitals != null:
+		vitals.set_multiplayer_authority(1 if VITALS_OWNED_BY_SERVER else name.to_int())
+
+
+# Who may write HP and the alive flag. One place to read, so no caller has to
+# know which stage we are in.
+func vitals_authority() -> int:
+	return 1 if VITALS_OWNED_BY_SERVER else get_multiplayer_authority()
+
+
+func vitals_are_mine() -> bool:
+	return vitals_authority() == multiplayer.get_unique_id() or not multiplayer.has_multiplayer_peer()
 
 
 func _ready() -> void:
@@ -278,6 +306,7 @@ func _physics_process(delta: float) -> void:
 		sync_position = global_position
 		sync_yaw = rotation.y
 		sync_state = state
+		sync_dead = state == State.DEAD
 		sync_strength = stats.strength
 		sync_race_weight = stats.race_weight
 		sync_gear_weight = stats.gear_weight
@@ -513,9 +542,14 @@ func grab_answer(target_path: NodePath, approved: bool) -> void:
 	if not is_local() or grab == null:
 		return
 	var target := get_node_or_null(target_path) as Player
-	# Until B-c moves approval to the server, only the requested body's owner
-	# may answer this particular outstanding request.
-	if target == null or multiplayer.get_remote_sender_id() != target.get_multiplayer_authority():
+	# The one result message not yet sent by the server: whether a person may
+	# be picked up is still ruled on that person's own machine. So the check
+	# here is "the body that was asked, and no one else" instead of "the
+	# server". B-c moves the ruling into ServerAuthority and this becomes
+	# result_is_server_sent() like the rest.
+	var sender := multiplayer.get_remote_sender_id()
+	if target == null or sender != target.get_multiplayer_authority():
+		ServerAuthority.note_rejected_result("grab_answer", sender)
 		return
 	Net.queue_physics(grab.on_player_answer.bind(target, approved))
 

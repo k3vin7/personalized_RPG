@@ -316,17 +316,38 @@ func _stunned_step(delta: float) -> void:
 
 # Judged here, on the pusher's own client, as the authority table says. What it
 # sends is a request; the target's own machine works out what it does.
+# The key press states an intent and stops there. The hit test below only runs
+# once the server has let it through, and B-c moves that test itself across.
 func shove() -> int:
 	if not player.is_grounded_state() or _shove_cooldown_left > 0.0:
 		return 0
+	var forward := shove_direction()
+	if forward == Vector3.ZERO:
+		return 0
+	# Charged on the press rather than on the result: a refused intent still
+	# costs the cooldown, which is what stops a client spamming the door. The
+	# server takes the cooldown over in B-c.
+	_shove_cooldown_left = SHOVE_COOLDOWN
+	var hits: Variant = ServerAuthority.submit_intent(
+		player, ServerAuthority.Intent.SHOVE, {"direction": forward})
+	return int(hits) if hits is int else 0
+
+
+func shove_direction() -> Vector3:
 	var forward := cursor_direction()
 	if forward.length_squared() < 0.01:
 		forward = -player.global_transform.basis.z
 		forward.y = 0.0
 		if forward.length_squared() < 0.01:
-			return 0
+			return Vector3.ZERO
 		forward = forward.normalized()
-	_shove_cooldown_left = SHOVE_COOLDOWN
+	return forward
+
+
+# Authorised: runs on the owner's machine inside a physics step.
+func apply_shove(forward: Vector3) -> int:
+	if forward == Vector3.ZERO:
+		return 0
 	player.snap_facing(forward)
 
 	var shape := SphereShape3D.new()
@@ -412,6 +433,8 @@ func _cursor_jump_velocity(current: Vector3) -> Vector3:
 func interact() -> bool:
 	if player.grab != null and player.grab.is_holding():
 		return player.grab.throw()
+	# The weapon rack is a local prop with no force behind it, so it does not
+	# go through the force door. Weapon approval is its own stage.
 	for node in player.get_tree().get_nodes_in_group(WeaponRack.INTERACT_GROUP):
 		if node.has_method("interact") and node.interact(player):
 			return true
