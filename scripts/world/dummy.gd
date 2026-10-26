@@ -16,6 +16,10 @@ const STATE_INTERVAL := 0.05
 
 var home := Vector3.ZERO
 var hp := MAX_HP
+# A read-only copy of a row in ServerAuthority's hold table. A scarecrow joins
+# the table in B-c so that one table covers every kind of body; being picked up
+# is enabled in stage E, where can_grab() stops refusing it.
+var holder_peer := 0
 var sync_position := Vector3.ZERO
 var sync_hp := MAX_HP
 
@@ -40,6 +44,7 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	home = global_position
 	sync_position = global_position
+	add_to_group(ServerAuthority.HOLDABLE_GROUP)
 	collision_layer = LAYER
 	# Was terrain only, which is why a player walked straight through a
 	# scarecrow and two scarecrows could stand in the same spot.
@@ -84,6 +89,10 @@ func apply_force_event(event: Dictionary) -> void:
 	_settle_left = RETURN_DELAY
 	_refresh()
 	print("PLAYGROUND_DUMMY_HIT name=%s hp=%.0f push=%.2f" % [name, hp, velocity.length()])
+
+
+func set_hold_display(peer: int) -> void:
+	holder_peer = peer
 
 
 func _physics_process(delta: float) -> void:

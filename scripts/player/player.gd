@@ -96,6 +96,9 @@ var _weapon_node: Node3D
 # A short line under the name: escape progress, and anything else worth reading
 # off the body.
 var overhead_note := ""
+# B-c: a read-only copy of a row in ServerAuthority's hold table, written by
+# set_hold_display() on every peer and decided nowhere else.
+var holder_peer := 0
 var _teleport_blind_left := 0.0
 var _respawning := false
 
@@ -141,6 +144,7 @@ func _ready() -> void:
 	# bother picking up, and a thrown one has to be able to knock you about.
 	collision_mask = Layers.SOLID_PLAYER
 	floor_snap_length = _default_snap
+	add_to_group(ServerAuthority.HOLDABLE_GROUP)
 	_build_body()
 	sync_position = global_position
 	spawn_point = global_position
@@ -224,14 +228,13 @@ func change_state(new_state: int) -> void:
 	state_changed.emit(new_state)
 
 
-# 7-6: a holder who is stunned, thrown, killed or walks off an edge drops what
-# it was carrying rather than throwing it, and a body that stops being GRABBED
-# forgets its holder. Both live here so no caller has to remember them.
+# 7-6 used to be enforced here, by each machine watching its own state: a
+# holder that stopped being GRABBING dropped what it held. B-c moved the ruling
+# to the hold table, which sees the stun, the throw, the death and the fall as
+# one case, so all that is left here is tidying the local display.
 func _update_hold(previous: int, new_state: int) -> void:
 	if grab == null:
 		return
-	if previous == State.GRABBING and new_state != State.GRABBING:
-		grab.drop()
 	if previous == State.GRABBED and new_state != State.GRABBED:
 		grab.clear_holder()
 
@@ -465,8 +468,9 @@ func apply_force_event(event: Dictionary) -> void:
 		var stun := float(event.get("stun_time", 0.0))
 		if stun > 0.0 and (not ally or Tuning.values.ally_ground_stun):
 			_apply_stun(stun)
-	print("PLAYGROUND_FORCE peer=%s power=%.2f airborne=%s hp=%.0f" % [
-		name, change.length(), state == State.AIRBORNE, hp])
+	print("PLAYGROUND_FORCE peer=%s power=%.2f airborne=%s hp=%.0f vel=(%.2f, %.2f, %.2f) y=%.2f" % [
+		name, change.length(), state == State.AIRBORNE, hp,
+		velocity.x, velocity.y, velocity.z, global_position.y])
 
 
 func _take_damage(amount: float) -> void:
@@ -504,54 +508,11 @@ func set_overhead_note(text: String) -> void:
 	_apply_state_colour()
 
 
-# 7-6: every refusal a grab can meet is decided here, on the machine that owns
-# this body. Two people reaching at once means the second request finds the
-# first one already answered.
-func accept_grab(by_peer: int) -> bool:
-	if not is_local() or state == State.DEAD or state == State.GRABBED:
-		return false
-	if grab != null and grab.is_holding():
-		# Already carrying someone: a chain of held bodies is not a thing.
-		return false
-	var holder := _peer_player(by_peer)
-	if holder == null or grab == null:
-		return false
-	if not holder.is_grounded_state() or holder.global_position.distance_to(global_position) > Tuning.values.grab_range + BODY_RADIUS:
-		return false
-	grab.become_held(holder)
-	return true
-
-
-@rpc("any_peer", "call_remote", "reliable")
-func request_grab(by_peer: int) -> void:
-	var sender := multiplayer.get_remote_sender_id()
-	if not is_local() or sender <= 0 or sender != by_peer:
-		return
-	Net.queue_physics(_answer_grab_request.bind(sender))
-
-
-func _answer_grab_request(by_peer: int) -> void:
-	var answer := accept_grab(by_peer)
-	var asker := _peer_player(by_peer)
-	if asker != null:
-		asker.grab_answer.rpc_id(by_peer, get_path(), answer)
-
-
-@rpc("any_peer", "call_remote", "reliable")
-func grab_answer(target_path: NodePath, approved: bool) -> void:
-	if not is_local() or grab == null:
-		return
-	var target := get_node_or_null(target_path) as Player
-	# The one result message not yet sent by the server: whether a person may
-	# be picked up is still ruled on that person's own machine. So the check
-	# here is "the body that was asked, and no one else" instead of "the
-	# server". B-c moves the ruling into ServerAuthority and this becomes
-	# result_is_server_sent() like the rest.
-	var sender := multiplayer.get_remote_sender_id()
-	if target == null or sender != target.get_multiplayer_authority():
-		ServerAuthority.note_rejected_result("grab_answer", sender)
-		return
-	Net.queue_physics(grab.on_player_answer.bind(target, approved))
+# Written by ServerAuthority's hold table and by nothing else. A person being
+# carried is shown by their own GRABBED state, which their machine sets when it
+# reads the row; this is the other direction, for everyone else's screen.
+func set_hold_display(peer: int) -> void:
+	holder_peer = peer
 
 
 func _peer_player(peer_id: int) -> Player:

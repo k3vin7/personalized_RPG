@@ -165,6 +165,12 @@ func _run_smoke() -> void:
 		get_tree().root.add_child(checks)
 		checks.run(self)
 		return
+	if Net.auto_only == "B-c":
+		var bc := preload("res://scripts/tests/bc_checks.gd").new()
+		bc.name = "BcChecks"
+		get_tree().root.add_child(bc)
+		bc.run(self)
+		return
 	if Net.auto_only == "B-b":
 		var bb := preload("res://scripts/tests/bb_checks.gd").new()
 		bb.name = "BbChecks"
@@ -392,7 +398,7 @@ func _run_stage5_checks(local: Player) -> void:
 		ForceSystem.Kind.SHOVE, Vector3(1.0, 0.25, 0.0).normalized(),
 		Tuning.values.shove_power, 10.0, 1, true,
 		Tuning.values.shove_damage, Tuning.values.shove_stun_time)
-	ForceSystem.send(local, ally_push)
+	ServerAuthority.instance.send_force(local, ally_push)
 	await get_tree().physics_frame
 	print("PLAYGROUND_STAGE5_GROUND state=%s hp=%.0f-%.0f speed=%.2f" % [
 		Player.State.keys()[local.state], hp_before, local.hp,
@@ -407,7 +413,7 @@ func _run_stage5_checks(local: Player) -> void:
 	await get_tree().create_timer(0.3).timeout
 	hp_before = local.hp
 	var before_speed := Vector2(local.velocity.x, local.velocity.z).length()
-	ForceSystem.send(local, ally_push)
+	ServerAuthority.instance.send_force(local, ally_push)
 	await get_tree().physics_frame
 	print("PLAYGROUND_STAGE5_AIR state=%s hp=%.0f-%.0f speed=%.2f-%.2f" % [
 		Player.State.keys()[local.state], hp_before, local.hp,
@@ -633,7 +639,7 @@ func _run_stage6_checks(local: Player) -> void:
 	await _settle(local, Vector3(0.0, 1.0, 11.0))
 	local.hp = local.stats.max_hp
 	var before_hp := local.hp
-	ForceSystem.send(local, ForceSystem.make_event(
+	ServerAuthority.instance.send_force(local, ForceSystem.make_event(
 		ForceSystem.Kind.THROW, Vector3.UP, 18.0, 0.0, 1, true, 0.0, 0.0))
 	await get_tree().physics_frame
 	var after_launch := local.hp
@@ -1026,10 +1032,13 @@ func _run_audit(local: Player) -> void:
 	# Numbers that are written out twice, in files that do not import each
 	# other. They agree today; printed so that the day they stop agreeing is a
 	# line in the log rather than a thing someone notices in play.
-	print("PLAYGROUND_AUDIT_SHARED hold_grace rock=%.2f grab=%.2f | state_interval rock=%.2f dummy=%.2f | dummy_weight=%.1f" % [
-		Rock.HOLD_GRACE, PlayerGrab.HOLD_GRACE,
+	# B-c removed two of these by moving the hold to one table: there is one
+	# grace now, and one weight for a scarecrow, so there is nothing left for
+	# the two files to disagree about.
+	print("PLAYGROUND_AUDIT_SHARED hold_grace judge=%.2f | state_interval rock=%.2f dummy=%.2f | dummy_weight=%.1f" % [
+		ServerAuthority.HOLD_GRACE,
 		Rock.STATE_INTERVAL, Dummy.STATE_INTERVAL,
-		Dummy.MAX_HP * 0.2])
+		ServerAuthority.DUMMY_WEIGHT])
 
 	# Everything that can be stood on, pushed or thrown, with what it collides
 	# with. A pair that appears in neither mask passes through.
@@ -1093,6 +1102,41 @@ func _ground_y(space: PhysicsDirectSpaceState3D, from: Vector3) -> float:
 
 # Stage 7 gates. The rock half runs on the host alone; the team mate half needs
 # the second peer, which co-operates from _client_support.
+# Puts a rock in the local player's hands the way a person would: the prop is
+# placed within reach (harness setup, as a level designer would), then G is
+# pressed and the hold is waited for.
+#
+# This replaces calling the rock's own grab function with the body standing
+# metres away, which is what hid 2-chapter bug 5: once B-a made the distance
+# and pending checks real, that shortcut was refused, the rock never left the
+# ground, and three "rock versus player" legs measured a rock that had never
+# been thrown. The fix is in the harness, as the work order allows for.
+func _hand_grab(local: Player, rock: Rock) -> bool:
+	var settling := 0.0
+	while settling < 2.5 and not local.is_grounded_state():
+		if local.state == Player.State.DEAD:
+			local.respawn()
+		await get_tree().physics_frame
+		settling += get_physics_process_delta_time()
+	rock.global_position = local.global_position + Vector3(0.0, 0.3, 0.0) \
+		+ (-local.global_transform.basis.z).normalized() * 0.9
+	rock.linear_velocity = Vector3.ZERO
+	rock.angular_velocity = Vector3.ZERO
+	for _frame in range(8):
+		await get_tree().physics_frame
+	local.movement.set_aim_override(rock.global_position)
+	local.movement.interact()
+	var waited := 0.0
+	while waited < 2.0 and not local.grab.is_holding():
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+	local.movement.set_aim_override(Vector3.INF)
+	if not local.grab.is_holding():
+		print("PLAYGROUND_HARNESS_HANDGRAB_FAILED rock=%s state=%s" % [
+			rock.name, Player.State.keys()[local.state]])
+	return local.grab.is_holding()
+
+
 func _run_stage7_checks(local: Player) -> void:
 	# Each rock is picked up where it lies, then carried to the measuring lane
 	# and thrown. Measured in the lane rather than on the spot because a throw
@@ -1106,6 +1150,11 @@ func _run_stage7_checks(local: Player) -> void:
 		await _settle(local, Vector3(spot.x, 1.0, spot.z + 1.1))
 		local.movement.set_aim_override(rock.global_position)
 		var picked := local.movement.interact()
+		# B-c: the hold is a row in the server's table and the body enters
+		# GRABBING when it reads that row back, which is the next physics step
+		# at the earliest. Read on the same frame it is always still IDLE.
+		for _frame in range(3):
+			await get_tree().physics_frame
 		var carrying := local.state == Player.State.GRABBING
 		local.global_position = THROW_LANE
 		await get_tree().physics_frame
@@ -1132,10 +1181,7 @@ func _run_stage7_checks(local: Player) -> void:
 		# at nine metres under the tuned 22 the rock now lands in front of it.
 		await _settle(local, Vector3(dummy.global_position.x, 1.0, dummy.global_position.z + 5.0))
 		# Brought to hand rather than walked to: the throw is what is under test.
-		rock_0.host_grab(1)
-		local.grab.on_rock_answer(rock_0, true)
-		for _frame in range(6):
-			await get_tree().physics_frame
+		await _hand_grab(local, rock_0)
 		print("PLAYGROUND_STAGE7_INHAND gap=%.2f" % rock_0.global_position.distance_to(local.hand_position()))
 		local.movement.set_aim_override(dummy.global_position)
 		# Thrown flat for this one check: at the documented 35 degrees a rock
@@ -1168,10 +1214,7 @@ func _run_stage7_checks(local: Player) -> void:
 	if rock_1 != null:
 		await _settle(local, Vector3(0.0, 1.0, 11.0))
 		var free_speed := await _travel_for(local, 1.2)
-		rock_1.host_grab(1)
-		local.grab.on_rock_answer(rock_1, true)
-		for _frame in range(6):
-			await get_tree().physics_frame
+		await _hand_grab(local, rock_1)
 		var carry_speed := await _travel_for(local, 1.2)
 		var jump_y := local.global_position.y
 		local.movement.set_aim_override(local.global_position)
@@ -1183,23 +1226,22 @@ func _run_stage7_checks(local: Player) -> void:
 			local.global_position.y - jump_y, Player.State.keys()[local.state]])
 
 		# 7-6: a holder who is stunned drops what it was carrying.
-		ForceSystem.send(local, ForceSystem.make_event(
+		ServerAuthority.instance.send_force(local, ForceSystem.make_event(
 			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.1, 0.0), Tuning.values.shove_power,
 			10.0, 1, false, 1.0, Tuning.values.shove_stun_time))
-		await get_tree().physics_frame
+		# B-c: the hold ends when the table says so, which is after
+		# ServerAuthority.HOLD_GRACE rather than on the next frame.
+		await get_tree().create_timer(ServerAuthority.HOLD_GRACE + 0.3).timeout
 		print("PLAYGROUND_STAGE7_STUNDROP state=%s holder=%d holding=%s" % [
 			Player.State.keys()[local.state], rock_1.holder_peer, local.grab.is_holding()])
 		await get_tree().create_timer(Tuning.values.shove_stun_time + 0.8).timeout
 
 		# 7-6: and so does a holder who leaves the ground.
 		await _settle(local, Vector3(0.0, 1.0, 11.0))
-		rock_1.host_grab(1)
-		local.grab.on_rock_answer(rock_1, true)
-		for _frame in range(6):
-			await get_tree().physics_frame
+		await _hand_grab(local, rock_1)
 		local.global_position += Vector3.UP * 2.0
 		local.change_state(Player.State.AIRBORNE)
-		await get_tree().physics_frame
+		await get_tree().create_timer(ServerAuthority.HOLD_GRACE + 0.3).timeout
 		print("PLAYGROUND_STAGE7_FALLDROP holder=%d holding=%s" % [
 			rock_1.holder_peer, local.grab.is_holding()])
 		await get_tree().create_timer(1.5).timeout
@@ -1209,12 +1251,16 @@ func _run_stage7_checks(local: Player) -> void:
 		for child in _players_root.get_children():
 			if String(child.name) != str(multiplayer.get_unique_id()):
 				other_peer = String(child.name).to_int()
-		var first := rock_1.host_grab(1)
-		var second := rock_1.host_grab(other_peer) if other_peer != 0 else false
-		print("PLAYGROUND_STAGE7_CONTEST first=%s second=%s holder=%d" % [first, second, rock_1.holder_peer])
-		rock_1.host_release(1)
-		if local.state == Player.State.GRABBING:
-			local.change_state(Player.State.IDLE)
+		var judge := ServerAuthority.instance
+		var other := judge.actor_for(other_peer) if other_peer != 0 else null
+		var first := await _hand_grab(local, rock_1)
+		# The second reach is refused by the row the first one wrote, not by a
+		# case of its own: that is what moving the hold into one table bought.
+		var second := judge.can_grab(other, rock_1) if other != null else false
+		print("PLAYGROUND_STAGE7_CONTEST first=%s second=%s holder=%d rows=%d other=%d" % [
+			first, second, rock_1.holder_peer, judge.hold_count(), other_peer])
+		local.grab.drop()
+		await get_tree().create_timer(0.4).timeout
 
 	await _run_stage7_team(local)
 
@@ -1253,6 +1299,13 @@ func _run_stage7_team(local: Player) -> void:
 	# lane each time: the z=8 line is open plaza from the west edge to the east,
 	# and a throw that leaves the ground invalidates the measurement.
 	var lane := THROW_LANE
+	# B-c made the lift limit real for people as well as rocks, and the heavy
+	# leg weighs 25 kg: at the default strength of 10 the limit is 20 and the
+	# hold is refused, correctly. The thrower is given the strength to lift it
+	# so that this leg keeps measuring what it was written to measure -- how
+	# far a heavier team mate flies -- rather than the limit it now meets.
+	var strength_was := local.stats.strength
+	local.stats.strength = 15.0
 	for weight in [10.0, 25.0]:
 		set_remote_weight.rpc_id(String(remote.name).to_int(), weight)
 		await get_tree().create_timer(0.5).timeout
@@ -1273,6 +1326,7 @@ func _run_stage7_team(local: Player) -> void:
 		local.movement.set_aim_override(Vector3.INF)
 		await get_tree().create_timer(1.5).timeout
 	set_remote_weight.rpc_id(String(remote.name).to_int(), 10.0)
+	local.stats.strength = strength_was
 
 	# A thrown team mate is in the air, so a shove bends their arc again.
 	if await _grab_remote(local, remote):
@@ -1281,7 +1335,7 @@ func _run_stage7_team(local: Player) -> void:
 		await get_tree().create_timer(0.35).timeout
 		var mid_air := remote.state == Player.State.AIRBORNE
 		var before := remote.global_position
-		ForceSystem.send(remote, ForceSystem.make_event(
+		ServerAuthority.instance.send_force(remote, ForceSystem.make_event(
 			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.3, 0.0), Tuning.values.shove_power,
 			local.stats.strength, 1, true, Tuning.values.shove_damage, 0.0))
 		await get_tree().create_timer(1.5).timeout
@@ -1292,7 +1346,7 @@ func _run_stage7_team(local: Player) -> void:
 
 	# 7-6: a held body that is pushed comes free and takes the push.
 	if await _grab_remote(local, remote):
-		ForceSystem.send(remote, ForceSystem.make_event(
+		ServerAuthority.instance.send_force(remote, ForceSystem.make_event(
 			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.3, 0.0), Tuning.values.shove_power,
 			local.stats.strength, 1, true, 0.0, 0.0))
 		await get_tree().create_timer(0.6).timeout
@@ -1348,17 +1402,20 @@ func _run_rock_vs_player(local: Player, remote: Player) -> void:
 		return
 	# A hit means the two surfaces met: sphere radius plus the capsule's 0.4.
 	var touching := Rock.radius_for(rock.weight) + Player.BODY_RADIUS
-	for distance in [3.0, 6.0, 9.0]:
+	# Flat at 3 m is in the list on purpose: it is the one that answers "can a
+	# thrown rock hit a person at all", separately from "does the documented
+	# 35 degree lob reach one", which at 3 to 6 m it does not.
+	for leg in [[3.0, 0.0], [3.0, 35.0], [6.0, 35.0], [9.0, 35.0], [12.0, 35.0]]:
+		var distance: float = leg[0]
+		var angle_was: float = Tuning.values.throw_up_angle_deg
+		Tuning.values.throw_up_angle_deg = leg[1]
 		if local.state == Player.State.DEAD:
 			local.respawn()
 		await _settle(local, THROW_LANE)
 		place_remote.rpc_id(String(remote.name).to_int(), THROW_LANE + Vector3(distance, 0.0, 0.0))
 		await get_tree().create_timer(1.0).timeout
 		# Brought to hand rather than walked to: the throw is what is under test.
-		rock.host_grab(1)
-		local.grab.on_rock_answer(rock, true)
-		for _frame in range(6):
-			await get_tree().physics_frame
+		await _hand_grab(local, rock)
 		var hp_before := remote.hp
 		var stood := remote.global_position
 		local.movement.set_aim_override(remote.global_position)
@@ -1377,6 +1434,7 @@ func _run_rock_vs_player(local: Player, remote: Player) -> void:
 		print("PLAYGROUND_ROCK_VS_PLAYER distance=%.0f angle=%.0f closest=%.2f touching_at=%.2f passing_height=%.2f hp=%.0f-%.0f moved=%.2f" % [
 			distance, Tuning.values.throw_up_angle_deg, closest, touching, passing_height,
 			hp_before, remote.hp, _flat(remote.global_position - stood)])
+		Tuning.values.throw_up_angle_deg = angle_was
 		# The harness putting a prop back on its mark, not game logic: the next
 		# leg has to start from the same place, and a rock left lying beside the
 		# team mate would be grabbed instead of them.

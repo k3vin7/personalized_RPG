@@ -158,7 +158,7 @@ func _forgery_checks() -> void:
 	expect(_judge.rejected_results >= rejected + 2, "forged_results_refused_and_counted")
 	expect(_judge.rejected_intents > intents, "intent_in_wrong_state_refused")
 	expect(_local.hp == hp_before and _local.state == state_before, "forged_results_had_no_effect")
-	expect(rock.holder_peer == 0, "forged_grab_answer_took_no_rock")
+	expect(rock.holder_peer == 0, "forged_hold_row_took_no_rock")
 
 
 # ------------------------------------------------------------- client side
@@ -228,9 +228,13 @@ func stage_done(name_text: String) -> void:
 @rpc("authority", "call_remote", "reliable")
 func forge(rock_path: NodePath) -> void:
 	var judge := _world.get_node("ServerAuthority") as ServerAuthority
-	judge.authorized.rpc_id(1, ServerAuthority.Intent.SHOVE, {"direction": Vector3.RIGHT})
-	var rock := get_node(rock_path) as Rock
-	rock.answer_grab.rpc_id(1, true)
+	# B-c replaced authorized() -- the result message B-b forged here -- with the
+	# hold table and plain force events, so the forgery aims at what exists now:
+	# a result that turns a body, and (below) a row in the table.
+	judge.face_shove.rpc_id(1, Vector3.RIGHT)
+	# B-c replaced the rock's own answer RPC with the server's hold table, so
+	# the second forged result is a forged row in that table.
+	judge.push_holds.rpc_id(1, [{"target": rock_path, "holder": _peer_id, "presses": 0}])
 	# And an intent the client is not in a state to make: a throw with empty
 	# hands. Attribution is the transport's, so this one is refused on state.
 	judge.receive_intent.rpc_id(1, ServerAuthority.Intent.THROW, {"direction": Vector3.RIGHT})

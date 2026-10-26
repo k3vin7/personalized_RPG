@@ -19,22 +19,18 @@ const HIT_DAMAGE := 4.0
 # A thrown rock leaves the thrower's own body alone for a moment: it starts
 # above their head and would otherwise clip them on the way out.
 const THROWER_GRACE := 0.3
-# How long a new hold is left alone before the holder is required to be in the
-# GRABBING state. A client's grab is approved here and the state that proves it
-# only comes back a round trip later: without this the host granted the hold and
-# dropped it on the very next frame, so a client could never carry a rock.
-const HOLD_GRACE := 0.6
 const STATE_INTERVAL := 0.05
 
 var weight := 10.0
 var home := Vector3.ZERO
-# 0 means nobody. The host is the only one that writes it.
+# B-c: a read-only copy of a row in ServerAuthority's hold table. 0 means
+# nobody. Only set_hold_display() writes it, on every peer alike, and nothing
+# in here decides it.
 var holder_peer := 0
 
 var _hit_times := {}
 var _thrower_peer := 0
 var _thrower_grace := 0.0
-var _hold_grace := 0.0
 var _state_left := 0.0
 var _sync_position := Vector3.ZERO
 var _sync_rotation := Vector3.ZERO
@@ -60,6 +56,7 @@ func _ready() -> void:
 	# through it.
 	collision_mask = Layers.SOLID_ROCK
 	add_to_group(GROUP)
+	add_to_group(ServerAuthority.HOLDABLE_GROUP)
 	home = global_position
 	# A sphere on a flat plane rolls for ever without these, and a thrown rock
 	# then wanders off the plaza minutes after it landed.
@@ -143,7 +140,6 @@ func _physics_process(delta: float) -> void:
 	if global_position.y < Tuning.values.kill_plane_y:
 		# Fallen out of the world. There are only three rocks, so losing one is
 		# losing a third of the stage: it comes back to its mark instead.
-		holder_peer = 0
 		freeze = false
 		global_position = home
 		linear_velocity = Vector3.ZERO
@@ -152,15 +148,13 @@ func _physics_process(delta: float) -> void:
 		return
 
 	_thrower_grace = maxf(0.0, _thrower_grace - delta)
-	_hold_grace = maxf(0.0, _hold_grace - delta)
 	if _thrower_grace == 0.0:
 		_thrower_peer = 0
 	if holder_peer != 0:
+		# Whether the hold still stands is the table's ruling, made once for
+		# every kind of held body; here the rock only rides the hand.
 		var holder := _peer_player(holder_peer)
-		if holder == null or (_hold_grace == 0.0 and holder.state != Player.State.GRABBING):
-			# The hands that were holding it are gone, stunned or falling.
-			host_release(holder_peer)
-		else:
+		if holder != null:
 			global_position = holder.hand_position()
 			linear_velocity = Vector3.ZERO
 			angular_velocity = Vector3.ZERO
@@ -168,51 +162,44 @@ func _physics_process(delta: float) -> void:
 	_state_left -= delta
 	if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 		_state_left = STATE_INTERVAL
-		# The holder travels with the state: a client cannot tell whether its own
-		# grab is still good without it, and would let go of a rock it is
-		# holding the moment its own grace ran out.
-		push_state.rpc(global_position, rotation, holder_peer)
+		# Position only. The holder used to ride along here as well, which meant
+		# two sources for one fact; it now comes from the hold table alone.
+		push_state.rpc(global_position, rotation)
 
 
 @rpc("authority", "call_remote", "unreliable_ordered")
-func push_state(at_position: Vector3, at_rotation: Vector3, held_by: int) -> void:
+func push_state(at_position: Vector3, at_rotation: Vector3) -> void:
 	_sync_position = at_position
 	_sync_rotation = at_rotation
-	holder_peer = held_by
 	if not _has_state:
 		_snap_state = true
 	_has_state = true
 
 
-# Decided on the host. Two players reaching at once means the first request to
-# arrive is the one that gets it.
-func host_grab(by_peer: int) -> bool:
-	if not is_multiplayer_authority() or holder_peer != 0:
-		return false
-	var holder := _peer_player(by_peer)
-	if holder == null or not holder.is_grounded_state():
-		return false
-	if holder.global_position.distance_to(global_position) > Tuning.values.grab_range + Player.BODY_RADIUS:
-		return false
-	if not is_finite(holder.stats.strength) or weight > holder.stats.strength * Tuning.values.lift_per_strength:
-		return false
-	holder_peer = by_peer
-	_hold_grace = HOLD_GRACE
-	freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
-	freeze = true
-	global_position = holder.hand_position()
-	print("PLAYGROUND_ROCK_GRAB rock=%s by=%d" % [name, by_peer])
-	return true
+# Written by ServerAuthority's hold table and by nothing else. On the server
+# this is also where a hold starts and stops mattering physically, because the
+# table applies the row the moment it changes.
+func set_hold_display(peer: int) -> void:
+	if holder_peer == peer:
+		return
+	holder_peer = peer
+	if not is_multiplayer_authority():
+		return
+	if peer != 0:
+		freeze_mode = RigidBody3D.FREEZE_MODE_KINEMATIC
+		freeze = true
+		linear_velocity = Vector3.ZERO
+		angular_velocity = Vector3.ZERO
+	else:
+		freeze = false
 
 
-func host_throw(by_peer: int, direction: Vector3) -> void:
-	if not is_multiplayer_authority() or holder_peer != by_peer:
+# Called by the judge, after the row is already gone. The thrower is passed in
+# rather than read back off the rock, because the row that knew it is erased by
+# the time this runs.
+func server_throw(direction: Vector3, strength: float, thrower_peer: int) -> void:
+	if not is_multiplayer_authority() or not direction.is_finite():
 		return
-	var holder := _peer_player(by_peer)
-	if holder == null or not direction.is_finite():
-		return
-	var strength := holder.stats.strength
-	holder_peer = 0
 	freeze = false
 	# Heavier rock, shorter throw: the same strength to weight rule the jump
 	# and the shove use.
@@ -220,54 +207,10 @@ func host_throw(by_peer: int, direction: Vector3) -> void:
 		strength / maxf(weight, 0.1), Tuning.values.ratio_k_jump)
 	linear_velocity = direction.normalized() * power
 	angular_velocity = Vector3(randf_range(-4.0, 4.0), 0.0, randf_range(-4.0, 4.0))
-	_thrower_peer = by_peer
+	_thrower_peer = thrower_peer
 	_thrower_grace = THROWER_GRACE
 	_hit_times.clear()
 	print("PLAYGROUND_ROCK_THROW rock=%s weight=%.0f power=%.2f" % [name, weight, power])
-
-
-func host_release(by_peer: int) -> void:
-	if not is_multiplayer_authority() or holder_peer != by_peer:
-		return
-	holder_peer = 0
-	freeze = false
-	linear_velocity = Vector3.ZERO
-	print("PLAYGROUND_ROCK_DROP rock=%s by=%d" % [name, by_peer])
-
-
-@rpc("any_peer", "call_remote", "reliable")
-func request_grab() -> void:
-	if not is_multiplayer_authority():
-		return
-	var by_peer := multiplayer.get_remote_sender_id()
-	Net.queue_physics(_answer_grab_request.bind(by_peer))
-
-
-func _answer_grab_request(by_peer: int) -> void:
-	if not multiplayer.get_peers().has(by_peer):
-		return
-	answer_grab.rpc_id(by_peer, host_grab(by_peer))
-
-
-# A result message: only the host decides whether a rock was taken, so a
-# client sending this is refused in our own code rather than only by the engine.
-@rpc("any_peer", "call_remote", "reliable")
-func answer_grab(approved: bool) -> void:
-	if not ServerAuthority.result_is_server_sent("answer_grab", multiplayer.get_remote_sender_id()):
-		return
-	var local := _peer_player(multiplayer.get_unique_id())
-	if local != null and local.grab != null:
-		Net.queue_physics(local.grab.on_rock_answer.bind(self, approved))
-
-
-@rpc("any_peer", "call_remote", "reliable")
-func request_throw(direction: Vector3) -> void:
-	Net.queue_physics(host_throw.bind(multiplayer.get_remote_sender_id(), direction))
-
-
-@rpc("any_peer", "call_remote", "reliable")
-func request_release() -> void:
-	Net.queue_physics(host_release.bind(multiplayer.get_remote_sender_id()))
 
 
 # Judged on the host, as the work order says, and routed through the single

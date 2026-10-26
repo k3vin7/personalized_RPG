@@ -3,30 +3,32 @@ extends Node
 
 # G picks something up, G throws it. Only the local player runs this.
 #
-# Both sides of a hold watch each other's replicated state rather than trading
-# release messages: the holder checks that what it is holding is still GRABBED,
-# the held body checks that its holder is still GRABBING, and either one letting
-# go is enough. That covers the holder being stunned, thrown, killed or
-# disconnected without a case for each.
+# B-c: this no longer decides anything. The server's hold table says who holds
+# what; this reads its own two rows out of that table and does the parts that
+# belong to the owner of a body -- entering GRABBING or GRABBED, and carrying
+# our own body to the hand we are held in. The approval protocol that used to
+# live here (ask the rock's host, ask the grabbed player's machine, trade
+# answers, watch each other's state to decide a hold was over) is gone: there
+# is one row and it is the server's.
 
-# How long after taking hold before that mutual check is enforced. The two
-# states are set a round trip apart, so without it every grab would cancel
-# itself on the frame it was approved.
-const HOLD_GRACE := 0.6
-const ESCAPE_PUSH := 4.0
+# A force always arrives with, or just after, the row that released us. The two
+# are separate messages and the force can be applied one physics step earlier,
+# so for this long a stale "you are still held" row is ignored. Without it the
+# follower below re-pinned the body and zeroed the recoil it had just been
+# given, and an escape read as a push of nothing.
+const FREED_GRACE := 0.4
 
 var player: Player
 
-# Never both at once: a body that has been grabbed cannot grab.
+# Both are read from the table, never assigned by this script's own decision.
 var held: Node3D
 var holder: Player
 
-var _pending_rock: Rock
-var _pending_player: Player
+# One intent at a time: a second G while the first is still in the air would
+# ask twice. Nothing answers a refusal, so the mark times out.
+var _pending_target: Node3D
 var _pending_left := 0.0
-var _hold_grace := 0.0
-var _escape_presses := 0
-var _escape_left := 0.0
+var _freed_left := 0.0
 
 
 func setup(owner_player: Player) -> void:
@@ -42,14 +44,15 @@ func is_held() -> bool:
 	return player.state == Player.State.GRABBED
 
 
+func _judge() -> ServerAuthority:
+	return ServerAuthority.instance
+
+
 # DOC: ground only, inside grab_range, and of everything in reach the one
-# nearest the cursor. Nothing in reach means nothing happens.
-#
-# B-b: picking the target is still the client's (it is the one with the cursor),
-# but the pick is now stated as an intent and the hold only starts if the
-# server lets it through.
+# nearest the cursor. Picking the target is the client's job -- it is the one
+# with the cursor -- and whether the hold may start is the server's.
 func grab() -> bool:
-	if is_holding() or is_held() or not player.is_grounded_state() or is_instance_valid(_pending_rock) or is_instance_valid(_pending_player):
+	if is_holding() or is_held() or not player.is_grounded_state() or is_instance_valid(_pending_target):
 		return false
 	var aim := player.movement.cursor_point()
 	var best: Node3D = null
@@ -66,135 +69,35 @@ func grab() -> bool:
 	if best == null:
 		print("PLAYGROUND_GRAB by=%s none_in_reach" % player.name)
 		return false
-	# Marked pending at submit time so a second G cannot ask twice while the
-	# first intent is still in the air. Nothing answers a refusal, so the mark
-	# is cleared by INTENT_TIMEOUT below.
-	_mark_pending(best)
+	_pending_target = best
+	_pending_left = ServerAuthority.INTENT_TIMEOUT
 	ServerAuthority.submit_intent(
 		player, ServerAuthority.Intent.GRAB, {"target": best.get_path()})
 	return true
 
 
-func _mark_pending(target: Node3D) -> void:
-	_pending_left = ServerAuthority.INTENT_TIMEOUT
-	if target is Rock:
-		_pending_rock = target as Rock
-	else:
-		_pending_player = target as Player
-
-
-func _clear_pending() -> void:
-	_pending_rock = null
-	_pending_player = null
-	_pending_left = 0.0
-
-
-# Authorised: runs on the owner's machine inside a physics step. The owner-side
-# approval below (the rock's host, or the grabbed player's own machine) stays
-# where it is until B-c moves it into ServerAuthority.
-func begin_hold(target: Node3D) -> bool:
-	if not is_instance_valid(target) or is_holding() or is_held() or not player.is_grounded_state():
-		_clear_pending()
-		return false
-	if target is Rock:
-		_ask_rock(target as Rock)
-	else:
-		_ask_player(target as Player)
-	return true
-
-
+# Everything holdable that is not already held, by the table's word.
 func _candidates() -> Array[Node3D]:
 	var found: Array[Node3D] = []
-	for node in player.get_tree().get_nodes_in_group(Rock.GROUP):
-		var rock := node as Rock
-		if rock != null and rock.holder_peer == 0:
-			found.append(rock)
-	if player.get_parent() != null:
-		for node in player.get_parent().get_children():
-			var other := node as Player
-			if other == null or other == player:
-				continue
-			if other.state == Player.State.GRABBED or other.state == Player.State.DEAD:
-				continue
-			found.append(other)
+	var judge := _judge()
+	if judge == null:
+		return found
+	for node in player.get_tree().get_nodes_in_group(ServerAuthority.HOLDABLE_GROUP):
+		var body := node as Node3D
+		if body == null or body == player or judge.holder_of(body) != 0:
+			continue
+		var person := body as Player
+		if person != null and (person.state == Player.State.GRABBED or person.state == Player.State.DEAD):
+			continue
+		# Scarecrows join the table in B-c but are not grabbable until stage E
+		# puts them on this list.
+		if body is Dummy:
+			continue
+		found.append(body)
 	return found
 
 
-# The host owns every rock, so a grab is a request even when we are the host:
-# the same function decides either way.
-func _ask_rock(rock: Rock) -> void:
-	var me := player.get_multiplayer_authority()
-	_pending_rock = rock
-	_pending_left = ServerAuthority.INTENT_TIMEOUT
-	if rock.is_multiplayer_authority() or not multiplayer.has_multiplayer_peer():
-		on_rock_answer(rock, rock.host_grab(me))
-		return
-	rock.request_grab.rpc_id(1)
-
-
-func on_rock_answer(rock: Rock, approved: bool) -> void:
-	if not is_instance_valid(rock) or _pending_rock != rock:
-		return
-	_pending_rock = null
-	_pending_left = 0.0
-	if not approved:
-		print("PLAYGROUND_GRAB by=%s rock=%s refused" % [player.name, rock.name])
-		return
-	if is_holding() or not player.is_grounded_state():
-		if multiplayer.is_server():
-			rock.host_release(player.get_multiplayer_authority())
-		else:
-			rock.request_release.rpc_id(1)
-		return
-	_take_hold(rock)
-
-
-# A player is asked on their own machine, which is where the refusals live.
-func _ask_player(target: Player) -> void:
-	_pending_player = target
-	_pending_left = ServerAuthority.INTENT_TIMEOUT
-	if target.is_local() or not multiplayer.has_multiplayer_peer():
-		on_player_answer(target, target.accept_grab(player.get_multiplayer_authority()))
-		return
-	target.request_grab.rpc_id(target.get_multiplayer_authority(), player.get_multiplayer_authority())
-
-
-func on_player_answer(target: Player, approved: bool) -> void:
-	if not is_instance_valid(target) or _pending_player != target:
-		return
-	_pending_player = null
-	_pending_left = 0.0
-	if not approved or is_holding() or not player.is_grounded_state():
-		return
-	_take_hold(target)
-
-
-func _take_hold(target: Node3D) -> void:
-	held = target
-	_hold_grace = HOLD_GRACE
-	if player.movement != null:
-		player.movement.cancel_target()
-	player.change_state(Player.State.GRABBING)
-	print("PLAYGROUND_GRAB by=%s target=%s" % [player.name, target.name])
-
-
-# Called on the body being grabbed, by its own machine.
-func become_held(by: Player) -> void:
-	holder = by
-	_hold_grace = HOLD_GRACE
-	_escape_presses = 0
-	_escape_left = 0.0
-	if player.climb != null and player.climb.is_climbing():
-		player.climb.detach(0.0)
-	if player.movement != null:
-		player.movement.cancel_target()
-	player.velocity = Vector3.ZERO
-	player.change_state(Player.State.GRABBED)
-	print("PLAYGROUND_GRABBED peer=%s by=%s" % [player.name, by.name])
-
-
 # DOC: direction is the cursor's heading, tilted up by throw_up_angle_deg.
-# B-b: the aim is the client's, the release is the server's to allow.
 func throw() -> bool:
 	if not is_holding():
 		return false
@@ -207,38 +110,6 @@ func throw() -> bool:
 	return allowed if allowed is bool else true
 
 
-# Authorised: runs on the owner's machine inside a physics step.
-func release_throw(direction: Vector3) -> bool:
-	if not is_holding():
-		return false
-	if direction == Vector3.ZERO:
-		direction = throw_direction()
-	var target := held
-	held = null
-	player.change_state(Player.State.IDLE)
-	if target is Rock:
-		var rock := target as Rock
-		if rock.is_multiplayer_authority() or not multiplayer.has_multiplayer_peer():
-			rock.host_throw(player.get_multiplayer_authority(), direction)
-		else:
-			rock.request_throw.rpc_id(1, direction)
-	else:
-		# A thrown team mate arrives in the air with no damage, which is what
-		# lets a third player push them again on the way.
-		ForceSystem.send(target, ForceSystem.make_event(
-			ForceSystem.Kind.THROW,
-			direction,
-			Tuning.values.throw_power,
-			player.stats.strength,
-			player.get_multiplayer_authority(),
-			true,
-			0.0,
-			0.0))
-	print("PLAYGROUND_THROW by=%s target=%s dir=(%.2f, %.2f, %.2f)" % [
-		player.name, target.name, direction.x, direction.y, direction.z])
-	return true
-
-
 func throw_direction() -> Vector3:
 	var flat := player.movement.cursor_direction()
 	if flat.length_squared() < 0.01:
@@ -249,115 +120,110 @@ func throw_direction() -> Vector3:
 	return (flat * cos(angle) + Vector3.UP * sin(angle)).normalized()
 
 
-# Dropped rather than thrown: the holder was stunned, thrown, killed or walked
-# off an edge.
+# Put down rather than thrown. Also an intent: the table is the only thing that
+# can end a hold.
 func drop() -> void:
 	if not is_holding():
 		return
-	var target := held
-	held = null
-	if target is Rock:
-		var rock := target as Rock
-		if rock.is_multiplayer_authority() or not multiplayer.has_multiplayer_peer():
-			rock.host_release(player.get_multiplayer_authority())
-		else:
-			rock.request_release.rpc_id(1)
-	print("PLAYGROUND_DROP by=%s target=%s" % [player.name, target.name])
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.DROP, {})
 
 
-# DOC: Space, grabbed_escape_presses times inside grabbed_escape_window.
-# B-b: each press is an intent; the server allows it and the count is kept on
-# the held body's own machine until B-c owns the contest.
+# DOC: Space, grabbed_escape_presses times inside grabbed_escape_window. The
+# count is kept in the server's table row, not here.
 func escape_press() -> void:
 	if not is_held():
 		return
 	ServerAuthority.submit_intent(player, ServerAuthority.Intent.ESCAPE, {})
 
 
-# Authorised: runs on the owner's machine inside a physics step.
-func count_escape_press() -> void:
-	if not is_held():
-		return
-	if _escape_left <= 0.0:
-		_escape_presses = 0
-		_escape_left = Tuning.values.grabbed_escape_window
-	_escape_presses += 1
-	_show_progress()
-	if _escape_presses < Tuning.values.grabbed_escape_presses:
-		return
-	var away := Vector3.ZERO
-	if is_instance_valid(holder):
-		away = player.global_position - holder.global_position
-	print("PLAYGROUND_ESCAPE peer=%s presses=%d" % [player.name, _escape_presses])
-	_let_go(ESCAPE_PUSH, away)
-
-
 # Leaving GRABBED by any route at all ends up here, death included.
 func clear_holder() -> void:
 	holder = null
-	_escape_presses = 0
-	_escape_left = 0.0
 	player.set_overhead_note("")
 
 
-# Any force at all frees a held body, which then takes that force in the air.
+# 7-6: any force at all frees a held body. The server guarantees it -- every
+# force it sends to a held body is preceded by that body's row being erased in
+# send_force() -- so a force arriving is proof enough that the hold is over,
+# without waiting for the row to confirm it.
 func on_force_received() -> void:
 	if is_held():
-		_let_go(0.0)
-	elif is_holding():
-		drop()
+		_freed_left = FREED_GRACE
+		_leave_held()
 
 
-func _let_go(push: float, away := Vector3.ZERO) -> void:
+func _leave_held() -> void:
 	clear_holder()
-	var flat := Vector3(away.x, 0.0, away.z)
-	if push > 0.0 and flat.length_squared() > 0.0001:
-		player.velocity = flat.normalized() * push
-	else:
-		player.velocity = Vector3.ZERO
-	player.change_state(Player.State.AIRBORNE)
+	if player.state == Player.State.GRABBED:
+		player.change_state(Player.State.AIRBORNE)
 
 
+# The owner's half of a hold, and nothing else: follow the table.
 func _physics_process(delta: float) -> void:
 	if not player.is_local():
 		return
-	_hold_grace = maxf(0.0, _hold_grace - delta)
+	_freed_left = maxf(0.0, _freed_left - delta)
 	if _pending_left > 0.0:
 		_pending_left -= delta
 		if _pending_left <= 0.0:
 			# Refused, or the answer was lost. Either way the hand is free to
-			# try again rather than stuck pending for the rest of the session.
-			_clear_pending()
+			# try again rather than staying pending for the rest of the session.
+			_pending_target = null
 
-	if is_held():
-		if not is_instance_valid(holder) or (_hold_grace == 0.0 and holder.state != Player.State.GRABBING):
-			# Whatever happened to the holder, the hold is over.
-			_let_go(0.0)
-			return
-		player.global_position = holder.hand_position()
-		player.velocity = Vector3.ZERO
-		_escape_left = maxf(0.0, _escape_left - delta)
-		if _escape_left == 0.0 and _escape_presses > 0:
-			_escape_presses = 0
-			_show_progress()
+	var judge := _judge()
+	if judge == null:
+		return
+	var holder_peer := judge.holder_of(player)
+	var my_target := judge.held_by(player.get_multiplayer_authority())
+
+	if holder_peer != 0 and _freed_left > 0.0:
+		# A force already freed us and the row saying otherwise is still in
+		# flight. If the server really does still hold us, the row outlives the
+		# grace and the branch below takes over again.
 		return
 
-	if is_holding():
-		if held is Player:
-			# The held body follows the hand on its own machine; here we only
-			# check that it is still holding on.
-			if _hold_grace == 0.0 and (held as Player).state != Player.State.GRABBED:
-				held = null
-				if player.state == Player.State.GRABBING:
-					player.change_state(Player.State.IDLE)
-		elif (held as Rock).holder_peer != player.get_multiplayer_authority() and _hold_grace == 0.0:
-			held = null
-			if player.state == Player.State.GRABBING:
-				player.change_state(Player.State.IDLE)
+	if holder_peer != 0:
+		# Being carried. Our own position is still ours to write, which is why
+		# it is written here and not by the server.
+		holder = judge.actor_for(holder_peer)
+		held = null
+		if player.state != Player.State.GRABBED:
+			if player.climb != null and player.climb.is_climbing():
+				player.climb.detach(0.0)
+			if player.movement != null:
+				player.movement.cancel_target()
+			player.change_state(Player.State.GRABBED)
+			print("PLAYGROUND_GRABBED peer=%s by=%d" % [player.name, holder_peer])
+		if is_instance_valid(holder):
+			player.global_position = holder.hand_position()
+			player.velocity = Vector3.ZERO
+		_show_progress(judge.escape_presses(player))
+		return
+
+	if player.state == Player.State.GRABBED:
+		# The row is gone: freed, escaped, thrown or the holder let go. The
+		# push that goes with it arrives as a force event of its own.
+		_leave_held()
+
+	if my_target != null:
+		if held != my_target:
+			held = my_target
+			_pending_target = null
+			_pending_left = 0.0
+			if player.movement != null:
+				player.movement.cancel_target()
+			print("PLAYGROUND_GRAB by=%s target=%s" % [player.name, my_target.name])
+		if player.state != Player.State.GRABBING and player.is_grounded_state():
+			player.change_state(Player.State.GRABBING)
+		return
+
+	held = null
+	if player.state == Player.State.GRABBING:
+		player.change_state(Player.State.IDLE)
 
 
-func _show_progress() -> void:
-	if _escape_presses <= 0:
+func _show_progress(presses: int) -> void:
+	if presses <= 0:
 		player.set_overhead_note("")
 		return
-	player.set_overhead_note("탈출 %d/%d" % [_escape_presses, int(Tuning.values.grabbed_escape_presses)])
+	player.set_overhead_note("탈출 %d/%d" % [presses, int(Tuning.values.grabbed_escape_presses)])

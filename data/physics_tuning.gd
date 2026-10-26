@@ -46,6 +46,18 @@ extends Resource
 @export var grabbed_escape_window: float = 2.0
 @export var shove_damage: float = 3.0
 @export var shove_stun_time: float = 0.4
+# Moved out of PlayerMovement in B-c, when the shove ruling became the
+# server's: a number the server judges with is a tuning value, not a constant
+# in the client's input handler. Values are the measured ones, unchanged.
+@export var shove_cooldown: float = 0.6
+@export var shove_range: float = 1.5
+@export var shove_half_angle_deg: float = 45.0
+# A jumping team mate is reached a little further than a stranger.
+@export var shove_ally_bonus: float = 0.3
+# Was ESCAPE_PUSH in PlayerGrab. 6-chapter calls it escape_recoil_power and
+# suggests 3.0; kept at the measured 4.0 so B-c changes no feel it has not
+# measured.
+@export var escape_recoil_power: float = 4.0
 @export var ally_ground_damage: bool = true
 @export var ally_ground_stun: bool = true
 

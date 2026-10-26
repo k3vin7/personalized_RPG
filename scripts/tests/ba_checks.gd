@@ -54,7 +54,11 @@ func run(world: Node3D) -> void:
 				break
 			await get_tree().create_timer(0.1).timeout
 		expect(_client_finished, "client_legitimate_requests_completed")
-		expect(is_equal_approx(_local.hp, _local.stats.max_hp - 1.0), "authenticated_client_force_preserved")
+		# B-a let a client send the force for its own shove, and checked that an
+		# authenticated one still landed. B-c took that path away entirely: the
+		# shove is ruled by the server, so a client has no way to write damage
+		# at all and the host's HP is untouched by anything the client sent.
+		expect(_local.hp == _local.stats.max_hp, "client_cannot_send_force_at_all")
 	else:
 		expect(false, "exactly_two_peers")
 	# Both persistent check nodes verify the menu and absence of world bodies.
@@ -129,22 +133,35 @@ func _local_checks() -> void:
 	await tick_request(_local.respawn)
 
 
+# The same four refusals B-a measured on the rock itself. B-c moved them into
+# the judge's single can_grab(), so that is what is asked; the outcomes are
+# unchanged, which is the point of re-running them.
 func _rock_checks() -> void:
 	var rock := _world.get_node("Rock_2") as Rock
+	var judge := ServerAuthority.instance
 	await tick_request(func() -> void:
 		_local.global_position = rock.global_position + Vector3(20.0, 0.0, 0.0)
-		expect(not rock.host_grab(1), "rock_rejects_far_holder")
+		expect(not judge.can_grab(_local, rock), "rock_rejects_far_holder")
 		_local.global_position = rock.global_position + Vector3(1.0, 0.3, 0.0)
 		_local.stats.strength = 1.0
-		expect(not rock.host_grab(1), "rock_rejects_insufficient_strength")
+		expect(not judge.can_grab(_local, rock), "rock_rejects_insufficient_strength")
 		_local.stats.strength = 10.0
 		_local.change_state(Player.State.AIRBORNE)
-		expect(not rock.host_grab(1), "rock_rejects_airborne_holder")
+		expect(not judge.can_grab(_local, rock), "rock_rejects_airborne_holder")
 		_local.change_state(Player.State.IDLE)
-		expect(rock.host_grab(1), "rock_accepts_near_20kg_at_strength_10")
-		expect(not rock.host_grab(1), "rock_rejects_duplicate_hold")
-		rock.host_release(1)
-		_local.respawn())
+		expect(judge.can_grab(_local, rock), "rock_accepts_near_20kg_at_strength_10"))
+	# Taken for real, which is what makes the duplicate refusal mean something.
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(rock.global_position)
+		_local.movement.interact())
+	await get_tree().create_timer(0.4).timeout
+	expect(_local.grab.is_holding() and rock.holder_peer == 1, "rock_hold_taken_through_door")
+	expect(not judge.can_grab(_local, rock), "rock_rejects_duplicate_hold")
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(Vector3.INF)
+		_local.grab.drop())
+	await get_tree().create_timer(0.5).timeout
+	await tick_request(_local.respawn)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -157,35 +174,43 @@ func client_ready() -> void:
 func exercise_requests(host_path: NodePath, rock_path: NodePath) -> void:
 	var host_player := get_node(host_path) as Player
 	var rock := get_node(rock_path) as Rock
+	# A lethal force, claiming to be the server's. B-c tightened the force door
+	# to "the server said so" with no owner-to-owner case left, so this is the
+	# whole forgery surface for a force.
 	ForceSystem.receive_force.rpc_id(1, host_path, ForceSystem.make_event(
 		ForceSystem.Kind.DEBUG, Vector3.UP, 50.0, 0.0, 1, false, 1000.0, 1.0))
-	host_player.request_grab.rpc_id(1, 1)
-	host_player.grab_answer.rpc_id(1, host_path, true)
-	rock.request_grab.rpc_id(1)
+	# The owner-approval RPCs B-a authenticated no longer exist: a hold is a row
+	# in the server's table. Forging the table itself is what is left.
+	var judge := _world.get_node("ServerAuthority") as ServerAuthority
+	judge.push_holds.rpc_id(1, [{
+		"target": rock_path, "holder": _peer_id, "presses": 0}])
+	judge.face_shove.rpc_id(1, Vector3.RIGHT)
 	await get_tree().create_timer(1.0).timeout
 	await tick_request(func() -> void:
 		_local.respawn()
 		_local.global_position = rock.global_position + Vector3(1.0, 0.3, 0.0))
 	await get_tree().create_timer(0.4).timeout
-	await tick_request(func() -> void: _local.grab._ask_rock(rock))
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(rock.global_position)
+		_local.movement.interact())
 	await get_tree().create_timer(0.8).timeout
 	expect(_local.grab.is_holding() and rock.holder_peer == _peer_id, "client_valid_rock_grab")
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(_local.global_position + Vector3.RIGHT * 10.0)
 		expect(_local.grab.throw(), "client_valid_rock_throw")
-		_local.movement.set_aim_override(Vector3.INF)
-		ForceSystem.send(host_player, ForceSystem.make_event(
-			ForceSystem.Kind.SHOVE, Vector3.RIGHT, 1.0, _local.stats.strength, _peer_id, false, 1.0, 0.0)))
+		_local.movement.set_aim_override(Vector3.INF))
 	await get_tree().create_timer(0.4).timeout
 	await tick_request(func() -> void:
 		_local.global_position = host_player.global_position + Vector3(1.2, 0.0, 0.0))
 	await get_tree().create_timer(0.4).timeout
-	await tick_request(func() -> void: _local.grab._ask_player(host_player))
-	await get_tree().create_timer(0.8).timeout
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(host_player.global_position)
+		_local.movement.interact())
+	await get_tree().create_timer(1.0).timeout
 	expect(_local.grab.is_holding() and host_player.state == Player.State.GRABBED, "authenticated_player_grab_reply")
 	await tick_request(func() -> void:
-		_local.grab.drop()
-		_local.change_state(Player.State.IDLE))
+		_local.movement.set_aim_override(Vector3.INF)
+		_local.grab.drop())
 	await get_tree().create_timer(0.8).timeout
 	client_finished.rpc_id(1)
 

@@ -61,10 +61,12 @@ func receive_force(path: NodePath, event: Dictionary) -> void:
 	Net.queue_physics(_apply.bind(target, event.duplicate(true)))
 
 
-# B-a authenticates the existing owner-to-owner protocol. B-b/c will replace
-# client result messages with server-approved results and intent requests.
+# B-a authenticated an owner-to-owner protocol, where a client could send the
+# force for its own shove. B-c took the shove ruling away from the client, so
+# nothing legitimate sends a force but the server: this is now a plain "the
+# server said so", plus the shape test that was always here.
 func valid_sender(sender: int, event: Dictionary) -> bool:
-	if sender <= 0:
+	if sender != 1:
 		return false
 	var direction: Variant = event.get("direction")
 	if not direction is Vector3 or not (direction as Vector3).is_finite():
@@ -73,14 +75,7 @@ func valid_sender(sender: int, event: Dictionary) -> bool:
 		var value: Variant = event.get(field)
 		if not (value is float or value is int) or not is_finite(float(value)) or float(value) < 0.0:
 			return false
-	if sender == 1:
-		return true
-	if int(event.get("source_peer", 0)) != sender or not int(event.get("kind", -1)) in [Kind.SHOVE, Kind.THROW]:
-		return false
-	if not is_instance_valid(Net.spawn_root):
-		return false
-	var source := Net.spawn_root.get_node_or_null(str(sender)) as Player
-	return source != null and source.state != Player.State.DEAD
+	return true
 
 
 func _apply(target: Node, event: Dictionary) -> void:

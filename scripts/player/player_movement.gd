@@ -28,12 +28,8 @@ const CATCH_BUFFER := 0.3
 const CATCH_REACH := 0.3
 const CATCH_PROBES := 8
 # DOC: the stand in for a shield bash until there is a shield. Ground only.
-const SHOVE_REACH := 1.5
-const SHOVE_HALF_ANGLE := 45.0
-# Allies are given a little extra, so a push that looked connected on the
-# pusher's screen still counts after the trip over the network.
-const SHOVE_ALLY_BONUS := 0.3
-const SHOVE_COOLDOWN := 0.6
+# The shove's reach, angle, ally bonus and cooldown moved to PhysicsTuning in
+# B-c, with the ruling: they are numbers the server judges with now.
 const CARRY_SPEED_SCALE := 0.7
 
 var player: Player
@@ -51,7 +47,6 @@ var _jump_buffer_left := 0.0
 var _coyote_left := 0.0
 var _catch_buffer_left := 0.0
 var _aim_override := Vector3.INF
-var _shove_cooldown_left := 0.0
 var _intent_direction := Vector3.ZERO
 var _intent_left := 0.0
 var _pending_air_target: Variant = null
@@ -204,7 +199,6 @@ func _physics_process(delta: float) -> void:
 		return
 	_jump_buffer_left = maxf(0.0, _jump_buffer_left - delta)
 	_catch_buffer_left = maxf(0.0, _catch_buffer_left - delta)
-	_shove_cooldown_left = maxf(0.0, _shove_cooldown_left - delta)
 	_dash_cooldown_left = maxf(0.0, _dash_cooldown_left - delta)
 	_intent_left = maxf(0.0, _intent_left - delta)
 	if _intent_left == 0.0:
@@ -316,18 +310,13 @@ func _stunned_step(delta: float) -> void:
 
 # Judged here, on the pusher's own client, as the authority table says. What it
 # sends is a request; the target's own machine works out what it does.
-# The key press states an intent and stops there. The hit test below only runs
-# once the server has let it through, and B-c moves that test itself across.
+# A key press states a direction. Everything else about a shove -- who it
+# reaches, whether they are a team mate, whether the cooldown has run -- is
+# ruled by ServerAuthority against the server's own view of the world.
 func shove() -> int:
-	if not player.is_grounded_state() or _shove_cooldown_left > 0.0:
-		return 0
 	var forward := shove_direction()
 	if forward == Vector3.ZERO:
 		return 0
-	# Charged on the press rather than on the result: a refused intent still
-	# costs the cooldown, which is what stops a client spamming the door. The
-	# server takes the cooldown over in B-c.
-	_shove_cooldown_left = SHOVE_COOLDOWN
 	var hits: Variant = ServerAuthority.submit_intent(
 		player, ServerAuthority.Intent.SHOVE, {"direction": forward})
 	return int(hits) if hits is int else 0
@@ -342,51 +331,6 @@ func shove_direction() -> Vector3:
 			return Vector3.ZERO
 		forward = forward.normalized()
 	return forward
-
-
-# Authorised: runs on the owner's machine inside a physics step.
-func apply_shove(forward: Vector3) -> int:
-	if forward == Vector3.ZERO:
-		return 0
-	player.snap_facing(forward)
-
-	var shape := SphereShape3D.new()
-	shape.radius = SHOVE_REACH + SHOVE_ALLY_BONUS
-	var params := PhysicsShapeQueryParameters3D.new()
-	params.shape = shape
-	params.transform = Transform3D(Basis.IDENTITY, player.global_position)
-	params.collision_mask = Player.PLAYER_LAYER | Dummy.LAYER
-	params.collide_with_areas = false
-	params.exclude = [player.get_rid()]
-	var half_angle := deg_to_rad(SHOVE_HALF_ANGLE)
-	var hits := 0
-	for collision in player.get_world_3d().direct_space_state.intersect_shape(params, 8):
-		var body := collision.get("collider") as Node3D
-		if body == null or body == player:
-			continue
-		var offset := body.global_position - player.global_position
-		offset.y = 0.0
-		if offset.length_squared() < 0.0001:
-			continue
-		var is_ally := body is Player
-		var reach := SHOVE_REACH + (SHOVE_ALLY_BONUS if is_ally else 0.0)
-		if offset.length() > reach:
-			continue
-		if absf(forward.signed_angle_to(offset.normalized(), Vector3.UP)) > half_angle:
-			continue
-		var push := offset.normalized() + Vector3.UP * Tuning.values.shove_up_bias
-		ForceSystem.send(body, ForceSystem.make_event(
-			ForceSystem.Kind.SHOVE,
-			push,
-			Tuning.values.shove_power,
-			player.stats.strength,
-			player.get_multiplayer_authority(),
-			is_ally,
-			Tuning.values.shove_damage,
-			Tuning.values.shove_stun_time))
-		hits += 1
-	print("PLAYGROUND_SHOVE by=%s hits=%d" % [player.name, hits])
-	return hits
 
 
 func _air_step(delta: float) -> void:
