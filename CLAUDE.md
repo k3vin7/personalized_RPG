@@ -106,6 +106,26 @@ godot --headless --path . -- --auto-join --auto-smoke --auto-port=7901 --auto-qu
 **두 피어 모두** 돌려야 한다. 단계 6·7의 버그 5개 중 5개가 호스트
 단독 실행에서는 보이지 않았다.
 
+### 지연을 넣고 돌리는 법 (B-e)
+
+`tools/udp_delay_proxy.py`를 둘 사이에 끼운다. ENet은 UDP라서 이걸 거치면
+의도·결과·보유 표·위치 동기화 패킷이 **전부** 늦는다. `--delay`는 한쪽
+방향이므로 왕복은 두 배다.
+
+```
+# 1) 호스트는 7777에서 듣는다
+godot --headless --path . -- --auto-host --auto-smoke --auto-only=B-e --auto-port=7777 --be-latency=100 --auto-quit=320
+
+# 2) 프록시: 한쪽 100ms (왕복 200ms), 지터 10ms
+python3 tools/udp_delay_proxy.py --listen 7901 --target 7777 --delay 100 --jitter 10
+
+# 3) 클라는 호스트가 아니라 프록시로 접속한다
+godot --headless --path . -- --auto-join --auto-smoke --auto-only=B-e --auto-port=7901 --be-latency=100 --auto-quit=320
+```
+
+`--be-latency`는 로그에 지연을 적고 하네스의 대기 시간을 늘리는 값일 뿐,
+실제 지연은 프록시가 만든다. 지연 0은 프록시 없이 같은 포트로 붙인다.
+
 ### 하네스 자체를 먼저 의심할 것
 수치가 이상하면 게임 버그로 단정하기 전에 확인한다:
 - 검사 좌표가 기존 지형/오브젝트와 겹치는가 (돌이 통로에 서 있었음)

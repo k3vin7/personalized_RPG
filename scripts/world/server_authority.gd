@@ -65,6 +65,16 @@ const FALL_REPORT_TOLERANCE := 1.5
 # owner's report can arrive either side of the server seeing the landing.
 const FALL_PEAK_HOLD := 0.6
 
+# B-e move check. Sampled over a window rather than per step: a single physics
+# step of a replicated body is mostly packet timing, and dividing a lerp by
+# 1/120 s says nothing about how fast anyone is really going.
+const MOVE_SAMPLE := 0.1
+# How long a force the server sent is remembered as an explanation for speed.
+const FORCE_MEMORY := 1.5
+# One sample is forgiven after a teleport the server knows about (a respawn, or
+# a harness placing a body). Two, because a sample straddles the jump.
+const MOVE_FORGIVE_SAMPLES := 2
+
 # Found by the player scripts, which are spawned under Players and have no
 # scene-tree relationship to this node.
 static var instance: ServerAuthority
@@ -93,6 +103,10 @@ var _fall_watch := {}
 # peer -> seconds until the body comes back
 var _respawn_left := {}
 var fall_mismatches := 0
+# peer -> {at: Vector3, left: float, forgive: int, h: float, v: float, hold: float}
+# h/v are the biggest force speeds the server has handed this body lately.
+var _move_watch := {}
+var move_warnings := 0
 
 
 func _ready() -> void:
@@ -157,6 +171,17 @@ func escape_presses(target: Node) -> int:
 
 func hold_count() -> int:
 	return _view.size()
+
+
+# Every row, as "holder->target", for a log line that can be read.
+func describe_holds() -> String:
+	var parts: Array[String] = []
+	for path: NodePath in _view:
+		var entry: Dictionary = _view[path]
+		var target := get_node_or_null(path)
+		parts.append("%d->%s" % [
+			int(entry.get("holder", 0)), target.name if target != null else String(path)])
+	return "[" + ", ".join(parts) + "]"
 
 
 func _take_hold(holder_peer: int, target: Node3D) -> void:
@@ -543,6 +568,9 @@ func send_force(target: Node, event: Dictionary) -> void:
 		# B-d: the damage and the stun are decided here and the HP is written
 		# here. What goes out to the owner is the push, and a stun to apply.
 		_rule_hurt(target as Player, event)
+		# B-e: and the push is remembered, because it is the reason this body
+		# is about to be moving faster than its own legs explain.
+		_remember_force(target as Player, event)
 	ForceSystem.send(target, event)
 
 
@@ -624,6 +652,7 @@ func server_respawn(player: Player, tell_owner := true) -> void:
 	player.sync_dead = false
 	_respawn_left.erase(peer)
 	_fall_watch.erase(peer)
+	forgive_move(peer, "")
 	if _holds.has(peer):
 		_end_hold(peer, "holder_respawned")
 	if not tell_owner:
@@ -712,6 +741,7 @@ func _watch_vitals(delta: float) -> void:
 			if float(watch["hold"]) <= 0.0:
 				watch["peak"] = y
 		_fall_watch[peer] = watch
+		_check_move(player, delta)
 
 		if player.sync_dead:
 			_respawn_left[peer] = maxf(0.0, float(_respawn_left.get(peer, 0.0)) - delta)
@@ -722,6 +752,93 @@ func _watch_vitals(delta: float) -> void:
 		# place decides a death, from the position the server has.
 		if y < Tuning.values.kill_plane_y:
 			server_kill(player, "kill_plane")
+
+
+# -------------------------------------------------------- the move check
+# B-1's last piece, and B-e's: the server compares how fast a body is actually
+# travelling with how fast its strength and the forces it has been given could
+# explain. This stage only says so in the log -- nothing is rolled back, and
+# nothing is refused -- so the number it prints has to be trustworthy rather
+# than merely alarming.
+
+# Called whenever the server moves a body itself, or knows it was placed: the
+# next sample would otherwise read a teleport as a sprint.
+func forgive_move(peer: int, reason: String) -> void:
+	var watch: Dictionary = _move_watch.get(peer, {})
+	watch["forgive"] = MOVE_FORGIVE_SAMPLES
+	_move_watch[peer] = watch
+	if reason != "":
+		print("PLAYGROUND_MOVE_FORGIVEN peer=%d reason=%s" % [peer, reason])
+
+
+# What this body's own strength could do, split by axis: a cap that mixed them
+# together would either excuse a sideways sprint or accuse an honest fall.
+func move_allowance(player: Player) -> Vector2:
+	var tolerance: float = Tuning.values.server_speed_tolerance
+	var dash_speed: float = Tuning.values.dash_distance / maxf(Tuning.values.dash_duration, 0.01)
+	var horizontal := maxf(player.get_move_speed(), dash_speed)
+	# Vertical has two honest sources: our own jump, and gravity acting over
+	# the height the server watched this body reach.
+	var peer := player.get_multiplayer_authority()
+	var watch: Dictionary = _fall_watch.get(peer, {})
+	var drop := maxf(0.0, float(watch.get("peak", player.global_position.y)) - player.global_position.y)
+	var vertical := maxf(player.get_jump_velocity(), sqrt(2.0 * Tuning.values.gravity * drop))
+	var given: Dictionary = _move_watch.get(peer, {})
+	return Vector2(
+		horizontal * tolerance + float(given.get("h", 0.0)),
+		vertical * tolerance + float(given.get("v", 0.0)))
+
+
+# Remembered when the server hands out a push, because the push is the reason
+# the body is about to be fast.
+func _remember_force(player: Player, event: Dictionary) -> void:
+	var peer := player.get_multiplayer_authority()
+	var watch: Dictionary = _move_watch.get(peer, {})
+	var direction: Vector3 = event.get("direction", Vector3.ZERO)
+	var change := direction * ForceSystem.power_for(event, player.stats.total_weight())
+	watch["h"] = maxf(float(watch.get("h", 0.0)), Vector2(change.x, change.z).length())
+	watch["v"] = maxf(float(watch.get("v", 0.0)), absf(change.y))
+	watch["hold"] = FORCE_MEMORY
+	_move_watch[peer] = watch
+
+
+func _check_move(player: Player, delta: float) -> void:
+	var peer := player.get_multiplayer_authority()
+	var watch: Dictionary = _move_watch.get(peer, {
+		"at": player.global_position, "left": MOVE_SAMPLE, "forgive": 0,
+		"h": 0.0, "v": 0.0, "hold": 0.0})
+	watch["hold"] = maxf(0.0, float(watch.get("hold", 0.0)) - delta)
+	if float(watch["hold"]) <= 0.0:
+		watch["h"] = 0.0
+		watch["v"] = 0.0
+	watch["left"] = float(watch.get("left", MOVE_SAMPLE)) - delta
+	if float(watch["left"]) > 0.0:
+		_move_watch[peer] = watch
+		return
+	var elapsed: float = MOVE_SAMPLE - float(watch["left"])
+	var from: Vector3 = watch.get("at", player.global_position)
+	var moved := player.global_position - from
+	watch["left"] = MOVE_SAMPLE
+	watch["at"] = player.global_position
+	var skip := int(watch.get("forgive", 0)) > 0
+	if skip:
+		watch["forgive"] = int(watch["forgive"]) - 1
+	_move_watch[peer] = watch
+	if skip or elapsed <= 0.0:
+		return
+	# A body that is dead, being carried or standing on a moving hand is not
+	# moving under its own power, and the server is the one that put it there.
+	if player.sync_dead or holder_of(player) != 0:
+		return
+	var allowance := move_allowance(player)
+	var horizontal := Vector2(moved.x, moved.z).length() / elapsed
+	var vertical := absf(moved.y) / elapsed
+	if horizontal <= allowance.x and vertical <= allowance.y:
+		return
+	move_warnings += 1
+	print("PLAYGROUND_MOVE_WARN peer=%s h=%.2f/%.2f v=%.2f/%.2f over=%.2fs state=%s" % [
+		player.name, horizontal, allowance.x, vertical, allowance.y,
+		elapsed, Player.State.keys()[player.state]])
 
 
 # ------------------------------------------------------------ the exceptions

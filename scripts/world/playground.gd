@@ -165,6 +165,13 @@ func _run_smoke() -> void:
 		get_tree().root.add_child(checks)
 		checks.run(self)
 		return
+	if Net.auto_only == "B-e":
+		var be := preload("res://scripts/tests/be_checks.gd").new()
+		be.name = "BeChecks"
+		# Outlives the scene changes: it checks a reconnect and a shutdown.
+		get_tree().root.add_child(be)
+		be.run(self)
+		return
 	if Net.auto_only == "B-d":
 		var bd := preload("res://scripts/tests/bd_checks.gd").new()
 		bd.name = "BdChecks"
@@ -674,6 +681,7 @@ func _drop_from(local: Player, height: float) -> Dictionary:
 	await _settle(local, Vector3(0.0, 1.0, 11.0))
 	local.hp = local.stats.max_hp
 	var before := local.hp
+	ServerAuthority.instance.forgive_move(local.get_multiplayer_authority(), "")
 	local.global_position = Vector3(0.0, 0.9 + height, 11.0)
 	local.velocity = Vector3.ZERO
 	local.floor_snap_length = 0.0
@@ -871,6 +879,11 @@ func _settle(local: Player, at_position: Vector3) -> Vector3:
 	local.global_position = at_position
 	local.velocity = Vector3.ZERO
 	local.movement.cancel_target()
+	# B-e: a harness putting a body somewhere is a teleport, and the move check
+	# would be right to call it one. The server is the one doing it here, so it
+	# forgives the sample it straddles rather than warning about its own work.
+	if ServerAuthority.instance != null:
+		ServerAuthority.instance.forgive_move(local.get_multiplayer_authority(), "")
 	await get_tree().create_timer(0.8).timeout
 	return local.global_position
 

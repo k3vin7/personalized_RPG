@@ -58,6 +58,10 @@ extends Resource
 # suggests 3.0; kept at the measured 4.0 so B-c changes no feel it has not
 # measured.
 @export var escape_recoil_power: float = 4.0
+# B-e: how much faster than the strength-based cap a body may be seen moving
+# before the server says so in the log. A sanity bound, not a correction: the
+# move check warns and nothing is rolled back.
+@export var server_speed_tolerance: float = 1.25
 @export var ally_ground_damage: bool = true
 @export var ally_ground_stun: bool = true
 
