@@ -187,10 +187,15 @@ func _refresh_indicator() -> void:
 	if _armed == Armed.NONE:
 		_indicator.hide_all()
 		return
-	var reach := player.leap_max_range() if _armed == Armed.JUMP else dash_max_distance()
-	var landing := jump_plan(cursor_jump_target()) if _armed == Armed.JUMP else dash_plan()
-	_indicator.show_aim(player.global_position, reach, landing["landing"] as Vector3,
-		bool(landing["clamped"]))
+	if _armed == Armed.DASH:
+		# A dash is a line, so it is drawn as one: an arrow from here to there.
+		var dash := dash_plan()
+		_indicator.show_arrow(player.global_position, dash["landing"] as Vector3,
+			bool(dash["clamped"]))
+		return
+	var plan := jump_plan(cursor_jump_target())
+	_indicator.show_aim(player.global_position, player.leap_max_range(),
+		plan["landing"] as Vector3, bool(plan["clamped"]))
 
 
 func has_target() -> bool:

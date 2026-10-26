@@ -44,6 +44,17 @@ const INTENT_TIMEOUT := 1.0
 # because the state proving it had not arrived yet.
 const HOLD_GRACE := 0.6
 
+# Given only to a holder that was standing on what it just picked up: the floor
+# is now in its hands, so it is airborne through no fault of its own and would
+# otherwise drop the rock on the frame it lifted it -- meaning the rock you
+# stand on could never be picked up at all.
+#
+# Decided from the geometry rather than handed to every hold, because time
+# cannot tell the two cases apart: falling off a lifted rock takes about 0.3 s
+# and being teleported two metres up while carrying takes 0.43 s, and that one
+# has to keep dropping it.
+const HOLD_SETTLE := 0.6
+
 # The table is small and it matters: pushed on every change, plus a heartbeat
 # so a lost packet cannot leave a client holding a row the server has dropped.
 const VIEW_HEARTBEAT := 0.5
@@ -189,6 +200,7 @@ func _take_hold(holder_peer: int, target: Node3D) -> void:
 	_holds[holder_peer] = {
 		"target": target.get_path(),
 		"grace": HOLD_GRACE,
+		"settle": HOLD_SETTLE if _was_standing_on(holder, target) else 0.0,
 		# The grace is for waiting on the holder's state to arrive, and nothing
 		# else. It is spent the moment the holder has been seen holding once,
 		# and it never applies to a holder on this machine, whose state has no
@@ -205,6 +217,20 @@ func _take_hold(holder_peer: int, target: Node3D) -> void:
 	if target.has_method("set_hold_display"):
 		target.set_hold_display(holder_peer)
 	print("PLAYGROUND_HOLD_TAKEN holder=%d target=%s" % [holder_peer, target.name])
+
+
+# Was this body standing on the thing it just picked up? Directly above it,
+# within a step of it horizontally.
+func _was_standing_on(holder: Player, target: Node3D) -> bool:
+	if holder == null or target == null:
+		return false
+	var below := holder.global_position.y - target.global_position.y
+	if below < Player.BODY_HALF_HEIGHT * 0.5:
+		return false
+	var flat := Vector2(
+		holder.global_position.x - target.global_position.x,
+		holder.global_position.z - target.global_position.z).length()
+	return flat <= Player.BODY_RADIUS + 0.5
 
 
 # The only way a hold ends. Returns what was being held.
@@ -942,7 +968,9 @@ func _enforce_holds(delta: float) -> void:
 		# E-5: the holder was stunned, thrown, killed or walked off an edge.
 		if holder.state == Player.State.GRABBING:
 			record["confirmed"] = true
-		if (bool(record["confirmed"]) or float(record["grace"]) == 0.0) \
+		record["settle"] = maxf(0.0, float(record.get("settle", 0.0)) - delta)
+		if float(record["settle"]) == 0.0 \
+				and (bool(record["confirmed"]) or float(record["grace"]) == 0.0) \
 				and not _can_keep_holding(holder):
 			_end_hold(holder_peer, "holder_state")
 			continue

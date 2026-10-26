@@ -106,6 +106,7 @@ func run(world: Node3D) -> void:
 	var warnings := _judge.move_warnings
 	await _jump_checks()
 	await _dash_checks()
+	await _rock_underfoot_check()
 	await _air_space_checks()
 	await _smart_key_checks()
 	await _gap_edge_check()
@@ -131,6 +132,7 @@ func _jump_at(home: Vector3, aim: Vector3) -> Dictionary:
 	var floor_y := _local.global_position.y
 	var launch := Vector3.ZERO
 	var peak := floor_y
+	var air := 0.0
 	_plan = {}
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(aim)
@@ -140,6 +142,8 @@ func _jump_at(home: Vector3, aim: Vector3) -> Dictionary:
 	while sampled < 3.0:
 		await get_tree().physics_frame
 		sampled += get_physics_process_delta_time()
+		if _local.state == Player.State.AIRBORNE:
+			air += get_physics_process_delta_time()
 		if launch == Vector3.ZERO and _local.state == Player.State.AIRBORNE:
 			launch = _local.velocity
 		peak = maxf(peak, _local.global_position.y)
@@ -149,6 +153,7 @@ func _jump_at(home: Vector3, aim: Vector3) -> Dictionary:
 	var landed := _local.global_position
 	return {
 		"height": peak - floor_y,
+		"air": air,
 		"launch": launch,
 		# Sampled on the first airborne frame, by which time the air step has
 		# taken a step or two of gravity off it (22 m/s^2 / 120 Hz = 0.18 each).
@@ -170,17 +175,18 @@ func _jump_checks() -> void:
 	# both have to land where the cursor was.
 	var near := await _jump_at(HOME, HOME + Vector3(2.0, 0.0, 0.0))
 	var far := await _jump_at(HOME, HOME + Vector3(4.0, 0.0, 0.0))
-	note("cursor jump: 2 m -> height %.2f miss %.2f launch %.2f | 4 m -> height %.2f miss %.2f launch %.2f (cap %.2f, reach %.2f)" % [
-		near["height"], near["miss"], near["plan_speed"],
-		far["height"], far["miss"], far["plan_speed"], cap, reach])
+	note("cursor jump: 2 m -> height %.2f air %.2fs launch %.2f miss %.2f | 4 m -> height %.2f air %.2fs launch %.2f miss %.2f (cap %.2f, reach %.2f, gravity %.1f)" % [
+		near["height"], near["air"], near["plan_speed"], near["miss"],
+		far["height"], far["air"], far["plan_speed"], far["miss"],
+		cap, reach, Tuning.values.gravity])
 	expect(float(near["height"]) < float(far["height"]) - 0.1, "a_nearer_cursor_is_a_lower_jump")
 	expect(float(near["miss"]) < 0.3, "the_two_metre_jump_landed_on_the_cursor")
 	expect(float(far["miss"]) < 0.3, "the_four_metre_jump_landed_on_the_cursor")
 
 	# Under the feet: straight up, at the standing height.
 	var standing := await _jump_at(HOME, HOME)
-	note("cursor under the feet: height %.2f travel %.2f launch %.2f (sampled %.2f) (cap %.2f -> apex %.2f, inplace_radius %.2f)" % [
-		standing["height"], standing["travel"], standing["plan_speed"], standing["speed"], cap,
+	note("cursor under the feet: height %.2f air %.2fs travel %.2f launch %.2f (sampled %.2f) (cap %.2f -> apex %.2f, inplace_radius %.2f)" % [
+		standing["height"], standing["air"], standing["travel"], standing["plan_speed"], standing["speed"], cap,
 		cap * cap / (2.0 * Tuning.values.gravity), Tuning.values.jump_inplace_radius])
 	# The whole budget, upward: the apex a launch at the cap reaches.
 	var cap_apex := cap * cap / (2.0 * Tuning.values.gravity)
@@ -305,6 +311,60 @@ func _dash_checks() -> void:
 	expect(strong_reach > reach + 0.2, "strength_raises_the_dash_distance")
 	expect(absf(float(strong["distance"]) - strong_reach) < 0.4, "the_longer_dash_is_actually_travelled")
 	await tick_request(func() -> void: _local.stats.strength = 10.0)
+
+
+# ------------------------- picking up the rock you are standing on top of
+
+# Reported: standing on a rock and grabbing it sent the body up for ever. The
+# rock is assigned hand_position() every step, so lifting it out from under its
+# own holder swept the capsule up to hand height, which raised the hand, which
+# swept it again -- about 200 m/s, climbing until something stopped it.
+func _rock_underfoot_check() -> void:
+	var rock := _world.get_node("Rock_2") as Rock          # the biggest, 20 kg
+	var radius := Rock.radius_for(rock.weight)
+	var spot := Vector3(6.0, radius, 2.0)
+	await tick_request(func() -> void:
+		placed()
+		_judge.server_respawn(_local)
+		rock.global_position = spot
+		rock.linear_velocity = Vector3.ZERO
+		rock.angular_velocity = Vector3.ZERO)
+	await _wait(0.5)
+	# Standing on top of it.
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = rock.global_position + Vector3(0.0, radius + Player.BODY_HALF_HEIGHT, 0.0)
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target())
+	await _wait(0.8)
+	var stood_on := _local.global_position.y
+	var grounded := _local.is_grounded_state()
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(rock.global_position)
+		_local.movement.interact())
+	var highest := _local.global_position.y
+	var took := false
+	var watched := 0.0
+	while watched < 1.5:
+		await get_tree().physics_frame
+		watched += get_physics_process_delta_time()
+		highest = maxf(highest, _local.global_position.y)
+		took = took or _local.grab.is_holding()
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	note("rock underfoot: stood at y=%.2f (grounded=%s) -> took hold=%s, still holding=%s, highest y in 1.5 s = %.2f" % [
+		stood_on, grounded, took, _local.grab.is_holding(), highest])
+	expect(grounded, "the_body_was_standing_on_the_rock")
+	# A metre of slack: the body does come off the rock's top, it just must not
+	# be carried up by it.
+	expect(highest < stood_on + 1.0, "grabbing_the_rock_underfoot_does_not_lift_the_body")
+	# The hold is taken, and then ends on its own: lifting the rock takes away
+	# the floor, and 7-6 says a holder that leaves the ground drops what it
+	# carries. That is the rule working, not the bug.
+	expect(took, "the_grab_itself_still_worked")
+	await tick_request(func() -> void:
+		if _local.grab.is_holding():
+			_local.grab.drop())
+	await _wait(0.6)
 
 
 # ------------------------------- Space off the ground: the wall, and the dash
@@ -442,6 +502,34 @@ func _smart_key_checks() -> void:
 	expect(_local.movement.armed_action() == PlayerMovement.Armed.NONE
 		and _local.state != Player.State.DASH, "cancelling_an_armed_action_casts_nothing")
 	expect(not _local.movement.aim_indicator().is_showing(), "cancelling_took_the_rings_away")
+
+	# The dash shows a line, not a ring: an arrow from here to where it goes.
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = HOME
+		_local.velocity = Vector3.ZERO
+		_local.stamina = Tuning.values.stamina_max
+		_local.movement.set_aim_override(HOME + Vector3(2.5, 0.0, 0.0))
+		_local.movement.press_dash())
+	await _wait(0.3)
+	var arrow := _local.movement.aim_indicator()
+	var reach := _local.movement.dash_max_distance()
+	note("dash arrow: showing=%s length=%.2f (cursor 2.5 m, reach %.2f)" % [
+		arrow.is_showing(), arrow.arrow_length(), reach])
+	expect(arrow.is_showing() and absf(arrow.arrow_length() - 2.5) < 0.35, "the_dash_arrow_reaches_the_cursor")
+	# Past the reach, the arrow stops at the limit and says so.
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(HOME + Vector3(20.0, 0.0, 0.0)))
+	await _wait(0.3)
+	note("dash arrow out of reach: length=%.2f clamped=%s" % [
+		arrow.arrow_length(), arrow.landing_is_clamped()])
+	expect(absf(arrow.arrow_length() - reach) < 0.35, "the_arrow_stops_at_the_dash_limit")
+	expect(arrow.landing_is_clamped(), "and_is_marked_as_the_limit")
+	await tick_request(func() -> void:
+		_local.movement.cancel_armed()
+		_local.movement.set_aim_override(Vector3.INF))
+	await _wait(0.2)
+	expect(not arrow.is_showing(), "cancelling_took_the_arrow_away")
 
 	# On: the key is the cast.
 	Tuning.values.smart_key_enabled = true

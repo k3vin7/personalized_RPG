@@ -20,6 +20,17 @@ const HIT_DAMAGE := 4.0
 # above their head and would otherwise clip them on the way out.
 const THROWER_GRACE := 0.3
 const STATE_INTERVAL := 0.05
+# CLAUDE.md lesson 4, with a rock instead of a capsule: a position that is
+# assigned sweeps the body along the whole path, and whatever is standing in it
+# is thrown out at teleport speed. A carried rock is assigned a new position
+# every step, so both of these exist:
+#  - its holder is excepted from colliding with it, because a rock picked up
+#    from under its own holder's feet swept the holder up to hand height, which
+#    raised the hand, which swept it up again: endless, about 200 m/s.
+#  - any other long move blinds the rock for a moment, so a carried rock cannot
+#    launch a bystander it is dragged through.
+const TELEPORT_STEP := 2.0
+const TELEPORT_BLIND := 0.2
 
 var weight := 10.0
 var home := Vector3.ZERO
@@ -36,6 +47,8 @@ var _sync_position := Vector3.ZERO
 var _sync_rotation := Vector3.ZERO
 var _has_state := false
 var _snap_state := false
+var _blind_left := 0.0
+var _excepted: Node3D
 var _label: Label3D
 
 
@@ -125,10 +138,14 @@ static func radius_for(rock_weight: float) -> float:
 
 
 func _physics_process(delta: float) -> void:
+	_tick_blind(delta)
 	if not is_multiplayer_authority():
+		_except_holder()
 		if _has_state:
 			# Shown, not simulated.
-			if _snap_state:
+			if _snap_state or global_position.distance_to(_sync_position) > TELEPORT_STEP:
+				if not _snap_state:
+					_blind_for_teleport()
 				global_position = _sync_position
 				rotation = _sync_rotation
 				_snap_state = false
@@ -153,9 +170,13 @@ func _physics_process(delta: float) -> void:
 	if holder_peer != 0:
 		# Whether the hold still stands is the table's ruling, made once for
 		# every kind of held body; here the rock only rides the hand.
+		_except_holder()
 		var holder := _peer_player(holder_peer)
 		if holder != null:
-			global_position = holder.hand_position()
+			var hand := holder.hand_position()
+			if global_position.distance_to(hand) > TELEPORT_STEP:
+				_blind_for_teleport()
+			global_position = hand
 			linear_velocity = Vector3.ZERO
 			angular_velocity = Vector3.ZERO
 
@@ -183,6 +204,9 @@ func set_hold_display(peer: int) -> void:
 	if holder_peer == peer:
 		return
 	holder_peer = peer
+	# Set on every peer, because every peer assigns this rock's position: the
+	# host from the hand, a client from the state packets.
+	_except_holder()
 	if not is_multiplayer_authority():
 		return
 	if peer != 0:
@@ -192,6 +216,35 @@ func set_hold_display(peer: int) -> void:
 		angular_velocity = Vector3.ZERO
 	else:
 		freeze = false
+
+
+# A body cannot be pushed by what it is carrying. Re-asserted rather than set
+# once: on a client the row can arrive before the holder's body has spawned.
+func _except_holder() -> void:
+	var holder: Node3D = _peer_player(holder_peer) if holder_peer != 0 else null
+	if holder == _excepted:
+		return
+	if is_instance_valid(_excepted):
+		remove_collision_exception_with(_excepted)
+	_excepted = null
+	if holder != null:
+		add_collision_exception_with(holder)
+		_excepted = holder
+
+
+# Collision off for a moment after a long jump, so the sweep cannot carry
+# anyone with it.
+func _blind_for_teleport() -> void:
+	_blind_left = TELEPORT_BLIND
+	collision_layer = 0
+
+
+func _tick_blind(delta: float) -> void:
+	if _blind_left <= 0.0:
+		return
+	_blind_left -= delta
+	if _blind_left <= 0.0:
+		collision_layer = LAYER
 
 
 # Called by the judge, after the row is already gone. The thrower is passed in
