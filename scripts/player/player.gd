@@ -166,6 +166,11 @@ func _ready() -> void:
 	# bother picking up, and a thrown one has to be able to knock you about.
 	collision_mask = Layers.SOLID_PLAYER
 	floor_snap_length = _default_snap
+	# Stage D: leaving a moving surface carries its speed with you. This is the
+	# engine's own platform handling rather than something hand-rolled, and a
+	# player's head is a platform like any other because the layer mask it
+	# watches is every layer.
+	platform_on_leave = CharacterBody3D.PLATFORM_ON_LEAVE_ADD_VELOCITY
 	add_to_group(ServerAuthority.HOLDABLE_GROUP)
 	_build_body()
 	sync_position = global_position
@@ -541,8 +546,12 @@ func _apply_weapon(kind: int) -> void:
 func apply_force_event(event: Dictionary) -> void:
 	if not is_local() or state == State.DEAD or sync_dead:
 		return
-	var direction: Vector3 = event.get("direction", Vector3.ZERO)
-	var change := direction * ForceSystem.power_for(event, stats.total_weight())
+	# 4-chapter, in one call: the push scaled by the pusher's strength against
+	# our weight, divided by what our own strength braces against it. Standing
+	# still, a strong body is moved less; in the air there is nothing to brace
+	# with and the push lands whole.
+	var change := ForceSystem.change_for(
+		event, stats.total_weight(), get_ratio(), is_grounded_state())
 	if grab != null:
 		# 7-6: being pushed frees a held body and empties a holder's hands. The
 		# force then applies to whatever state that left us in.
@@ -556,6 +565,11 @@ func apply_force_event(event: Dictionary) -> void:
 		velocity += change
 	else:
 		velocity = change
+		if movement != null:
+			# 4-chapter: on the ground the push becomes the velocity. Telling
+			# the movement means the ground step carries it instead of writing
+			# the move order over it on the next frame.
+			movement.note_pushed()
 		if change.y > ForceSystem.UPWARD_LAUNCH:
 			change_state(State.AIRBORNE)
 		# B-d: whether this hurt, and whether it stuns, was decided by the

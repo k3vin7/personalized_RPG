@@ -63,6 +63,11 @@ var _dash_cooldown_left := 0.0
 # Set when a launch came out of a dash, which spends the leap budget on
 # distance rather than height.
 var _launch_from_dash := false
+# Stage D's platform rule: how long this body has been standing on another
+# body's head. A head is something to bounce off, not somewhere to live.
+var _head_stand_left := 0.0
+# How long the body is still carrying a push rather than its own move order.
+var _pushed_left := 0.0
 # 5-chapter smart key. With it off, a key arms the action and shows where it
 # would go; the left button casts. Jump and dash share this, and a basic attack
 # is meant to join them without a second mechanism.
@@ -104,6 +109,13 @@ func cancel_target() -> void:
 # press go through identical code.
 # Space. With the smart key on this jumps now; with it off it arms the jump and
 # shows where it would land, and the left button casts it.
+# Called by the one force entry point when a push lands while this body is on
+# the ground. 4-chapter: the push becomes the velocity, and it has to survive
+# long enough to be a push rather than a frame of noise.
+func note_pushed() -> void:
+	_pushed_left = Tuning.values.force_slide_time
+
+
 func press_jump() -> void:
 	if not player.is_grounded_state():
 		# Off the ground Space is not a jump to aim. It is the wall catch, and
@@ -226,8 +238,11 @@ func set_target(world_point: Vector3) -> void:
 	# re-orders every tenth of a second, which reads as a flickering state.
 	if _flat_distance(player.global_position, world_point) <= ARRIVE_TOLERANCE:
 		return
-	# A fresh click replaces any intent the last blocked one left behind.
+	# A fresh click replaces any intent the last blocked one left behind, and
+	# ends any push the body was still sliding on: it is moving under its own
+	# orders again.
 	_clear_intent()
+	_pushed_left = 0.0
 	_target = world_point
 	_has_target = true
 	_agent.target_position = world_point
@@ -382,14 +397,23 @@ func _ground_step(delta: float) -> void:
 		_launch_jump()
 		return
 
-	var desired := _desired_velocity()
-	if desired.length_squared() > 0.0001:
-		player.velocity.x = desired.x
-		player.velocity.z = desired.z
-		player.face_direction(desired, delta)
+	if _pushed_left > 0.0:
+		# Still carrying a push. The move order does not get to overwrite it;
+		# it rubs off against the ground instead, and a fresh click cancels it
+		# because set_target() clears the window.
+		_pushed_left -= delta
+		var rub: float = Tuning.values.force_slide_friction * delta
+		player.velocity.x = move_toward(player.velocity.x, 0.0, rub)
+		player.velocity.z = move_toward(player.velocity.z, 0.0, rub)
 	else:
-		player.velocity.x = 0.0
-		player.velocity.z = 0.0
+		var desired := _desired_velocity()
+		if desired.length_squared() > 0.0001:
+			player.velocity.x = desired.x
+			player.velocity.z = desired.z
+			player.face_direction(desired, delta)
+		else:
+			player.velocity.x = 0.0
+			player.velocity.z = 0.0
 	# Taken from whether an order stands, not from this frame's velocity: a
 	# re-query gap is still MOVE, because the order has not gone anywhere.
 	if _has_target and player.state == Player.State.IDLE:
@@ -406,7 +430,47 @@ func _ground_step(delta: float) -> void:
 		# pressed a frame late still goes.
 		player.change_state(Player.State.AIRBORNE)
 		return
+	if _stand_on_head(delta):
+		return
 	_try_attach_climb()
+
+
+# DOC (stage D): a player's head is a surface -- you land on it and you can
+# jump again off it, which is the whole of the platform rule as far as two
+# bodies are concerned. It is not somewhere to stand: after head_stomp_time the
+# body slides off, so a head is a step rather than a perch.
+#
+# Returns true when the body has just been put back in the air.
+func _stand_on_head(delta: float) -> bool:
+	var floor_body := _floor_body()
+	if floor_body == null or not (floor_body is Player):
+		_head_stand_left = 0.0
+		return false
+	if _head_stand_left <= 0.0:
+		_head_stand_left = Tuning.values.head_stomp_time
+		print("PLAYGROUND_HEAD_STAND on=%s by=%s" % [floor_body.name, player.name])
+	_head_stand_left -= delta
+	if _head_stand_left > 0.0:
+		return false
+	# Time up: off it. The push is the standing body's own, not a force event,
+	# because nothing is being done to anyone -- this body is simply no longer
+	# supported.
+	_head_stand_left = 0.0
+	player.floor_snap_length = 0.0
+	player.change_state(Player.State.AIRBORNE)
+	print("PLAYGROUND_HEAD_SLIDE off=%s by=%s" % [floor_body.name, player.name])
+	return true
+
+
+# What this body is standing on, if anything.
+func _floor_body() -> Node:
+	if not player.is_on_floor():
+		return null
+	for index in player.get_slide_collision_count():
+		var collision := player.get_slide_collision(index)
+		if collision.get_normal().y > 0.5:
+			return collision.get_collider()
+	return null
 
 
 # DOC (stage C-2): the jump goes where the cursor is, and the height comes out

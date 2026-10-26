@@ -83,8 +83,15 @@ func _ready() -> void:
 func apply_force_event(event: Dictionary) -> void:
 	if not is_multiplayer_authority():
 		return
-	var direction: Vector3 = event.get("direction", Vector3.ZERO)
-	velocity = direction * ForceSystem.power_for(event, Dummy.MAX_HP * 0.2)
+	# Stage D: in the air the push is added, not written over. A scarecrow was
+	# the one body that still overwrote, so a second shove while it was flying
+	# replaced the first one instead of bending its arc.
+	var change := ForceSystem.change_for(
+		event, Dummy.MAX_HP * 0.2, 1.0, is_on_floor())
+	if is_on_floor():
+		velocity = change
+	else:
+		velocity += change
 	hp = maxf(0.0, hp - float(event.get("damage", 0.0)))
 	_settle_left = RETURN_DELAY
 	_refresh()
@@ -108,7 +115,11 @@ func _physics_process(delta: float) -> void:
 
 	if not is_on_floor():
 		velocity.y -= Tuning.values.gravity * delta
-	else:
+	elif velocity.y <= 0.0:
+		# Only pressed into the floor when it is not trying to leave it. This
+		# used to be unconditional, so an upward force was written back to
+		# -0.5 on the same frame and a scarecrow could not be launched at all
+		# -- it had only ever been shoved sideways, so nobody had noticed.
 		velocity.y = -0.5
 		velocity.x = move_toward(velocity.x, 0.0, 12.0 * delta)
 		velocity.z = move_toward(velocity.z, 0.0, 12.0 * delta)

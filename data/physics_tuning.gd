@@ -73,10 +73,34 @@ extends Resource
 # server's: a number the server judges with is a tuning value, not a constant
 # in the client's input handler. Values are the measured ones, unchanged.
 @export var shove_cooldown: float = 0.6
+# Stage D: the shove is a rectangle in front of the cursor heading, not a fan.
+# shove_half_angle_deg and shove_ally_bonus are gone with the fan.
 @export var shove_range: float = 1.5
-@export var shove_half_angle_deg: float = 45.0
-# A jumping team mate is reached a little further than a stranger.
-@export var shove_ally_bonus: float = 0.3
+@export var shove_width: float = 1.2
+# What the pusher takes back, as a share of what it gave out.
+@export var shove_recoil: float = 0.3
+# A team mate already in the air is launched rather than shoved: the push tilts
+# up by this much, which is what makes one player a step for another.
+@export var shove_ally_launch_angle_deg: float = 50.0
+# 4-chapter. k_push scales the push by the pusher's strength against the
+# target's weight; k_brace is how much of the push the target's own strength
+# holds back. They used to borrow ratio_k_jump, which is the jump's number and
+# had no business here.
+@export var k_push: float = 0.35
+@export var k_brace: float = 0.30
+# How long a body may stand on another body's head before sliding off it.
+@export var head_stomp_time: float = 0.5
+# 4-chapter says a push on the ground becomes the body's velocity. The ground
+# step writes the horizontal back to the move order every frame, so without a
+# window of its own a ground push is gone before it is seen: the recoil moved
+# a pusher four centimetres and the escape recoil moved nobody at all. For
+# this long after a force lands, the push is what the body is doing.
+@export var force_slide_time: float = 0.25
+@export var force_slide_friction: float = 6.0
+# The playground is all field, so there is no party system to ask. This is the
+# toggle the work order asks for in the debug panel: with it on, the other
+# player counts as a team mate.
+@export var same_party: bool = true
 # Was ESCAPE_PUSH in PlayerGrab. 6-chapter calls it escape_recoil_power and
 # suggests 3.0; kept at the measured 4.0 so B-c changes no feel it has not
 # measured.

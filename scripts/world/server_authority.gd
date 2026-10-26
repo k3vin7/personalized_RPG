@@ -118,6 +118,12 @@ var fall_mismatches := 0
 # h/v are the biggest force speeds the server has handed this body lately.
 var _move_watch := {}
 var move_warnings := 0
+# Stage D: the last forces the server handed out, newest last. Each carries the
+# event's id and the time it was made, which is what "힘 이력" asks for: a push
+# can be pointed at rather than described, and the move check's allowance is
+# built from the same rows.
+const FORCE_HISTORY_MAX := 64
+var force_history: Array[Dictionary] = []
 
 
 func _ready() -> void:
@@ -409,21 +415,35 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 # replicated position -- which is the whole point of putting the ruling here.
 func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 	var peer := actor.get_multiplayer_authority()
-	if actor.state == Player.State.DEAD or not actor.is_grounded_state():
+	if actor.sync_dead:
 		return null
+	# Stage D: a shove goes out in the air as well. There is nothing to brace
+	# against up there, which is the target's problem, not the pusher's.
 	if float(_shove_cooldown.get(peer, 0.0)) > 0.0:
 		return null
 	_shove_cooldown[peer] = Tuning.values.shove_cooldown
 
+	# A rectangle in front of the heading, shove_range deep and shove_width
+	# across, rather than the fan it was until stage D. The query is a sphere
+	# big enough to hold that rectangle and the rectangle is applied to what it
+	# returns: orienting a box costs the same and gets the corners wrong when
+	# the heading is not flat.
+	var reach: float = Tuning.values.shove_range
+	var half_width: float = Tuning.values.shove_width * 0.5
+	var forward := Vector3(direction.x, 0.0, direction.z)
+	if forward.length_squared() < 0.0001:
+		return null
+	forward = forward.normalized()
+	var side := Vector3(-forward.z, 0.0, forward.x)
+
 	var shape := SphereShape3D.new()
-	shape.radius = Tuning.values.shove_range + Tuning.values.shove_ally_bonus
+	shape.radius = sqrt(reach * reach + half_width * half_width)
 	var params := PhysicsShapeQueryParameters3D.new()
 	params.shape = shape
 	params.transform = Transform3D(Basis.IDENTITY, actor.global_position)
 	params.collision_mask = Player.PLAYER_LAYER | Dummy.LAYER
 	params.collide_with_areas = false
 	params.exclude = [actor.get_rid()]
-	var half_angle := deg_to_rad(Tuning.values.shove_half_angle_deg)
 	var hits := 0
 	for collision in actor.get_world_3d().direct_space_state.intersect_shape(params, 8):
 		var body := collision.get("collider") as Node3D
@@ -431,19 +451,29 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 			continue
 		var offset := body.global_position - actor.global_position
 		offset.y = 0.0
-		if offset.length_squared() < 0.0001:
+		var along := offset.dot(forward)
+		var across := absf(offset.dot(side))
+		# Behind, past the end, or off to the side: not in the rectangle. The
+		# body's own radius counts, or a shove would pass either side of
+		# someone standing right in front of it.
+		if along <= -Player.BODY_RADIUS or along > reach + Player.BODY_RADIUS:
 			continue
-		# 4-chapter: a team mate is any other player while the playground is all
-		# field. Party membership arrives in stage D.
-		var is_ally := body is Player
-		var reach: float = Tuning.values.shove_range
-		if is_ally:
-			reach += Tuning.values.shove_ally_bonus
-		if offset.length() > reach:
+		if across > half_width + Player.BODY_RADIUS:
 			continue
-		if absf(direction.signed_angle_to(offset.normalized(), Vector3.UP)) > half_angle:
-			continue
-		var push := offset.normalized() + Vector3.UP * Tuning.values.shove_up_bias
+		# 4-chapter: a team mate is another player while the debug toggle says
+		# they are in the same party. The playground is all field, so there is
+		# no party list to read.
+		var is_ally := body is Player and Tuning.values.same_party
+		var push := forward
+		var launched := false
+		if is_ally and (body as Player).state == Player.State.AIRBORNE:
+			# A team mate already in the air is launched, not shoved: this is
+			# what makes one player a step for another.
+			var angle := deg_to_rad(Tuning.values.shove_ally_launch_angle_deg)
+			push = forward * cos(angle) + Vector3.UP * sin(angle)
+			launched = true
+		else:
+			push = (forward + Vector3.UP * Tuning.values.shove_up_bias).normalized()
 		send_force(body, ForceSystem.make_event(
 			ForceSystem.Kind.SHOVE,
 			push,
@@ -454,6 +484,25 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 			Tuning.values.shove_damage,
 			Tuning.values.shove_stun_time))
 		hits += 1
+		if launched:
+			print("PLAYGROUND_SHOVE_LAUNCH by=%s target=%s angle=%.0f" % [
+				actor.name, body.name, Tuning.values.shove_ally_launch_angle_deg])
+	# What the push costs the pusher. Sent through the same door as everything
+	# else, so it is one force event with an id like any other.
+	if hits > 0 and Tuning.values.shove_recoil > 0.0:
+		# The same up bias every other push gets. Without it the recoil is pure
+		# horizontal, and the ground step writes the horizontal velocity back
+		# to the move order on the very next frame: the pusher was given a
+		# step back it never took.
+		send_force(actor, ForceSystem.make_event(
+			ForceSystem.Kind.RECOIL,
+			(-forward + Vector3.UP * Tuning.values.shove_up_bias).normalized(),
+			Tuning.values.shove_power * Tuning.values.shove_recoil,
+			actor.stats.strength,
+			peer,
+			true,
+			0.0,
+			0.0))
 	# The body still turns to face where it pushed, and that part belongs to
 	# whoever owns the body.
 	if actor.is_local():
@@ -609,6 +658,16 @@ func _rule_escape(actor: Player) -> Variant:
 func send_force(target: Node, event: Dictionary) -> void:
 	if target == null or not is_instance_valid(target):
 		return
+	force_history.append({
+		"id": int(event.get("id", 0)),
+		"at": float(event.get("at", 0.0)),
+		"kind": int(event.get("kind", -1)),
+		"target": target.name,
+		"source_peer": int(event.get("source_peer", 0)),
+		"base_power": float(event.get("base_power", 0.0)),
+	})
+	if force_history.size() > FORCE_HISTORY_MAX:
+		force_history.remove_at(0)
 	var holder_peer := holder_of(target)
 	if holder_peer != 0:
 		_end_hold(holder_peer, "target_pushed")
@@ -868,8 +927,10 @@ func move_allowance(player: Player) -> Vector2:
 func _remember_force(player: Player, event: Dictionary) -> void:
 	var peer := player.get_multiplayer_authority()
 	var watch: Dictionary = _move_watch.get(peer, {})
-	var direction: Vector3 = event.get("direction", Vector3.ZERO)
-	var change := direction * ForceSystem.power_for(event, player.stats.total_weight())
+	# The same arithmetic the target will do, brace included, so the allowance
+	# matches what the body is actually about to be given.
+	var change := ForceSystem.change_for(event, player.stats.total_weight(),
+		player.get_ratio(), player.is_grounded_state())
 	watch["h"] = maxf(float(watch.get("h", 0.0)), Vector2(change.x, change.z).length())
 	watch["v"] = maxf(float(watch.get("v", 0.0)), absf(change.y))
 	watch["hold"] = FORCE_MEMORY

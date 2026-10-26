@@ -12,10 +12,18 @@ enum Kind {
 	SHOVE,
 	THROW,
 	KNOCKBACK,
+	# Stage D: what a push costs the pusher. A separate kind because it is the
+	# one force a body asks to be given.
+	RECOIL,
 	DEBUG,
 }
 
 const UPWARD_LAUNCH := 0.5
+
+
+# Stage D: every event carries an id and the time it was made, so a force can
+# be pointed at in a log and in the move check's history rather than described.
+static var _next_id := 0
 
 
 static func make_event(
@@ -27,7 +35,10 @@ static func make_event(
 		is_ally_source: bool,
 		damage: float = 0.0,
 		stun_time: float = 0.0) -> Dictionary:
+	_next_id += 1
 	return {
+		"id": _next_id,
+		"at": float(Time.get_ticks_msec()) / 1000.0,
 		"kind": kind,
 		"direction": direction.normalized(),
 		"base_power": base_power,
@@ -85,10 +96,34 @@ func _apply(target: Node, event: Dictionary) -> void:
 
 # Shared by everything that can be pushed, so a dummy and a player are shoved
 # by the same rule.
+#
+#     power = base_power x ratio_mult(source_strength / target_weight, k_push)
+#
 func power_for(event: Dictionary, total_weight: float) -> float:
 	var strength := float(event.get("source_strength", 0.0))
 	if strength <= 0.0:
 		# Environmental force: no one's strength behind it, so no multiplier.
 		return float(event.get("base_power", 0.0))
 	return float(event.get("base_power", 0.0)) * Tuning.ratio_mult(
-		strength / maxf(total_weight, 0.1), Tuning.values.ratio_k_jump)
+		strength / maxf(total_weight, 0.1), Tuning.values.k_push)
+
+
+# 4-chapter's brace: what the target's own strength holds back. Standing, a
+# strong body is moved less by the same push; in the air or on a wall there is
+# nothing to brace against and it is the full push.
+#
+#     brace = grounded ? ratio_mult(target_ratio, k_brace) : 1.0
+#
+func brace_for(target_ratio: float, grounded: bool) -> float:
+	if not grounded:
+		return 1.0
+	return maxf(Tuning.ratio_mult(target_ratio, Tuning.values.k_brace), 0.01)
+
+
+# The whole of 4-chapter's push, in the one place every push comes through:
+#
+#     dv = direction x power / brace
+#
+func change_for(event: Dictionary, total_weight: float, target_ratio: float, grounded: bool) -> Vector3:
+	var direction: Vector3 = event.get("direction", Vector3.ZERO)
+	return direction * (power_for(event, total_weight) / brace_for(target_ratio, grounded))
