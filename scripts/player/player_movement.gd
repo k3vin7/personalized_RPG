@@ -66,6 +66,7 @@ var _launch_from_dash := false
 # Stage D's platform rule: how long this body has been standing on another
 # body's head. A head is something to bounce off, not somewhere to live.
 var _head_stand_left := 0.0
+var _head_body: Node3D
 # How long the body is still carrying a push rather than its own move order.
 var _pushed_left := 0.0
 # 5-chapter smart key. With it off, a key arms the action and shows where it
@@ -425,12 +426,15 @@ func _ground_step(delta: float) -> void:
 	else:
 		player.velocity.y -= Tuning.values.gravity * delta
 	player.move_and_slide()
+	# Asked before the airborne transition below: a body balanced on another
+	# body's head loses floor contact constantly, and letting that read as
+	# "walked off something" is what cut the stomp short.
+	if _stand_on_head(delta):
+		return
 	if not player.is_on_floor():
 		# Walked off something. Coyote time is already running, so a jump
 		# pressed a frame late still goes.
 		player.change_state(Player.State.AIRBORNE)
-		return
-	if _stand_on_head(delta):
 		return
 	_try_attach_climb()
 
@@ -440,29 +444,52 @@ func _ground_step(delta: float) -> void:
 # bodies are concerned. It is not somewhere to stand: after head_stomp_time the
 # body slides off, so a head is a step rather than a perch.
 #
-# Returns true when the body has just been put back in the air.
+func _clear_head_stand() -> void:
+	_head_stand_left = 0.0
+	_head_body = null
+
+
+# Returns true when this function has taken charge of the body for this frame,
+# either by holding it on the head or by putting it back in the air.
 func _stand_on_head(delta: float) -> bool:
 	var floor_body := _floor_body()
-	if floor_body == null or not (floor_body is Player):
-		_head_stand_left = 0.0
+	if floor_body is Player:
+		# A different head is a new stand, with a full window.
+		if _head_stand_left <= 0.0 or _head_body != floor_body:
+			_head_stand_left = Tuning.values.head_stomp_time
+			_head_body = floor_body as Node3D
+			print("PLAYGROUND_HEAD_STAND on=%s by=%s for=%.2f" % [
+				floor_body.name, player.name, _head_stand_left])
+	if _head_stand_left <= 0.0 or not is_instance_valid(_head_body):
+		_head_body = null
 		return false
-	if _head_stand_left <= 0.0:
-		_head_stand_left = Tuning.values.head_stomp_time
-		print("PLAYGROUND_HEAD_STAND on=%s by=%s" % [floor_body.name, player.name])
 	_head_stand_left -= delta
 	if _head_stand_left > 0.0:
-		return false
-	# Time up: off it. The push is the standing body's own, not a force event,
-	# because nothing is being done to anyone -- this body is simply no longer
-	# supported.
+		# Held on, not left to balance. A capsule on top of a capsule rolls off
+		# in about a fifth of a second, so without this the stomp lasted a
+		# fraction of head_stomp_time and the number meant nothing. Our own
+		# position, which is ours to write, put on top of the head.
+		player.global_position = _head_body.global_position \
+			+ Vector3.UP * (Player.BODY_HALF_HEIGHT * 2.0)
+		player.velocity = Vector3.ZERO
+		if player.state == Player.State.AIRBORNE:
+			player.change_state(Player.State.IDLE)
+		return true
+	# Time up: off it. Nothing is being done to anyone, so this is not a force
+	# event -- the body is simply no longer held up.
+	var stepped_off := _head_body
 	_head_stand_left = 0.0
+	_head_body = null
 	player.floor_snap_length = 0.0
 	player.change_state(Player.State.AIRBORNE)
-	print("PLAYGROUND_HEAD_SLIDE off=%s by=%s" % [floor_body.name, player.name])
+	print("PLAYGROUND_HEAD_SLIDE off=%s by=%s window=%.2f" % [
+		stepped_off.name, player.name, Tuning.values.head_stomp_time])
 	return true
 
 
-# What this body is standing on, if anything.
+# What this body is standing on, if anything. The slide list is asked first and
+# a short ray second: standing still on another capsule often produces no slide
+# collision at all, and the stomp was being armed or not depending on that.
 func _floor_body() -> Node:
 	if not player.is_on_floor():
 		return null
@@ -470,7 +497,13 @@ func _floor_body() -> Node:
 		var collision := player.get_slide_collision(index)
 		if collision.get_normal().y > 0.5:
 			return collision.get_collider()
-	return null
+	var from := player.global_position
+	var query := PhysicsRayQueryParameters3D.create(
+		from, from + Vector3.DOWN * (Player.BODY_HALF_HEIGHT + 0.3), Player.PLAYER_LAYER)
+	query.collide_with_areas = false
+	query.exclude = [player.get_rid()]
+	var hit := player.get_world_3d().direct_space_state.intersect_ray(query)
+	return hit.get("collider") if not hit.is_empty() else null
 
 
 # DOC (stage C-2): the jump goes where the cursor is, and the height comes out
@@ -605,6 +638,10 @@ func _launch_jump() -> void:
 	_jump_buffer_left = 0.0
 	_catch_buffer_left = 0.0
 	_coyote_left = 0.0
+	# Jumping off a head ends the stand on it. Without this the window carried
+	# over to the next time this body landed on a head and expired early
+	# there -- a stomp that measured 0.22 s of a 0.50 s window.
+	_clear_head_stand()
 	var from_dash := player.state == Player.State.DASH
 	_launch_from_dash = from_dash
 	var launch := jump_launch_velocity()
@@ -672,6 +709,11 @@ func shove_direction() -> Vector3:
 
 
 func _air_step(delta: float) -> void:
+	# In the air, so not standing on anything. The stomp window has to go here
+	# as well as on a jump: a body that was put in the air any other way kept
+	# the window and spent what was left of it the next time it landed on a
+	# head, which measured as a stomp far shorter than head_stomp_time.
+	_clear_head_stand()
 	if _jump_buffer_left > 0.0 and _coyote_left > 0.0:
 		# Walked off something a moment ago: this is still the jump.
 		_launch_jump()

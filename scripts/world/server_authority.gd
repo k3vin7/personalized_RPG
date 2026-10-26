@@ -76,6 +76,13 @@ const FALL_REPORT_TOLERANCE := 1.5
 # owner's report can arrive either side of the server seeing the landing.
 const FALL_PEAK_HOLD := 0.6
 
+# Stage D follow-up: a team mate's airborne state reaches the server a round
+# trip late, so a launch aimed at a jumping body was landing on a body the
+# server still thought was standing -- at 200 ms the co-op crossing failed for
+# that reason alone. A body seen in the air this recently still counts as in
+# the air for the launch.
+const AIRBORNE_MEMORY := 0.3
+
 # B-e move check. Sampled over a window rather than per step: a single physics
 # step of a replicated body is mostly packet timing, and dividing a lerp by
 # 1/120 s says nothing about how fast anyone is really going.
@@ -223,6 +230,18 @@ func _take_hold(holder_peer: int, target: Node3D) -> void:
 	if target.has_method("set_hold_display"):
 		target.set_hold_display(holder_peer)
 	print("PLAYGROUND_HOLD_TAKEN holder=%d target=%s" % [holder_peer, target.name])
+
+
+# In the air, or seen there within one round trip. The launch asks this rather
+# than the replicated state on its own.
+func recently_airborne(player: Player) -> bool:
+	if player == null:
+		return false
+	if player.state == Player.State.AIRBORNE:
+		return true
+	var watch: Dictionary = _fall_watch.get(player.get_multiplayer_authority(), {})
+	var seen := float(watch.get("air_at", -100.0))
+	return float(Time.get_ticks_msec()) / 1000.0 - seen <= AIRBORNE_MEMORY
 
 
 # Was this body standing on the thing it just picked up? Directly above it,
@@ -466,7 +485,7 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 		var is_ally := body is Player and Tuning.values.same_party
 		var push := forward
 		var launched := false
-		if is_ally and (body as Player).state == Player.State.AIRBORNE:
+		if is_ally and recently_airborne(body as Player):
 			# A team mate already in the air is launched, not shoved: this is
 			# what makes one player a step for another.
 			var angle := deg_to_rad(Tuning.values.shove_ally_launch_angle_deg)
@@ -845,6 +864,7 @@ func _watch_vitals(delta: float) -> void:
 			watch["peak"] = maxf(float(watch["peak"]), y) if bool(watch["tracking"]) else y
 			watch["tracking"] = true
 			watch["hold"] = FALL_PEAK_HOLD
+			watch["air_at"] = float(Time.get_ticks_msec()) / 1000.0
 		else:
 			watch["tracking"] = false
 			watch["hold"] = maxf(0.0, float(watch["hold"]) - delta)

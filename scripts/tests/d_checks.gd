@@ -477,23 +477,76 @@ func _dash_jump_range_check() -> void:
 		_local.movement.request_dash())
 	await get_tree().create_timer(0.06).timeout
 	await tick_request(func() -> void: _local.movement.press_jump())
+	# Two distances, because they answer different questions: how far the leap
+	# itself went, and how far the whole move covered. Only the first one is
+	# the budget's business.
 	var launch := Vector3.ZERO
+	var left_ground := Vector3.ZERO
 	var sampled := 0.0
 	while sampled < 3.0:
 		await get_tree().physics_frame
 		sampled += get_physics_process_delta_time()
 		if launch == Vector3.ZERO and _local.state == Player.State.AIRBORNE:
 			launch = _local.velocity
+			left_ground = _local.global_position
 		if launch != Vector3.ZERO and _local.is_grounded_state():
 			break
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
-	var travelled := Vector2(_local.global_position.x - from.x, _local.global_position.z - from.z).length()
+	var whole := Vector2(_local.global_position.x - from.x, _local.global_position.z - from.z).length()
+	var leap := Vector2(_local.global_position.x - left_ground.x, _local.global_position.z - left_ground.z).length()
 	var jump_reach := _local.leap_max_range()
-	note("dash jump: travelled %.2f m, launch %.2f (cap %.2f) | plain jump reach %.2f m, dash reach %.2f m" % [
-		travelled, launch.length(), _local.leap_speed_cap(), jump_reach,
+	note("dash jump: leap itself %.2f m from where the feet left the ground, whole move %.2f m from the dash's start | launch %.2f (cap %.2f), plain jump reach %.2f m, dash reach %.2f m" % [
+		leap, whole, launch.length(), _local.leap_speed_cap(), jump_reach,
 		_local.movement.dash_max_distance()])
 	expect(launch.length() <= _local.leap_speed_cap() + 0.4, "the_dash_jump_launch_is_inside_the_budget")
-	expect(travelled > jump_reach, "a_dash_jump_covers_more_ground_than_a_jump_alone")
+	# The leap is a leap: no dash speed survives into it.
+	expect(leap <= jump_reach + 0.5, "the_leap_out_of_a_dash_is_no_longer_than_any_other_leap")
+	expect(whole > leap, "but_the_whole_move_covers_more_because_the_dash_came_first")
+
+	# And the 5 m gap stays uncrossable alone, dash or no dash: the dash can
+	# carry a body to the lip, and the leap from there is still just a leap.
+	await tick_request(func() -> void:
+		placed()
+		_judge.server_respawn(_local)
+		# South of SmoothWall (x 13..19, z 1.7..2.3), which the dash used to
+		# start pressed against -- it ended on the wall in the first frame and
+		# the body never moved.
+		_local.global_position = Vector3(GAP5_LANE, 0.9, 1.0)
+		_local.velocity = Vector3.ZERO
+		_local.stamina = Tuning.values.stamina_max
+		_local.movement.cancel_target())
+	# The cooldown from the dash above has to run out, or the dash is refused
+	# and the body never leaves the mark -- which would pass this check for
+	# doing nothing at all.
+	await get_tree().create_timer(Tuning.values.dash_cooldown + 0.3).timeout
+	var started_at := _local.global_position.z
+	_hits = 0
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(Vector3(GAP5_LANE, 0.9, -1.4))
+		_hits = 1 if _local.movement.request_dash() else 0)
+	# Jumped at the lip, which is the best a single body can do.
+	var dashed := 0.0
+	while dashed < 1.0 and _local.global_position.z > -1.0:
+		await get_tree().physics_frame
+		dashed += get_physics_process_delta_time()
+	note("dash to the lip: accepted=%d z %.2f -> %.2f (grounded=%s stamina=%.0f)" % [
+		_hits, started_at, _local.global_position.z,
+		_local.is_grounded_state(), _local.stamina])
+	expect(_hits == 1 and _local.global_position.z < started_at - 2.0, "the_dash_to_the_lip_actually_ran")
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(Vector3(GAP5_LANE, 0.9, GAP5_FAR - 0.5))
+		_local.movement.press_jump())
+	await _beat(2.6)
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	var landed := _local.global_position
+	var crossed := landed.z < GAP5_FAR and landed.y > -1.0
+	note("5 m gap with a dash jump, alone: landed z=%.2f y=%.2f crossed=%s (far edge %.1f)" % [
+		landed.z, landed.y, crossed, GAP5_FAR])
+	expect(not crossed, "the_five_metre_gap_is_not_crossed_alone_even_with_a_dash")
+	await tick_request(func() -> void:
+		_judge.server_respawn(_local)
+		placed())
+	await _wait(1.0)
 
 
 # --------------------------------------------------------------------- RPCs
