@@ -29,6 +29,19 @@ func note(line: String) -> void:
 	print("BD_NOTE peer=%d %s" % [_peer_id, line])
 
 
+# Stage C: a harness placing a body is a teleport, and the move check is right
+# to notice one. The judge is told first, so the only warnings left in a run are
+# about movement nobody asked for.
+func placed() -> void:
+	var judge := ServerAuthority.instance
+	if judge == null:
+		return
+	if judge.is_judge():
+		judge.forgive_move(multiplayer.get_unique_id(), "")
+	else:
+		judge.harness_forgive_move.rpc_id(1)
+
+
 func tick_request(action: Callable) -> void:
 	Net.queue_physics(action)
 	for _frame in range(3):
@@ -143,10 +156,12 @@ func _fall_damage_checks() -> void:
 func _drop(height: float) -> Dictionary:
 	await tick_request(func() -> void:
 		_judge.server_respawn(_local)
+		placed()
 		_local.global_position = DROP_SPOT)
 	await get_tree().create_timer(0.6).timeout
 	var before := _local.hp
 	await tick_request(func() -> void:
+		placed()
 		_local.global_position = DROP_SPOT + Vector3.UP * height
 		_local.velocity = Vector3.ZERO
 		_local.floor_snap_length = 0.0
@@ -244,6 +259,7 @@ func _death_checks() -> void:
 	# The kill plane is the server's check, from the position it has.
 	await tick_request(func() -> void:
 		_judge.server_respawn(_local)
+		placed()
 		_local.global_position = Vector3(0.0, Tuning.values.kill_plane_y - 2.0, 8.0))
 	await get_tree().create_timer(0.5).timeout
 	expect(_local.sync_dead and _local.state == Player.State.DEAD, "kill_plane_ruled_by_server")
@@ -279,6 +295,7 @@ func stage_done(name_text: String) -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_park(point: Vector3) -> void:
 	await tick_request(func() -> void:
+		placed()
 		_local.global_position = point
 		_local.movement.set_aim_override(Vector3.INF))
 	await get_tree().create_timer(0.4).timeout
@@ -288,6 +305,7 @@ func client_park(point: Vector3) -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_drop(height: float) -> void:
 	await tick_request(func() -> void:
+		placed()
 		_local.global_position = _local.global_position + Vector3.UP * height
 		_local.velocity = Vector3.ZERO
 		_local.floor_snap_length = 0.0

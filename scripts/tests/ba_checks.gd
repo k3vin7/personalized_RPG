@@ -18,6 +18,19 @@ func expect(condition: bool, label: String) -> void:
 	print("BA_CHECK peer=%d %s %s" % [_peer_id, "PASS" if condition else "FAIL", label])
 
 
+# Stage C: a harness placing a body is a teleport, and the move check is right
+# to notice one. The judge is told first, so the only warnings left in a run are
+# about movement nobody asked for.
+func placed() -> void:
+	var judge := ServerAuthority.instance
+	if judge == null:
+		return
+	if judge.is_judge():
+		judge.forgive_move(multiplayer.get_unique_id(), "")
+	else:
+		judge.harness_forgive_move.rpc_id(1)
+
+
 func tick_request(action: Callable) -> void:
 	Net.queue_physics(action)
 	for _frame in range(3):
@@ -44,6 +57,7 @@ func run(world: Node3D) -> void:
 		var rock := _world.get_node("Rock_2") as Rock
 		await tick_request(func() -> void:
 			_local.respawn()
+			placed()
 			_local.global_position = Vector3(-14.0, 0.9, 8.0))
 		exercise_requests.rpc_id(peers[0], _local.get_path(), rock.get_path())
 		await get_tree().create_timer(0.5).timeout
@@ -127,6 +141,7 @@ func _local_checks() -> void:
 			Vector3(TimeBoundary.SEAM.x, 1.5, terrain.face_z() - 1.0), Layers.TERRAIN)
 		var hit := _local.get_world_3d().direct_space_state.intersect_ray(query)
 		expect(hit.get("collider") == terrain.face, "aura_does_not_intercept_click_ray")
+		placed()
 		_local.global_position = Vector3(TimeBoundary.SEAM.x + (3.0 if _peer_id != 1 else 0.0), 0.9, terrain.face_z() + 5.0))
 	await get_tree().create_timer(0.6).timeout
 	if _peer_id == 1 and DisplayServer.get_name() != "headless":
@@ -150,8 +165,10 @@ func _rock_checks() -> void:
 	var rock := _world.get_node("Rock_2") as Rock
 	var judge := ServerAuthority.instance
 	await tick_request(func() -> void:
+		placed()
 		_local.global_position = rock.global_position + Vector3(20.0, 0.0, 0.0)
 		expect(not judge.can_grab(_local, rock), "rock_rejects_far_holder")
+		placed()
 		_local.global_position = rock.global_position + Vector3(1.0, 0.3, 0.0)
 		_local.stats.strength = 1.0
 		expect(not judge.can_grab(_local, rock), "rock_rejects_insufficient_strength")
@@ -198,6 +215,7 @@ func exercise_requests(host_path: NodePath, rock_path: NodePath) -> void:
 	await get_tree().create_timer(1.0).timeout
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = rock.global_position + Vector3(1.0, 0.3, 0.0))
 	await get_tree().create_timer(0.4).timeout
 	await tick_request(func() -> void:
@@ -211,6 +229,7 @@ func exercise_requests(host_path: NodePath, rock_path: NodePath) -> void:
 		_local.movement.set_aim_override(Vector3.INF))
 	await get_tree().create_timer(0.4).timeout
 	await tick_request(func() -> void:
+		placed()
 		_local.global_position = host_player.global_position + Vector3(1.2, 0.0, 0.0))
 	await get_tree().create_timer(0.4).timeout
 	await tick_request(func() -> void:

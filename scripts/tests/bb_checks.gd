@@ -34,6 +34,19 @@ func expect(condition: bool, label: String) -> void:
 	print("BB_CHECK peer=%d %s %s" % [_peer_id, "PASS" if condition else "FAIL", label])
 
 
+# Stage C: a harness placing a body is a teleport, and the move check is right
+# to notice one. The judge is told first, so the only warnings left in a run are
+# about movement nobody asked for.
+func placed() -> void:
+	var judge := ServerAuthority.instance
+	if judge == null:
+		return
+	if judge.is_judge():
+		judge.forgive_move(multiplayer.get_unique_id(), "")
+	else:
+		judge.harness_forgive_move.rpc_id(1)
+
+
 func tick_request(action: Callable) -> void:
 	Net.queue_physics(action)
 	for _frame in range(3):
@@ -116,6 +129,7 @@ func _host_shove_checks() -> void:
 	var pushed_from := dummy.global_position
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = dummy.global_position - Vector3(1.0, 0.1, 0.0)
 		_local.movement.set_aim_override(dummy.global_position))
 	await get_tree().create_timer(0.3).timeout
@@ -169,6 +183,7 @@ func _client_action_checks() -> void:
 	var hp_before := _local.hp
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = PARK_HOST)
 	await get_tree().create_timer(0.5).timeout
 	client_shove.rpc_id(_client_peer(), _local.get_path())
@@ -197,6 +212,7 @@ func _escape_checks() -> void:
 	await get_tree().create_timer(0.6).timeout
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = victim.global_position + Vector3(0.9, 0.0, 0.0)
 		_local.movement.set_aim_override(victim.global_position))
 	await get_tree().create_timer(0.6).timeout
@@ -249,6 +265,7 @@ func client_shove(host_path: NodePath) -> void:
 	var host_player := get_node(host_path) as Player
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = host_player.global_position - Vector3(1.0, 0.0, 0.0)
 		_local.movement.set_aim_override(host_player.global_position))
 	await get_tree().create_timer(0.4).timeout
@@ -265,6 +282,7 @@ func client_rock(rock_path: NodePath) -> void:
 	var rock := get_node(rock_path) as Rock
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = rock.global_position + Vector3(1.0, 0.3, 0.0)
 		_local.movement.set_aim_override(rock.global_position))
 	await get_tree().create_timer(0.5).timeout
@@ -287,6 +305,7 @@ func client_rock(rock_path: NodePath) -> void:
 func client_park(point: Vector3) -> void:
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = point
 		_local.movement.set_aim_override(Vector3.INF))
 	await get_tree().create_timer(0.4).timeout

@@ -71,6 +71,7 @@ func grab() -> bool:
 		return false
 	_pending_target = best
 	_pending_left = ServerAuthority.INTENT_TIMEOUT
+	player.begin_predicted(ServerAuthority.Intent.GRAB)
 	ServerAuthority.submit_intent(
 		player, ServerAuthority.Intent.GRAB, {"target": best.get_path()})
 	return true
@@ -104,6 +105,7 @@ func throw() -> bool:
 	var direction := throw_direction()
 	if direction == Vector3.ZERO:
 		return false
+	player.begin_predicted(ServerAuthority.Intent.THROW)
 	var allowed: Variant = ServerAuthority.submit_intent(
 		player, ServerAuthority.Intent.THROW, {"direction": direction})
 	# A client's throw lands a round trip later; the host's is already done.
@@ -133,6 +135,7 @@ func drop() -> void:
 func escape_press() -> void:
 	if not is_held():
 		return
+	player.begin_predicted(ServerAuthority.Intent.ESCAPE)
 	ServerAuthority.submit_intent(player, ServerAuthority.Intent.ESCAPE, {})
 
 
@@ -154,6 +157,7 @@ func on_force_received() -> void:
 
 func _leave_held() -> void:
 	clear_holder()
+	player.clear_predicted()
 	if player.state == Player.State.GRABBED:
 		player.change_state(Player.State.AIRBORNE)
 
@@ -187,6 +191,7 @@ func _physics_process(delta: float) -> void:
 		# it is written here and not by the server.
 		holder = judge.actor_for(holder_peer)
 		held = null
+		player.clear_predicted()
 		if player.state != Player.State.GRABBED:
 			if player.climb != null and player.climb.is_climbing():
 				player.climb.detach(0.0)
@@ -208,6 +213,7 @@ func _physics_process(delta: float) -> void:
 	if my_target != null:
 		if held != my_target:
 			held = my_target
+			player.clear_predicted()
 			_pending_target = null
 			_pending_left = 0.0
 			if player.movement != null:
@@ -217,6 +223,9 @@ func _physics_process(delta: float) -> void:
 			player.change_state(Player.State.GRABBING)
 		return
 
+	if held != null:
+		# The hand emptied: a throw or a put-down has been answered.
+		player.clear_predicted()
 	held = null
 	if player.state == Player.State.GRABBING:
 		player.change_state(Player.State.IDLE)

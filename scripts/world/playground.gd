@@ -165,6 +165,12 @@ func _run_smoke() -> void:
 		get_tree().root.add_child(checks)
 		checks.run(self)
 		return
+	if Net.auto_only == "C":
+		var cc := preload("res://scripts/tests/c_checks.gd").new()
+		cc.name = "CChecks"
+		get_tree().root.add_child(cc)
+		cc.run(self)
+		return
 	if Net.auto_only == "B-e":
 		var be := preload("res://scripts/tests/be_checks.gd").new()
 		be.name = "BeChecks"
@@ -268,6 +274,7 @@ func _run_smoke() -> void:
 	# order and the body walks out over the edge and falls. That is the asked
 	# for behaviour, so what is checked is that it leaves the plaza and that
 	# falling resolves itself rather than wedging the body somewhere.
+	_harness_placed(local)
 	local.global_position = Vector3(-15.0, 1.0, 0.0)
 	await get_tree().create_timer(0.6).timeout
 	local.movement.set_target(Vector3(-15.0, 0.0, -6.0))
@@ -487,6 +494,7 @@ func _run_stage4_checks(local: Player) -> void:
 	# Jumping at a climbable wall and pressing jump again while touching it
 	# takes hold, and hanging there drains stamina without an entry fee.
 	await _settle(local, front_face + Vector3(0.0, -0.5, 2.0))
+	_harness_placed(local)
 	local.global_position = front_face + Vector3(0.0, 2.5, 2.3)
 	local.velocity = Vector3(0.0, 0.0, -4.0)
 	local.change_state(Player.State.AIRBORNE)
@@ -607,6 +615,7 @@ func _run_stage3_checks(local: Player) -> void:
 
 	# In the air it does not go at all.
 	await _settle(local, Vector3(0.0, 4.0, 11.0))
+	_harness_placed(local)
 	local.global_position = Vector3(0.0, 6.0, 11.0)
 	await get_tree().physics_frame
 	await get_tree().physics_frame
@@ -681,7 +690,8 @@ func _drop_from(local: Player, height: float) -> Dictionary:
 	await _settle(local, Vector3(0.0, 1.0, 11.0))
 	local.hp = local.stats.max_hp
 	var before := local.hp
-	ServerAuthority.instance.forgive_move(local.get_multiplayer_authority(), "")
+	_harness_placed(local)
+	_harness_placed(local)
 	local.global_position = Vector3(0.0, 0.9 + height, 11.0)
 	local.velocity = Vector3.ZERO
 	local.floor_snap_length = 0.0
@@ -702,6 +712,7 @@ func _drop_from(local: Player, height: float) -> Dictionary:
 func _run_respawn_checks(local: Player) -> void:
 	# Falling past the kill plane kills and brings the body back on its own.
 	await _settle(local, Vector3(0.0, 1.0, 8.0))
+	_harness_placed(local)
 	local.global_position = Vector3(0.0, Tuning.values.kill_plane_y - 2.0, 8.0)
 	await get_tree().create_timer(0.3).timeout
 	var died := local.state == Player.State.DEAD
@@ -869,6 +880,20 @@ func _jump_on_the_run(
 	return local.global_position
 
 
+# Stage C: every harness placement tells the judge first, so the only move
+# warnings a run can produce are about movement nobody asked for. place_remote
+# runs on the client being placed, which is why it goes through the harness
+# hook rather than calling the judge directly.
+func _harness_placed(body: Player) -> void:
+	var judge := ServerAuthority.instance
+	if judge == null or body == null:
+		return
+	if judge.is_judge():
+		judge.forgive_move(body.get_multiplayer_authority(), "")
+	else:
+		judge.harness_forgive_move.rpc_id(1)
+
+
 func _settle(local: Player, at_position: Vector3) -> Vector3:
 	# A check that ended in a fall leaves the body dead and unable to move, so
 	# wait the respawn out before placing it for the next one.
@@ -876,14 +901,14 @@ func _settle(local: Player, at_position: Vector3) -> Vector3:
 	while local.state == Player.State.DEAD and waited < 6.0:
 		await get_tree().physics_frame
 		waited += get_physics_process_delta_time()
+	_harness_placed(local)
 	local.global_position = at_position
 	local.velocity = Vector3.ZERO
 	local.movement.cancel_target()
-	# B-e: a harness putting a body somewhere is a teleport, and the move check
-	# would be right to call it one. The server is the one doing it here, so it
-	# forgives the sample it straddles rather than warning about its own work.
-	if ServerAuthority.instance != null:
-		ServerAuthority.instance.forgive_move(local.get_multiplayer_authority(), "")
+	# A harness putting a body somewhere is a teleport, and the move check would
+	# be right to call it one. It is told, rather than warning about work the
+	# harness asked for.
+	_harness_placed(local)
 	await get_tree().create_timer(0.8).timeout
 	return local.global_position
 
@@ -1185,6 +1210,7 @@ func _run_stage7_checks(local: Player) -> void:
 		for _frame in range(3):
 			await get_tree().physics_frame
 		var carrying := local.state == Player.State.GRABBING
+		_harness_placed(local)
 		local.global_position = THROW_LANE
 		await get_tree().physics_frame
 		await get_tree().physics_frame
@@ -1268,6 +1294,7 @@ func _run_stage7_checks(local: Player) -> void:
 		# 7-6: and so does a holder who leaves the ground.
 		await _settle(local, Vector3(0.0, 1.0, 11.0))
 		await _hand_grab(local, rock_1)
+		_harness_placed(local)
 		local.global_position += Vector3.UP * 2.0
 		local.change_state(Player.State.AIRBORNE)
 		await get_tree().create_timer(ServerAuthority.HOLD_GRACE + 0.3).timeout
@@ -1540,6 +1567,7 @@ func place_remote(at: Vector3) -> void:
 		# Otherwise the pending respawn fires later and moves the body out from
 		# under whatever the host was about to measure.
 		local.respawn()
+	_harness_placed(local)
 	local.global_position = at
 	local.velocity = Vector3.ZERO
 	local.movement.cancel_target()
@@ -1707,8 +1735,11 @@ func _build_gaps() -> void:
 			Vector3(8.0, 1.0, width + 1.0),
 			Color("5f656b"),
 			WORLD_LAYER)
-		# Nothing to stand on, only something to path over.
-		_nav_bridge("GapBridge_%.0f" % width, Vector3(lane, -0.5, gap_start - width * 0.5), Vector3(8.0, 1.0, width))
+		# Stage C: there was a navigation bridge over each gap, so a click on the
+		# far side produced a path that walked straight off the edge. It is gone:
+		# the click is now unreachable, the body stops at the lip with the
+		# direction remembered, and Space is what crosses. _nav_bridge() is kept
+		# for the places that still want path without floor.
 		_sign("GAP %.0fm" % width, Vector3(lane, 1.6, gap_start + 1.0), Color("d9f3ff"))
 
 

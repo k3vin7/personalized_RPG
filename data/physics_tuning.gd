@@ -10,6 +10,10 @@ extends Resource
 @export var base_move_speed: float = 6.0
 @export var base_jump_height: float = 1.6
 @export var move_intent_timeout: float = 1.5
+# Stage C, the variable jump. A press always launches at the full height; let go
+# before jump_hold_time and the rise is cut to this share of it.
+@export var jump_tap_height_ratio: float = 0.55
+@export var jump_hold_time: float = 0.15
 # The jump goes where the cursor points. Turn it off for the documented rule,
 # where the jump keeps the heading it was already travelling on.
 @export var jump_aims_at_cursor: bool = true
@@ -24,7 +28,11 @@ extends Resource
 @export var ratio_mult_max: float = 1.3
 
 @export_group("Dash")
-@export var dash_distance: float = 4.0
+# Stage C: the dash goes to the cursor, between these two, with the far end
+# scaled by the strength multiplier. dash_distance was one fixed number; it is
+# gone rather than kept beside these, so there is nothing to disagree with.
+@export var dash_min_distance: float = 1.2
+@export var dash_max_distance_base: float = 4.0
 @export var dash_duration: float = 0.18
 @export var dash_cooldown: float = 1.0
 
@@ -34,6 +42,8 @@ extends Resource
 @export var stamina_max: float = 100.0
 @export var stamina_climb_drain: float = 15.0
 @export var stamina_regen: float = 25.0
+# 6-chapter stamina costs. Dash is the one stage C spends.
+@export var stamina_dash_cost: float = 10.0
 
 @export_group("Force")
 @export var shove_power: float = 7.0

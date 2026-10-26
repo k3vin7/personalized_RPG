@@ -98,6 +98,13 @@ var overhead_note := ""
 # B-c: a read-only copy of a row in ServerAuthority's hold table, written by
 # set_hold_display() on every peer and decided nowhere else.
 var holder_peer := 0
+# Stage C, the felt delay. A press shows on this body at once -- a lean and a
+# brighter skin -- while the ruling is still crossing the network. It is only a
+# picture: nothing about the hit, the hold or the damage is decided here, and a
+# refusal from the server takes the picture back.
+var predicted_action := -1
+var predicted_at_msec := 0
+var _predicted_left := 0.0
 var _teleport_blind_left := 0.0
 var _respawning := false
 # See _physics_process: how long a stale "you are dead" copy is ignored after
@@ -307,6 +314,11 @@ func _physics_process(delta: float) -> void:
 		# can arrive before the flag packet that cleared the death, and without
 		# it the body stood up and was put straight back down as dead.
 		_respawn_echo_left = maxf(0.0, _respawn_echo_left - delta)
+		if _predicted_left > 0.0:
+			_predicted_left -= delta
+			if _predicted_left <= 0.0:
+				# Nothing answered. The picture goes rather than sticks.
+				clear_predicted()
 		if sync_dead and state != State.DEAD and _respawn_echo_left <= 0.0:
 			enter_dead_now()
 		if state == State.STUNNED:
@@ -582,10 +594,60 @@ func _build_body() -> void:
 	_apply_state_colour()
 
 
+# How long a press is shown while nothing has answered it. Long enough for a
+# 200 ms round trip and the ruling at the far end, short enough that a lost
+# answer does not leave the body posing.
+const PREDICT_SHOW := 0.8
+const PREDICT_NAMES := {
+	ServerAuthority.Intent.SHOVE: "밀치기",
+	ServerAuthority.Intent.GRAB: "잡기",
+	ServerAuthority.Intent.THROW: "던지기",
+	ServerAuthority.Intent.ESCAPE: "탈출",
+}
+
+
+# Shown on the frame of the press, by the machine that pressed.
+func begin_predicted(kind: int) -> void:
+	if not is_local():
+		return
+	predicted_action = kind
+	predicted_at_msec = Time.get_ticks_msec()
+	_predicted_left = PREDICT_SHOW
+	_apply_predicted_pose()
+	_apply_state_colour()
+
+
+# The answer arrived, or the server refused, or nothing came at all.
+func clear_predicted() -> void:
+	if predicted_action == -1:
+		return
+	predicted_action = -1
+	_predicted_left = 0.0
+	_apply_predicted_pose()
+	_apply_state_colour()
+
+
+# The whole of the motion: a lean towards whatever was aimed at. Deliberately
+# small -- it has to be taken back without looking like a glitch when the
+# server says no.
+func _apply_predicted_pose() -> void:
+	if _visual == null:
+		return
+	var leaning := predicted_action != -1
+	_visual.rotation.x = deg_to_rad(-12.0) if leaning else 0.0
+	_visual.position.y = -0.08 if leaning else 0.0
+
+
 func _apply_state_colour() -> void:
 	if _material != null:
-		_material.albedo_color = Color(STATE_COLORS.get(state, "6fa8dc"))
+		var colour := Color(STATE_COLORS.get(state, "6fa8dc"))
+		if predicted_action != -1:
+			# Brighter while a press is waiting on its answer.
+			colour = colour.lerp(Color.WHITE, 0.35)
+		_material.albedo_color = colour
 	if _label != null:
 		_label.text = "%s · %s" % [name, State.keys()[state]]
+		if predicted_action != -1:
+			_label.text += " (%s?)" % PREDICT_NAMES.get(predicted_action, "동작")
 		if overhead_note != "":
 			_label.text += "\n" + overhead_note

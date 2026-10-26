@@ -32,6 +32,19 @@ func note(line: String) -> void:
 	print("BC_NOTE peer=%d %s" % [_peer_id, line])
 
 
+# Stage C: a harness placing a body is a teleport, and the move check is right
+# to notice one. The judge is told first, so the only warnings left in a run are
+# about movement nobody asked for.
+func placed() -> void:
+	var judge := ServerAuthority.instance
+	if judge == null:
+		return
+	if judge.is_judge():
+		judge.forgive_move(multiplayer.get_unique_id(), "")
+	else:
+		judge.harness_forgive_move.rpc_id(1)
+
+
 func tick_request(action: Callable) -> void:
 	Net.queue_physics(action)
 	for _frame in range(3):
@@ -124,6 +137,7 @@ func _host_shove_checks() -> void:
 	var stood := dummy.global_position
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = dummy.global_position - Vector3(1.0, 0.1, 0.0)
 		_local.movement.set_aim_override(dummy.global_position))
 	await get_tree().create_timer(0.4).timeout
@@ -143,6 +157,7 @@ func _host_hold_checks() -> void:
 	var heavy := _world.get_node("Rock_2") as Rock      # 20 kg
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = PARK_HOST)
 	await get_tree().create_timer(0.4).timeout
 
@@ -188,6 +203,7 @@ func _client_action_checks() -> void:
 	var hp_before := _local.hp
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = PARK_HOST)
 	await get_tree().create_timer(0.5).timeout
 
@@ -219,6 +235,7 @@ func _escape_checks() -> void:
 	await get_tree().create_timer(0.6).timeout
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = victim.global_position + Vector3(0.9, 0.0, 0.0)
 		_local.movement.set_aim_override(victim.global_position))
 	await get_tree().create_timer(0.6).timeout
@@ -257,6 +274,7 @@ func _exception_checks() -> void:
 	# 2. The holder leaves the ground.
 	var state_released := _released("holder_state")
 	expect(await _hold_then(rock, func() -> void:
+		placed()
 		_local.global_position += Vector3.UP * 2.0
 		_local.change_state(Player.State.AIRBORNE)), "hold_taken_for_fall_case")
 	await get_tree().create_timer(0.4).timeout
@@ -275,6 +293,7 @@ func _exception_checks() -> void:
 	# 3. The held body is pushed by something else.
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = victim.global_position + Vector3(0.9, 0.0, 0.0)
 		_local.movement.set_aim_override(victim.global_position))
 	await get_tree().create_timer(0.6).timeout
@@ -308,6 +327,7 @@ func _hold_then(rock: Rock, after: Callable) -> bool:
 	await tick_request(func() -> void:
 		if _local.state == Player.State.DEAD:
 			_local.respawn()
+		placed()
 		_local.global_position = PARK_HOST
 		_local.velocity = Vector3.ZERO
 		if _local.state != Player.State.IDLE and _local.is_grounded_state() == false:
@@ -337,6 +357,7 @@ func _rock_versus_player_check() -> void:
 	expect(await _wait_stage("parked"), "client_parked_in_hit_lane")
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = HIT_LANE)
 	await get_tree().create_timer(0.8).timeout
 	await tick_request(func() -> void:
@@ -412,6 +433,7 @@ func escape_progress(presses: int) -> void:
 func client_park(point: Vector3) -> void:
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = point
 		_local.movement.set_aim_override(Vector3.INF))
 	await get_tree().create_timer(0.4).timeout
@@ -423,6 +445,7 @@ func client_shove(host_path: NodePath) -> void:
 	var host_player := get_node(host_path) as Player
 	await tick_request(func() -> void:
 		_local.respawn()
+		placed()
 		_local.global_position = host_player.global_position - Vector3(1.0, 0.0, 0.0)
 		_local.movement.set_aim_override(host_player.global_position))
 	await get_tree().create_timer(0.5).timeout

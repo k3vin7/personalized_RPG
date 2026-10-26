@@ -51,8 +51,16 @@ var _intent_direction := Vector3.ZERO
 var _intent_left := 0.0
 var _pending_air_target: Variant = null
 var _dash_left := 0.0
+var _dash_total := 0.0
 var _dash_direction := Vector3.ZERO
 var _dash_cooldown_left := 0.0
+# Stage C's variable jump. The press launches at full height; these say whether
+# the key is still down and how long the cut is still allowed.
+var _jump_cut_left := 0.0
+var _jump_held := false
+# Set when a launch came out of a dash, which spends the leap budget on
+# distance rather than height.
+var _launch_from_dash := false
 var _climb_wall: CollisionObject3D
 var _climb_point := Vector3.ZERO
 var _climb_normal := Vector3.ZERO
@@ -81,9 +89,21 @@ func cancel_target() -> void:
 
 # Same path the key takes: the buffer is the only way in, so a test and a key
 # press go through identical code.
-func request_jump() -> void:
+# The key, and what the checks press. Held until release_jump(), so a caller
+# that only presses gets the full height -- which is what request_jump() has
+# always meant.
+func press_jump() -> void:
 	_jump_buffer_left = JUMP_BUFFER
 	_catch_buffer_left = CATCH_BUFFER
+	_jump_held = true
+
+
+func release_jump() -> void:
+	_jump_held = false
+
+
+func request_jump() -> void:
+	press_jump()
 
 
 func has_target() -> bool:
@@ -180,8 +200,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		# Always buffered, never acted on here: input runs outside the physics
 		# step, where is_on_floor() and the contact list both still describe
 		# the previous one. What the press means is decided in the step.
-		_jump_buffer_left = JUMP_BUFFER
-		_catch_buffer_left = CATCH_BUFFER
+		press_jump()
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_released("jump"):
+		# A flag, not an action: the cut itself happens in the physics step,
+		# where the velocity lives.
+		release_jump()
 		get_viewport().set_input_as_handled()
 
 
@@ -199,6 +224,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_jump_buffer_left = maxf(0.0, _jump_buffer_left - delta)
 	_catch_buffer_left = maxf(0.0, _catch_buffer_left - delta)
+	_apply_jump_cut(delta)
 	_dash_cooldown_left = maxf(0.0, _dash_cooldown_left - delta)
 	_intent_left = maxf(0.0, _intent_left - delta)
 	if _intent_left == 0.0:
@@ -269,23 +295,69 @@ func _ground_step(delta: float) -> void:
 	_try_attach_climb()
 
 
+# DOC (stage C): a touch lifts less than a hold. The press always launches at
+# the full height, and letting go inside jump_hold_time takes the rise back
+# down to jump_tap_height_ratio of it. Cutting the rise rather than launching
+# twice is what makes the two feel like one button: the body is already moving
+# on the frame of the press, whatever happens next.
+func _apply_jump_cut(delta: float) -> void:
+	if _jump_cut_left <= 0.0:
+		return
+	_jump_cut_left = maxf(0.0, _jump_cut_left - delta)
+	if _jump_held or player.state != Player.State.AIRBORNE or player.velocity.y <= 0.0:
+		return
+	# Height goes with the square of the speed, so the speed that reaches a
+	# share of the height is that share's square root of it.
+	var tapped: float = player.get_jump_velocity() * sqrt(maxf(0.0, Tuning.values.jump_tap_height_ratio))
+	player.velocity.y = minf(player.velocity.y, tapped)
+	_jump_cut_left = 0.0
+
+
 func _launch_jump() -> void:
 	_jump_buffer_left = 0.0
 	_catch_buffer_left = 0.0
 	_coyote_left = 0.0
+	var from_dash := player.state == Player.State.DASH
+	_launch_from_dash = from_dash
 	var launch := jump_launch_velocity()
+	_launch_from_dash = false
 	_clear_intent()
 	cancel_target()
+	_dash_left = 0.0
 	player.velocity = launch
 	player.floor_snap_length = 0.0
 	player.change_state(Player.State.AIRBORNE)
+	# The cut is only offered to a jump that asked for height. A dash jump has
+	# already spent its budget sideways.
+	_jump_cut_left = 0.0 if from_dash else Tuning.values.jump_hold_time
 	player.move_and_slide()
 
 
-# The preview and the real launch share cursor, deadzone and intent rules.
+# DOC (stage C, 4-chapter): one budget for every leap.
+#
+#     v_cap = sqrt(v_jump_max^2 + v_move_max^2)
+#
+# and a launch may not exceed it: given a horizontal h, the vertical is
+# min(v_jump_max, sqrt(v_cap^2 - h^2)). Standing still spends it all on height,
+# which is why a standing jump is the highest one there is.
+#
+# A jump out of a dash spends it on distance instead. At a fixed launch speed
+# the range is longest at 45 degrees, so that is the split it takes: half the
+# budget each way. Sending the whole budget sideways would be within the cap
+# and would also never leave the ground.
+func leap_speed_cap() -> float:
+	var jump_max := player.get_jump_velocity()
+	var move_max := player.get_move_speed()
+	return sqrt(jump_max * jump_max + move_max * move_max)
+
+
+# The preview and the real launch share cursor, deadzone, intent and cap rules.
 func jump_launch_velocity() -> Vector3:
 	var horizontal := Vector3(player.velocity.x, 0.0, player.velocity.z)
-	if Tuning.values.jump_aims_at_cursor:
+	if _launch_from_dash and _dash_direction.length_squared() > 0.01:
+		# The dash decides where, the budget decides how fast.
+		horizontal = _dash_direction * player.get_move_speed()
+	elif Tuning.values.jump_aims_at_cursor:
 		horizontal = _cursor_jump_velocity(horizontal)
 	elif horizontal.length() <= 0.1:
 		# Standing still, but an order was blocked by a gap: jump the way the
@@ -294,8 +366,22 @@ func jump_launch_velocity() -> Vector3:
 			horizontal = _intent_direction * player.get_move_speed()
 		else:
 			horizontal = Vector3.ZERO
-	horizontal.y = player.get_jump_velocity()
-	return horizontal
+	var cap := leap_speed_cap()
+	var flat := Vector3(horizontal.x, 0.0, horizontal.z)
+	var speed := flat.length()
+	var vertical := player.get_jump_velocity()
+	if _launch_from_dash:
+		# 45 degrees: the longest jump the budget can buy.
+		var share := cap / sqrt(2.0)
+		flat = (flat.normalized() if speed > 0.01 else Vector3.ZERO) * share
+		vertical = share
+	else:
+		if speed > cap:
+			flat = flat.normalized() * cap
+			speed = cap
+		vertical = minf(vertical, sqrt(maxf(0.0, cap * cap - speed * speed)))
+	flat.y = vertical
+	return flat
 
 
 func _stunned_step(delta: float) -> void:
@@ -317,6 +403,9 @@ func shove() -> int:
 	var forward := shove_direction()
 	if forward == Vector3.ZERO:
 		return 0
+	# Stage C: shown now, ruled later.
+	player.snap_facing(forward)
+	player.begin_predicted(ServerAuthority.Intent.SHOVE)
 	var hits: Variant = ServerAuthority.submit_intent(
 		player, ServerAuthority.Intent.SHOVE, {"direction": forward})
 	return int(hits) if hits is int else 0
@@ -452,14 +541,35 @@ func _try_attach_climb() -> void:
 	player.climb.attach(body, point, normal)
 
 
+# DOC (stage C): the dash goes to the cursor. Short of dash_min_distance it
+# still travels that far, and it never goes past dash_max_distance_base scaled
+# by this body's strength. It costs stamina, and with none left it does not go.
+func dash_max_distance() -> float:
+	return Tuning.values.dash_max_distance_base * Tuning.ratio_mult(
+		player.get_ratio(), Tuning.values.ratio_k_speed)
+
+
+func dash_distance_for_cursor() -> float:
+	var point: Variant = _cursor_ground_point()
+	if point == null:
+		return 0.0
+	var wanted := _flat_distance(player.global_position, point as Vector3)
+	return clampf(wanted, Tuning.values.dash_min_distance, dash_max_distance())
+
+
 func request_dash() -> bool:
 	if not player.is_grounded_state() or _dash_cooldown_left > 0.0:
 		return false
 	var aim := cursor_direction()
 	if aim.length_squared() < 0.01:
 		return false
+	if player.stamina < Tuning.values.stamina_dash_cost:
+		print("PLAYGROUND_DASH_NO_STAMINA peer=%s stamina=%.1f" % [player.name, player.stamina])
+		return false
+	player.stamina -= Tuning.values.stamina_dash_cost
 	_dash_direction = aim
-	_dash_left = Tuning.values.dash_distance
+	_dash_total = dash_distance_for_cursor()
+	_dash_left = _dash_total
 	_dash_cooldown_left = Tuning.values.dash_cooldown
 	cancel_target()
 	_clear_intent()
@@ -473,7 +583,13 @@ func is_dashing() -> bool:
 
 
 func _dash_step(delta: float) -> void:
-	var speed: float = Tuning.values.dash_distance / maxf(Tuning.values.dash_duration, 0.01)
+	# A jump out of a dash is allowed, inside the same leap budget as any other.
+	if _jump_buffer_left > 0.0:
+		_launch_jump()
+		return
+	# The whole dash still takes dash_duration, however far it is going, so a
+	# short one is not a slow one.
+	var speed: float = _dash_total / maxf(Tuning.values.dash_duration, 0.01)
 	# Tracked as remaining distance so the last step covers exactly what is
 	# left rather than a frame's worth more or less.
 	var step := minf(speed * delta, _dash_left)
@@ -492,6 +608,7 @@ func _dash_step(delta: float) -> void:
 
 func _end_dash() -> void:
 	_dash_left = 0.0
+	_dash_total = 0.0
 	player.velocity.x = 0.0
 	player.velocity.z = 0.0
 	player.change_state(Player.State.IDLE if player.is_on_floor() else Player.State.AIRBORNE)

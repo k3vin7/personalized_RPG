@@ -337,7 +337,26 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 func _refuse(sender: int, kind: int, why: String) -> Variant:
 	rejected_intents += 1
 	print("PLAYGROUND_INTENT_REJECTED sender=%d kind=%d why=%s" % [sender, kind, why])
+	# Stage C: the asker is showing the press on its own screen while this
+	# travels. Telling it no is what takes the picture back, instead of leaving
+	# it to time out.
+	var actor := actor_for(sender)
+	if actor != null and actor.is_local():
+		actor.clear_predicted()
+	elif sender > 1:
+		intent_refused.rpc_id(sender, kind)
 	return null
+
+
+# Server -> the peer that asked. Carries no authority of its own: all it does
+# is end a local picture early.
+@rpc("any_peer", "call_remote", "reliable")
+func intent_refused(kind: int) -> void:
+	if not result_is_server_sent("intent_refused", multiplayer.get_remote_sender_id()):
+		return
+	var actor := actor_for(multiplayer.get_unique_id())
+	if actor != null and actor.is_local() and actor.predicted_action == kind:
+		actor.clear_predicted()
 
 
 # Only the shape of the message, not whether it is allowed. The rulings below
@@ -413,6 +432,8 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 	# whoever owns the body.
 	if actor.is_local():
 		actor.snap_facing(direction)
+		if actor.predicted_action == Intent.SHOVE:
+			actor.clear_predicted()
 	else:
 		face_shove.rpc_id(peer, direction)
 	print("PLAYGROUND_SHOVE by=%s hits=%d" % [actor.name, hits])
@@ -425,7 +446,11 @@ func face_shove(direction: Vector3) -> void:
 		return
 	var actor := actor_for(multiplayer.get_unique_id())
 	if actor != null and actor.is_local() and direction.is_finite():
-		Net.queue_physics(func() -> void: actor.snap_facing(direction))
+		Net.queue_physics(func() -> void:
+			actor.snap_facing(direction)
+			# The shove was allowed: the press has its answer.
+			if actor.predicted_action == Intent.SHOVE:
+				actor.clear_predicted())
 
 
 # Whether a hold may start: the table first, then reach, then the lift limit,
@@ -771,11 +796,25 @@ func forgive_move(peer: int, reason: String) -> void:
 		print("PLAYGROUND_MOVE_FORGIVEN peer=%d reason=%s" % [peer, reason])
 
 
+# For the automated checks only, which place bodies where a person never could.
+# Gated on the run being an automated one: in a session a person started, this
+# does nothing at all, so it is not a way around the move check.
+@rpc("any_peer", "call_remote", "reliable")
+func harness_forgive_move() -> void:
+	if not is_judge():
+		return
+	var sender := multiplayer.get_remote_sender_id()
+	if not Net.auto_smoke:
+		print("PLAYGROUND_HARNESS_FORGIVE_REFUSED sender=%d" % sender)
+		return
+	forgive_move(sender, "")
+
+
 # What this body's own strength could do, split by axis: a cap that mixed them
 # together would either excuse a sideways sprint or accuse an honest fall.
 func move_allowance(player: Player) -> Vector2:
 	var tolerance: float = Tuning.values.server_speed_tolerance
-	var dash_speed: float = Tuning.values.dash_distance / maxf(Tuning.values.dash_duration, 0.01)
+	var dash_speed: float = Tuning.values.dash_max_distance_base / maxf(Tuning.values.dash_duration, 0.01)
 	var horizontal := maxf(player.get_move_speed(), dash_speed)
 	# Vertical has two honest sources: our own jump, and gravity acting over
 	# the height the server watched this body reach.
@@ -783,6 +822,11 @@ func move_allowance(player: Player) -> Vector2:
 	var watch: Dictionary = _fall_watch.get(peer, {})
 	var drop := maxf(0.0, float(watch.get("peak", player.global_position.y)) - player.global_position.y)
 	var vertical := maxf(player.get_jump_velocity(), sqrt(2.0 * Tuning.values.gravity * drop))
+	# What the server knows of a remote body's apex is a packet old, so the drop
+	# it computes can be short of the real one and an honest fall then reads as
+	# too fast. One sample's worth of gravity covers that gap. (Measured: a team
+	# mate thrown at 18 m/s produced one warning per stage 7 run without it.)
+	vertical += Tuning.values.gravity * MOVE_SAMPLE * 2.0
 	var given: Dictionary = _move_watch.get(peer, {})
 	return Vector2(
 		horizontal * tolerance + float(given.get("h", 0.0)),
@@ -829,6 +873,13 @@ func _check_move(player: Player, delta: float) -> void:
 	# A body that is dead, being carried or standing on a moving hand is not
 	# moving under its own power, and the server is the one that put it there.
 	if player.sync_dead or holder_of(player) != 0:
+		return
+	# On a wall the wall owns the body, and taking hold of one is a documented
+	# one-step placement: the body is put square on the face so that the first
+	# frame of climbing already looks right. That snap is not a sprint, and
+	# climbing itself is slower than walking, which the allowance already
+	# covers. (Measured: an attach reads as 43 m/s for one sample.)
+	if player.state == Player.State.CLIMB or player.state == Player.State.MANTLE:
 		return
 	var allowance := move_allowance(player)
 	var horizontal := Vector2(moved.x, moved.z).length() / elapsed
