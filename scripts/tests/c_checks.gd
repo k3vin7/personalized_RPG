@@ -110,6 +110,8 @@ func run(world: Node3D) -> void:
 	await _air_space_checks()
 	await _smart_key_checks()
 	await _gap_edge_check()
+	await _gap_width_checks()
+	await _shadow_checks()
 	await _stamina_check()
 	await _client_feel_check()
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_c")
@@ -292,14 +294,16 @@ func _dash_checks() -> void:
 	var speed := _local.dash_speed()
 	var reach := _local.movement.dash_max_distance()
 	expect(absf(speed - cap * Tuning.values.dash_speed_mult) < 0.01, "the_dash_speed_is_the_cap_times_the_multiplier")
+	# The dash and the longest jump cover the same ground.
+	expect(absf(reach - _local.leap_max_range()) < 0.01, "the_dash_reaches_as_far_as_the_longest_jump")
 
 	var asked_two := await _dash_to(HOME, 2.0)
 	var asked_far := await _dash_to(HOME, 20.0)
 	var asked_short := await _dash_to(HOME, 0.4)
-	note("dash at strength 10: speed %.2f (cap %.2f) max %.2f m in %.2f s | cursor 2 m -> %.2f m in %.2f s | cursor 0.4 m -> %.2f m" % [
-		speed, cap, reach, Tuning.values.dash_time_max,
+	note("dash at strength 10: speed %.2f (= cap %.2f x %.1f) max %.2f m (= leap range) | cursor 2 m -> %.2f m in %.2f s | cursor 0.4 m -> %.2f m" % [
+		speed, cap, Tuning.values.dash_speed_mult, reach,
 		asked_two["distance"], asked_two["seconds"], asked_short["distance"]])
-	note("dash vs stage C (4.00 m in 0.18 s = 22.2 m/s): now %.2f m in %.2f s = %.1f m/s" % [
+	note("dash full: %.2f m in %.2f s = %.1f m/s (stage C was 4.00 m in 0.18 s = 22.2 m/s)" % [
 		asked_far["distance"], asked_far["seconds"],
 		float(asked_far["distance"]) / maxf(float(asked_far["seconds"]), 0.01)])
 	expect(absf(float(asked_two["distance"]) - 2.0) < 0.35, "cursor_two_metres_stops_at_two_metres")
@@ -462,8 +466,18 @@ func _air_space_checks() -> void:
 	var dashing := _local.movement.is_dashing()
 	Net.queue_physics(_local.movement.press_jump)
 	var jumped := await _left_the_ground()
-	note("space during a dash: was dashing=%s, left the ground=%s" % [dashing, jumped])
+	var dash_launch := Vector3.ZERO
+	var looked := 0.0
+	while looked < 0.5 and dash_launch == Vector3.ZERO:
+		await get_tree().physics_frame
+		looked += get_physics_process_delta_time()
+		if _local.state == Player.State.AIRBORNE:
+			dash_launch = _local.velocity
+	note("space during a dash: was dashing=%s, left the ground=%s, launch %.2f (dash speed %.2f, cap %.2f)" % [
+		dashing, jumped, dash_launch.length(), _local.dash_speed(), _local.leap_speed_cap()])
 	expect(dashing and jumped, "space_during_a_dash_is_the_dash_jump")
+	# The dash runs at twice the budget; the jump out of it does not.
+	expect(dash_launch.length() <= _local.leap_speed_cap() + 0.4, "a_dash_jump_is_cut_back_to_the_budget")
 	await _wait(1.5)
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
 	Tuning.values.smart_key_enabled = was
@@ -580,8 +594,9 @@ func _gap_edge_check() -> void:
 		if intent.length() > 0.5 and not _local.movement.has_target():
 			break
 	var stopped := _local.global_position
-	note("gap edge: stopped at z=%.2f (lip is -2.00), intent=(%.2f, %.2f) after %.2fs" % [
-		stopped.z, intent.x, intent.z, watched])
+	note("gap edge: stopped at z=%.2f (lip is -2.00), intent=(%.2f, %.2f) after %.2fs (hop %.2f, ledge margin %.2f)" % [
+		stopped.z, intent.x, intent.z, watched,
+		Tuning.values.jump_min_hop_height, Tuning.values.jump_ledge_margin])
 	expect(stopped.z > -2.6 and stopped.z < 0.6, "the_click_stopped_at_the_lip")
 	expect(_local.state != Player.State.DEAD, "the_click_did_not_walk_it_off")
 	expect(intent.length() > 0.5 and intent.z < -0.5, "the_blocked_click_left_its_direction_behind")
@@ -594,6 +609,95 @@ func _gap_edge_check() -> void:
 	note("after Space: z=%.2f y=%.2f state=%s" % [
 		_local.global_position.z, _local.global_position.y, Player.State.keys()[_local.state]])
 	expect(_local.global_position.z < -4.0 and _local.global_position.y > -1.0, "space_crossed_the_gap")
+
+
+# ------------------------------------------------------ the blob under the feet
+
+func _shadow_checks() -> void:
+	var shadow := _local.get_node_or_null("FootShadow") as MeshInstance3D
+	expect(shadow != null, "every_body_has_a_blob_under_it")
+	if shadow == null:
+		return
+	# Cosmetic only: nothing to collide with, and on its own layer so a capture
+	# can leave it out.
+	var solid := false
+	for child in shadow.get_children():
+		solid = solid or child is CollisionObject3D
+	expect(not solid and shadow.layers == Player.SHADOW_LAYER and shadow.top_level,
+		"the_blob_is_render_only_on_its_own_layer")
+
+	await tick_request(func() -> void:
+		placed()
+		_judge.server_respawn(_local)
+		_local.global_position = HOME
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target())
+	await _wait(0.6)
+	var standing_gap := _local.global_position.y - Player.BODY_HALF_HEIGHT - shadow.global_position.y
+	var standing_scale := shadow.scale.x
+	# The blob stays on the floor while the body goes up, so the gap between
+	# them is what reads as height.
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(HOME)
+		_local.movement.cast_jump())
+	var widest := standing_gap
+	var smallest := standing_scale
+	var sampled := 0.0
+	while sampled < 1.0:
+		await get_tree().physics_frame
+		sampled += get_physics_process_delta_time()
+		widest = maxf(widest, _local.global_position.y - Player.BODY_HALF_HEIGHT - shadow.global_position.y)
+		smallest = minf(smallest, shadow.scale.x)
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	note("foot blob: gap on the ground %.3f m -> %.2f m at the top of a jump, scale %.2f -> %.2f, y=%.2f" % [
+		standing_gap, widest, standing_scale, smallest, shadow.global_position.y])
+	expect(absf(standing_gap) < 0.1, "it_sits_at_the_feet_when_standing")
+	expect(widest > 2.0, "it_stays_on_the_floor_while_the_body_rises")
+	expect(smallest < standing_scale - 0.1, "and_shrinks_with_the_distance")
+	await _wait(0.8)
+
+
+# ------------------------------------------------- how wide a gap can be crossed
+
+# The level has 2 / 3 / 4 / 5 m gaps. Reported rather than asserted beyond the
+# 2 m one: how wide a gap should be crossable is a tuning decision, and this is
+# the measurement it should be made from.
+func _gap_width_checks() -> void:
+	var lanes := {2.0: -15.0, 3.0: -5.0, 4.0: 5.0, 5.0: 15.0}
+	for width in [2.0, 3.0, 4.0, 5.0]:
+		var lane: float = lanes[width]
+		# The near lip is z = -2; stand a little back from it.
+		var start := Vector3(lane, 0.9, -1.2)
+		# The far block starts at -2 - width; aim just onto it.
+		var target := Vector3(lane, 0.9, -2.0 - float(width) - 0.5)
+		await tick_request(func() -> void:
+			placed()
+			_judge.server_respawn(_local)
+			_local.global_position = start
+			_local.velocity = Vector3.ZERO
+			_local.movement.cancel_target())
+		await _wait(0.6)
+		_plan = {}
+		await tick_request(func() -> void:
+			_local.movement.set_aim_override(target)
+			_plan = _local.movement.jump_plan(target)
+			_local.movement.cast_jump())
+		await _wait(2.2)
+		await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+		var crossed: bool = _local.global_position.z < -2.0 - float(width) \
+			and _local.global_position.y > -1.0
+		note("gap %.0f m: crossed=%s landed z=%.2f y=%.2f at_limit=%s (aim was %.2f m away)" % [
+			float(width), crossed, _local.global_position.z, _local.global_position.y,
+			_plan.get("clamped", false), absf(target.z - start.z)])
+		if width == 2.0:
+			expect(crossed, "the_two_metre_gap_is_crossed")
+		if width == 4.0:
+			expect(true, "the_four_metre_gap_was_measured")
+	await tick_request(func() -> void:
+		_judge.server_respawn(_local)
+		placed()
+		_local.global_position = HOME)
+	await _wait(0.8)
 
 
 # ---------------------------------------------------------------- stamina

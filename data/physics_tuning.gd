@@ -17,7 +17,14 @@ extends Resource
 # "straight up", which is a hard edge on purpose -- just outside it is the
 # lowest hop there is.
 @export var jump_inplace_radius: float = 0.8
-@export var jump_min_hop_height: float = 0.4
+# The flattest hop there is: the apex a jump to a cursor right next to the body
+# asks for, on level ground.
+@export var jump_min_hop_height: float = 0.2
+# How far over a higher landing the arc has to pass. Separate from the hop
+# height, which it used to share: lowering the flattest hop was then also
+# lowering the clearance over a step, and the two have nothing to do with each
+# other.
+@export var jump_ledge_margin: float = 0.4
 # The jump goes where the cursor points. Turn it off for the documented rule,
 # where the jump keeps the heading it was already travelling on.
 @export var jump_aims_at_cursor: bool = true
@@ -32,13 +39,14 @@ extends Resource
 @export var ratio_mult_max: float = 1.3
 
 @export_group("Dash")
-# Stage C-2: the dash is the leap budget spent entirely sideways. Its speed is
-# v_cap times this, so strength is already in it and is not applied again; the
-# far end is that speed held for dash_time_max, and the time a dash takes comes
-# out of distance divided by speed rather than being fixed.
+# Stage C-2: the dash is the leap budget spent sideways, and spent fast. Its
+# speed is v_cap times this -- strength is already inside v_cap and is not
+# applied again -- and it goes as far as the longest jump can, so a dash and a
+# running jump cover the same ground at different speeds. The time it takes
+# falls out of distance over speed; dash_time_max is gone, because a maximum
+# time and a maximum distance cannot both be the limit.
 @export var dash_min_distance: float = 1.2
-@export var dash_time_max: float = 0.4
-@export var dash_speed_mult: float = 1.0
+@export var dash_speed_mult: float = 2.0
 @export var dash_cooldown: float = 1.0
 
 @export_group("Climb")

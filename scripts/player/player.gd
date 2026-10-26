@@ -32,6 +32,17 @@ const BODY_HALF_HEIGHT := 0.9
 const HAND_HEIGHT := 0.8
 # A replicated step bigger than this is a teleport, not travel: a respawn, a
 # test placement, or a large correction.
+# The blob under the feet is drawn on its own layer, like the aim rings, so a
+# camera or a capture can leave the markers out without touching the bodies.
+const SHADOW_LAYER := 1 << 17
+# How far down to look for a floor to put the blob on.
+const SHADOW_REACH := 40.0
+# How small the blob gets when the body is high up, and the height at which it
+# has shrunk all the way: further off the ground is smaller and fainter, which
+# is the other half of reading height off it.
+const SHADOW_MIN_SCALE := 0.45
+const SHADOW_FADE_HEIGHT := 4.0
+
 const TELEPORT_STEP := 2.0
 const TELEPORT_BLIND := 0.2
 
@@ -78,6 +89,7 @@ var stamina := 100.0
 var camera: QuarterCamera
 
 var _visual: Node3D
+var _shadow: MeshInstance3D
 # The camera, the HUD bars and the debug panel: ours to free when we go.
 var _owned_views: Array[Node] = []
 var _material: StandardMaterial3D
@@ -365,6 +377,7 @@ func _physics_process(delta: float) -> void:
 		sync_race_weight = stats.race_weight
 		sync_gear_weight = stats.gear_weight
 		sync_weapon = weapon
+		_update_shadow()
 		return
 	stats.strength = sync_strength
 	stats.race_weight = sync_race_weight
@@ -390,6 +403,7 @@ func _physics_process(delta: float) -> void:
 		# between state packets without letting them drift.
 		global_position = global_position.lerp(sync_position, 1.0 - exp(-18.0 * delta))
 	rotation.y = lerp_angle(rotation.y, sync_yaw, 1.0 - exp(-20.0 * delta))
+	_update_shadow()
 	if sync_state != state:
 		change_state(sync_state)
 
@@ -397,6 +411,34 @@ func _physics_process(delta: float) -> void:
 # Told by the server. The body is stopped and put in the state here, because
 # the pose is still the owner's to write; whether it died at all was decided in
 # one place, which is what B-a's "nothing overwrites DEAD" needed.
+# Where the floor is under this body, and how far above it the body is. Run for
+# every body on every peer: a remote character needs its blob as much as a
+# local one does.
+func _update_shadow() -> void:
+	if _shadow == null:
+		return
+	var from := global_position
+	var query := PhysicsRayQueryParameters3D.create(
+		from, from + Vector3.DOWN * SHADOW_REACH, Layers.TERRAIN | Layers.THROWABLE)
+	query.collide_with_areas = false
+	query.exclude = [get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		_shadow.visible = false
+		return
+	var ground: Vector3 = hit["position"]
+	# Just clear of the surface, or it fights with the floor it is drawn on.
+	_shadow.global_position = ground + Vector3.UP * 0.02
+	_shadow.global_rotation = Vector3(-PI * 0.5, 0.0, 0.0)
+	var height := maxf(0.0, from.y - BODY_HALF_HEIGHT - ground.y)
+	var closeness: float = 1.0 - clampf(height / SHADOW_FADE_HEIGHT, 0.0, 1.0)
+	var size: float = lerpf(SHADOW_MIN_SCALE, 1.0, closeness)
+	_shadow.scale = Vector3(size, size, 1.0)
+	var material := _shadow.material_override as StandardMaterial3D
+	material.albedo_color.a = lerpf(0.12, 0.35, closeness)
+	_shadow.visible = true
+
+
 func enter_dead_now() -> void:
 	if not is_local() or state == State.DEAD:
 		return
@@ -612,6 +654,28 @@ func _build_body() -> void:
 	facing_material.albedo_color = Color.WHITE
 	facing.material_override = facing_material
 	_visual.add_child(facing)
+
+	# A blob on the ground under the body. top_level, so the parent transform
+	# does not carry it up with the body: it stays on the floor, and the gap
+	# between the two is what says how high this body is. Cosmetic only -- no
+	# collision, its own render layer, built on every peer rather than
+	# replicated.
+	_shadow = MeshInstance3D.new()
+	_shadow.name = "FootShadow"
+	_shadow.top_level = true
+	var blob := QuadMesh.new()
+	blob.size = Vector2(BODY_RADIUS * 2.4, BODY_RADIUS * 2.4)
+	_shadow.mesh = blob
+	_shadow.rotation_degrees.x = -90.0
+	_shadow.layers = SHADOW_LAYER
+	_shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var blob_material := StandardMaterial3D.new()
+	blob_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	blob_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	blob_material.albedo_color = Color(0.0, 0.0, 0.0, 0.35)
+	blob_material.no_depth_test = false
+	_shadow.material_override = blob_material
+	add_child(_shadow)
 
 	_label = Label3D.new()
 	_label.position = Vector3(0.0, 1.45, 0.0)

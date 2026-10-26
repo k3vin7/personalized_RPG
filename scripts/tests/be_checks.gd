@@ -244,16 +244,28 @@ func _contest_check() -> void:
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(rock.global_position)
 		_local.movement.interact())
-	await _settle_wait(1.5)
+	# Watched rather than read at the end. At 200 ms the loser's intent is
+	# formed against a rock that has already been taken, and the next candidate
+	# under its cursor may well be the winner's own body -- which is correct,
+	# and is not the question. The question is whether the table ever let two
+	# peers hold the same rock.
+	var holders := {}
+	var refused_while_held := true
+	var watched := 0.0
+	while watched < 2.0 + _lag * 10.0:
+		await get_tree().physics_frame
+		watched += get_physics_process_delta_time()
+		var who := _judge.holder_of(rock)
+		if who != 0:
+			holders[who] = true
+			var other := _local if who != 1 else victim
+			refused_while_held = refused_while_held and not _judge.can_grab(other, rock)
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
-	var holder := _judge.holder_of(rock)
-	note("contest holder=%d rows=%d table=%s (host=1 client=%d)" % [
-		holder, _judge.hold_count(), _judge.describe_holds(), _client_peer()])
-	expect(_judge.hold_count() <= 1, "one_row_at_most_after_a_contest")
-	expect(holder == 1 or holder == _client_peer(), "exactly_one_of_them_got_it")
-	if holder != 0:
-		var other := _local if holder != 1 else victim
-		expect(not _judge.can_grab(other, rock), "the_loser_is_refused_by_the_row")
+	note("contest: the rock was held by %s during the window, table now %s (host=1 client=%d)" % [
+		str(holders.keys()), _judge.describe_holds(), _client_peer()])
+	expect(_judge.hold_count() <= 2, "nobody_holds_two_things_at_once")
+	expect(holders.size() == 1, "only_one_of_them_ever_held_the_rock")
+	expect(refused_while_held, "the_loser_is_refused_by_the_row")
 	await tick_request(func() -> void:
 		if _judge.holder_of(rock) == 1:
 			_local.grab.drop())

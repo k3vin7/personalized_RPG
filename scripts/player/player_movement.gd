@@ -503,7 +503,7 @@ func jump_plan(aim: Vector3) -> Dictionary:
 	var apex_at_reach := reach * 0.25
 	var apex: float = lerpf(Tuning.values.jump_min_hop_height, apex_at_reach, t)
 	# Over the lip rather than into it.
-	apex = maxf(apex, rise + Tuning.values.jump_min_hop_height)
+	apex = maxf(apex, rise + Tuning.values.jump_ledge_margin)
 	# The height the distance asks for is a preference, not a requirement. When
 	# it costs more than the budget -- which a step always eventually does,
 	# because clearing it needs the apex above it -- the cheapest launch that
@@ -557,7 +557,10 @@ func _launch_jump() -> void:
 # The preview, the indicator and the real launch all come through here.
 func jump_launch_velocity() -> Vector3:
 	if _launch_from_dash and _dash_direction.length_squared() > 0.01:
-		# Stage C's dash jump, kept: the budget split that flies furthest.
+		# Stage C's dash jump, kept: the budget split that flies furthest, at
+		# 45 degrees. The dash itself runs at twice the cap, so this is where
+		# that speed is cut back to it -- a jump is a leap and pays leap
+		# prices, however fast the body was already travelling.
 		var share := player.leap_speed_cap() / sqrt(2.0)
 		var launch := _dash_direction.normalized() * share
 		launch.y = share
@@ -725,11 +728,14 @@ func _try_attach_climb() -> void:
 
 # DOC (stage C-2): the dash is the same budget spent entirely sideways. Its
 # speed is the cap times dash_speed_mult -- strength is already inside the cap,
-# so it is not applied a second time -- and the furthest it goes is that speed
-# held for dash_time_max. A nearer cursor is obeyed, down to dash_min_distance,
-# and the time a dash takes falls out of distance over speed.
+# so it is not applied a second time -- and it reaches as far as the longest
+# jump does. A nearer cursor is obeyed, down to dash_min_distance, and the time
+# a dash takes falls out of distance over speed.
+# As far as the longest jump reaches. One budget, two ways to spend it: the
+# jump takes the arc and the dash takes the straight line, and they cover the
+# same ground.
 func dash_max_distance() -> float:
-	return player.dash_speed() * Tuning.values.dash_time_max
+	return player.leap_max_range()
 
 
 func dash_plan() -> Dictionary:
