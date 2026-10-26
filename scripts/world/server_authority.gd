@@ -369,7 +369,7 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 		Intent.GRAB:
 			result = _rule_grab(actor, _target_for(payload))
 		Intent.THROW:
-			result = _rule_throw(actor, _direction_of(payload))
+			result = _rule_throw(actor, payload)
 		Intent.DROP:
 			result = _rule_drop(actor)
 		Intent.ESCAPE:
@@ -569,9 +569,27 @@ func can_grab(actor: Player, target: Node3D) -> bool:
 	if actor.global_position.distance_to(target.global_position) > (
 			Tuning.values.grab_range + Player.BODY_RADIUS + INTENT_RANGE_SLACK):
 		return false
-	var limit: float = actor.stats.strength * Tuning.values.lift_per_strength
-	if not is_finite(limit) or weight_of(target) > limit:
+	if weight_of(target) > lift_limit(actor):
 		return false
+	# Stage E leaves a seat for the attack grab: when a hold is contested by a
+	# blow rather than by another hold, this is where the blow's force is
+	# weighed against it. Nothing calls it yet, and it says yes.
+	if not _hold_beats_attack(actor, target):
+		return false
+	return true
+
+
+# 4-chapter: strength x lift_per_strength, halved while one hand is busy.
+func lift_limit(actor: Player) -> float:
+	var limit: float = actor.stats.strength * Tuning.values.lift_per_strength
+	if Tuning.values.one_hand_weapon:
+		limit /= maxf(Tuning.values.grab_one_hand_strength_mult, 0.01)
+	return limit if is_finite(limit) else 0.0
+
+
+# The seat for the attack grab. The real version compares the attack's force
+# with the hold's; until there are attacks there is nothing to compare.
+func _hold_beats_attack(_actor: Player, _target: Node3D) -> bool:
 	return true
 
 
@@ -593,30 +611,88 @@ func weight_of(target: Node3D) -> float:
 	return INF
 
 
-func _rule_throw(actor: Player, direction: Vector3) -> Variant:
+# DOC (stage E): an arc that lands where the cursor is, or a straight line in
+# the cursor's heading. The charge scales how far an arc may reach and how hard
+# a line is thrown.
+#
+# The arc is solved rather than thrown at a fixed angle. A fixed 35 degrees is
+# what used to send a rock clean over a body three metres away: the hand is
+# 1.7 m above the thrower's own origin, so a flat-ish lob from it passes above
+# a standing target until about nine metres out. Solving for the landing point
+# puts it where the cursor is at any range.
+#
+# Either way it leaves as a force event with the target being thrown, which is
+# what "돌 던지기도 힘 이벤트로" asks for: the rock is given a velocity by the
+# one force door like everything else.
+func _rule_throw(actor: Player, payload: Dictionary) -> Variant:
 	var peer := actor.get_multiplayer_authority()
 	if not _holds.has(peer):
 		return null
+	var direction := _direction_of(payload)
+	if direction == Vector3.ZERO:
+		return null
+	var charge: float = clampf(float(payload.get("charge", 1.0)), 0.0, 1.0)
+	var line := bool(payload.get("line", false))
 	var target := _end_hold(peer, "thrown")
 	if target == null:
 		return null
-	if target is Rock:
-		(target as Rock).server_throw(direction, actor.stats.strength, peer)
+
+	var velocity := Vector3.ZERO
+	if line:
+		# Straight: the heading, at a speed the charge decides.
+		velocity = direction.normalized() * (Tuning.values.throw_line_power_base
+			* maxf(charge, 0.2)
+			* Tuning.ratio_mult(actor.stats.strength / maxf(weight_of(target), 0.1),
+				Tuning.values.ratio_k_jump))
 	else:
-		# A thrown team mate arrives in the air with no damage, which is what
-		# lets a third player push them again on the way.
-		send_force(target, ForceSystem.make_event(
-			ForceSystem.Kind.THROW,
-			direction,
-			Tuning.values.throw_power,
-			actor.stats.strength,
-			peer,
-			true,
-			0.0,
-			0.0))
-	print("PLAYGROUND_THROW by=%s target=%s dir=(%.2f, %.2f, %.2f)" % [
-		actor.name, target.name, direction.x, direction.y, direction.z])
+		var landing: Variant = payload.get("target")
+		var aim: Vector3 = landing if landing is Vector3 else actor.global_position + direction * 3.0
+		velocity = _arc_to(actor.hand_position(), aim, charge,
+			actor.stats.strength / maxf(weight_of(target), 0.1))
+
+	var speed := velocity.length()
+	if speed <= 0.01:
+		return null
+	# source_strength 0 so the one force door takes the speed as given: the
+	# strength is already in the solve above, and applying it twice would send
+	# every throw past the cursor it was aimed at.
+	send_force(target, ForceSystem.make_event(
+		ForceSystem.Kind.THROW,
+		velocity / speed,
+		speed,
+		0.0,
+		peer,
+		true,
+		Tuning.values.shove_damage * charge if line else 0.0,
+		0.0))
+	if target is Rock:
+		(target as Rock).note_thrown(peer)
+	print("PLAYGROUND_THROW by=%s target=%s line=%s charge=%.2f speed=%.2f" % [
+		actor.name, target.name, line, charge, speed])
 	return true
+
+
+# The launch that lands at `aim`, or as near to it as the charge allows. The
+# cheapest arc that reaches it -- 45 degrees tilted by half the slope to the
+# target -- so a throw is never higher than it has to be.
+func _arc_to(from: Vector3, aim: Vector3, charge: float, ratio: float) -> Vector3:
+	var gravity: float = maxf(Tuning.values.gravity, 0.01)
+	var flat := Vector3(aim.x - from.x, 0.0, aim.z - from.z)
+	var distance := flat.length()
+	if distance < 0.01:
+		return Vector3.UP * sqrt(2.0 * gravity * 0.5)
+	var reach: float = Tuning.values.throw_arc_max_range_base * maxf(charge, 0.1) \
+		* Tuning.ratio_mult(ratio, Tuning.values.ratio_k_jump)
+	if distance > reach:
+		flat = flat.normalized() * reach
+		distance = reach
+		aim = Vector3(from.x + flat.x, aim.y, from.z + flat.z)
+	var rise := aim.y - from.y
+	var span := sqrt(distance * distance + rise * rise)
+	var optimum := PI * 0.25 + 0.5 * atan2(rise, maxf(distance, 0.001))
+	var speed := sqrt(gravity * (rise + span))
+	var heading := flat.normalized()
+	return heading * (speed * cos(optimum)) + Vector3.UP * (speed * sin(optimum))
 
 
 func _rule_drop(actor: Player) -> Variant:
@@ -648,9 +724,17 @@ func _rule_escape(actor: Player) -> Variant:
 	if holder != null:
 		away = actor.global_position - holder.global_position
 	away.y = 0.0
-	if away.length_squared() < 0.0001:
-		away = -actor.global_transform.basis.z
+	if away.length_squared() < 0.0001 and holder != null:
+		# A held body is pinned to the holder's own x and z, so "away from the
+		# holder" is nothing at all and the recoil had no direction. It used to
+		# fall back on the escaping body's facing, which is whatever it happened
+		# to be looking at when it was picked up -- so the same escape pushed
+		# four metres a second in one run and nothing in the next. Out behind
+		# the holder, which is somewhere, every time.
+		away = -holder.global_transform.basis.z
 		away.y = 0.0
+	if away.length_squared() < 0.0001:
+		away = Vector3.FORWARD
 	print("PLAYGROUND_ESCAPE peer=%s presses=%d" % [actor.name, int(record["presses"])])
 	# Freed first, then pushed: the row has to be gone before the force lands,
 	# or the owner is still following the hand and zeroes the velocity it was
@@ -781,7 +865,10 @@ func server_respawn(player: Player, tell_owner := true) -> void:
 	player.sync_dead = false
 	_respawn_left.erase(peer)
 	_fall_watch.erase(peer)
-	forgive_move(peer, "")
+	# The server asked for this teleport, so it does not warn about it. Long
+	# enough to outlive a round trip: a client's body does not move until the
+	# message telling it to has arrived, and by then two samples are long gone.
+	forgive_move(peer, "", MOVE_FORGIVE_SAMPLES if player.is_local() else 30)
 	if _holds.has(peer):
 		_end_hold(peer, "holder_respawned")
 	if not tell_owner:
@@ -893,9 +980,13 @@ func _watch_vitals(delta: float) -> void:
 
 # Called whenever the server moves a body itself, or knows it was placed: the
 # next sample would otherwise read a teleport as a sprint.
-func forgive_move(peer: int, reason: String) -> void:
+# samples: how many of the move check's windows to let pass. The default covers
+# a teleport on this machine; forgiving one on a client's body needs enough to
+# outlive the round trip, because the body does not move until the message
+# telling it to has arrived.
+func forgive_move(peer: int, reason: String, samples := MOVE_FORGIVE_SAMPLES) -> void:
 	var watch: Dictionary = _move_watch.get(peer, {})
-	watch["forgive"] = MOVE_FORGIVE_SAMPLES
+	watch["forgive"] = maxi(int(watch.get("forgive", 0)), samples)
 	_move_watch[peer] = watch
 	if reason != "":
 		print("PLAYGROUND_MOVE_FORGIVEN peer=%d reason=%s" % [peer, reason])

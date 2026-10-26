@@ -100,9 +100,27 @@ func apply_force_event(event: Dictionary) -> void:
 
 func set_hold_display(peer: int) -> void:
 	holder_peer = peer
+	if is_multiplayer_authority() and peer == 0:
+		# Put down: it settles where it was left rather than snapping home.
+		_settle_left = RETURN_DELAY
 
 
 func _physics_process(delta: float) -> void:
+	if is_multiplayer_authority() and holder_peer != 0:
+		# Stage E: a scarecrow can be picked up, and a held body rides the hand
+		# rather than walking itself home. Whether the hold still stands is the
+		# table's ruling, the same one every other held body gets.
+		var hands := _peer_player(holder_peer)
+		if hands != null:
+			global_position = hands.hand_position()
+			velocity = Vector3.ZERO
+			_settle_left = RETURN_DELAY
+			sync_position = global_position
+			_state_left -= delta
+			if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
+				_state_left = STATE_INTERVAL
+				push_state.rpc(global_position, hp)
+			return
 	if not is_multiplayer_authority():
 		# Shown, not simulated.
 		if not _has_state:
@@ -153,6 +171,14 @@ func push_state(at_position: Vector3, at_hp: float) -> void:
 		# The first packet places it rather than easing in from the start mark.
 		global_position = at_position
 		_has_state = true
+
+
+# A scarecrow is server-owned, so the body it is being carried by is looked up
+# the same way the rock looks it up.
+func _peer_player(peer_id: int) -> Player:
+	if Net.spawn_root == null:
+		return null
+	return Net.spawn_root.get_node_or_null(str(peer_id)) as Player
 
 
 func _refresh() -> void:

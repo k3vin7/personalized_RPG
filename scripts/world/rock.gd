@@ -247,23 +247,30 @@ func _tick_blind(delta: float) -> void:
 		collision_layer = LAYER
 
 
-# Called by the judge, after the row is already gone. The thrower is passed in
-# rather than read back off the rock, because the row that knew it is erased by
-# the time this runs.
-func server_throw(direction: Vector3, strength: float, thrower_peer: int) -> void:
-	if not is_multiplayer_authority() or not direction.is_finite():
+# Stage E: a thrown rock is given its speed by the one force door, like every
+# other push in the game. server_throw() used to work the velocity out in here,
+# which meant the throw was the one force that did not go through the door.
+func apply_force_event(event: Dictionary) -> void:
+	if not is_multiplayer_authority():
+		return
+	var direction: Vector3 = event.get("direction", Vector3.ZERO)
+	if not direction.is_finite():
 		return
 	freeze = false
-	# Heavier rock, shorter throw: the same strength to weight rule the jump
-	# and the shove use.
-	var power: float = Tuning.values.throw_power * Tuning.ratio_mult(
-		strength / maxf(weight, 0.1), Tuning.values.ratio_k_jump)
-	linear_velocity = direction.normalized() * power
+	var change := ForceSystem.change_for(event, weight, 1.0, false)
+	linear_velocity = change
 	angular_velocity = Vector3(randf_range(-4.0, 4.0), 0.0, randf_range(-4.0, 4.0))
+	_hit_times.clear()
+	print("PLAYGROUND_ROCK_THROW rock=%s weight=%.0f speed=%.2f" % [
+		name, weight, change.length()])
+
+
+# Who let go, for the grace that stops a thrown rock clipping the thrower on
+# the way out. Told by the judge, because the row that knew it is erased by the
+# time the force goes out.
+func note_thrown(thrower_peer: int) -> void:
 	_thrower_peer = thrower_peer
 	_thrower_grace = THROWER_GRACE
-	_hit_times.clear()
-	print("PLAYGROUND_ROCK_THROW rock=%s weight=%.0f power=%.2f" % [name, weight, power])
 
 
 # Judged on the host, as the work order says, and routed through the single

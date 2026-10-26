@@ -28,6 +28,9 @@ var holder: Player
 # ask twice. Nothing answers a refusal, so the mark times out.
 var _pending_target: Node3D
 var _pending_left := 0.0
+# Stage E: the one key's charge, and what carrying something weighs.
+var _charging := false
+var _charge_left := 0.0
 var _freed_left := 0.0
 
 
@@ -54,72 +57,121 @@ func _judge() -> ServerAuthority:
 func grab() -> bool:
 	if is_holding() or is_held() or not player.is_grounded_state() or is_instance_valid(_pending_target):
 		return false
-	var aim := player.movement.cursor_point()
-	var best: Node3D = null
-	var best_score := INF
-	for candidate in _candidates():
-		var offset := candidate.global_position - player.global_position
-		offset.y = 0.0
-		if offset.length() - Player.BODY_RADIUS > Tuning.values.grab_range:
-			continue
-		var score := Vector2(candidate.global_position.x - aim.x, candidate.global_position.z - aim.z).length()
-		if score < best_score:
-			best_score = score
-			best = candidate
-	if best == null:
-		print("PLAYGROUND_GRAB by=%s none_in_reach" % player.name)
+	var judge := _judge()
+	if judge == null:
 		return false
-	_pending_target = best
+	# DOC (stage E): the cursor names one thing, and that is the thing the
+	# intent carries. Everything holdable is considered here, taken or not,
+	# because what matters is what is being aimed at -- and if that thing
+	# cannot be picked up, the grab fails. It does not fall through to whatever
+	# else is nearby: aiming at a rock someone else had just taken used to pick
+	# up the person standing behind it.
+	var aim := player.movement.cursor_point()
+	var aimed: Node3D = null
+	var aimed_score := INF
+	for node in player.get_tree().get_nodes_in_group(ServerAuthority.HOLDABLE_GROUP):
+		var body := node as Node3D
+		if body == null or body == player:
+			continue
+		var score := Vector2(body.global_position.x - aim.x, body.global_position.z - aim.z).length()
+		if score < aimed_score:
+			aimed_score = score
+			aimed = body
+	if aimed == null or aimed_score > Tuning.values.grab_cursor_radius + Player.BODY_RADIUS:
+		print("PLAYGROUND_GRAB by=%s nothing_under_the_cursor" % player.name)
+		return false
+	var offset := aimed.global_position - player.global_position
+	offset.y = 0.0
+	if offset.length() - Player.BODY_RADIUS > Tuning.values.grab_range:
+		print("PLAYGROUND_GRAB by=%s target=%s out_of_reach" % [player.name, aimed.name])
+		return false
+	if judge.holder_of(aimed) != 0:
+		print("PLAYGROUND_GRAB by=%s target=%s already_held" % [player.name, aimed.name])
+		return false
+	var person := aimed as Player
+	if person != null and (person.state == Player.State.GRABBED or person.state == Player.State.DEAD):
+		print("PLAYGROUND_GRAB by=%s target=%s not_available" % [player.name, aimed.name])
+		return false
+	_pending_target = aimed
 	_pending_left = ServerAuthority.INTENT_TIMEOUT
 	player.begin_predicted(ServerAuthority.Intent.GRAB)
 	ServerAuthority.submit_intent(
-		player, ServerAuthority.Intent.GRAB, {"target": best.get_path()})
+		player, ServerAuthority.Intent.GRAB, {"target": aimed.get_path()})
 	return true
 
 
-# Everything holdable that is not already held, by the table's word.
-func _candidates() -> Array[Node3D]:
-	var found: Array[Node3D] = []
-	var judge := _judge()
-	if judge == null:
-		return found
-	for node in player.get_tree().get_nodes_in_group(ServerAuthority.HOLDABLE_GROUP):
-		var body := node as Node3D
-		if body == null or body == player or judge.holder_of(body) != 0:
-			continue
-		var person := body as Player
-		if person != null and (person.state == Player.State.GRABBED or person.state == Player.State.DEAD):
-			continue
-		# Scarecrows join the table in B-c but are not grabbable until stage E
-		# puts them on this list.
-		if body is Dummy:
-			continue
-		found.append(body)
-	return found
+# DOC (stage E): one key. G with something in your hands starts a charge; what
+# letting go means depends on how long it was held.
+#
+#   released before throw_hold_threshold  -> put it down
+#   held at least that long               -> an arc, landing where the cursor is
+#   shift held as well                    -> a straight line, cursor = heading
+#
+# The charge runs from the threshold to throw_charge_max and scales how far an
+# arc can reach, or how hard a line is thrown. Moving while charging is fine --
+# nothing here forbids anything.
+func press_throw() -> void:
+	if not is_holding():
+		return
+	_charge_left = 0.0
+	_charging = true
+	player.begin_predicted(ServerAuthority.Intent.THROW)
 
 
-# DOC: direction is the cursor's heading, tilted up by throw_up_angle_deg.
+func release_throw_key() -> void:
+	if not _charging:
+		return
+	_charging = false
+	if not is_holding():
+		player.clear_predicted()
+		return
+	if _charge_left < Tuning.values.throw_hold_threshold:
+		# A tap is a put-down.
+		ServerAuthority.submit_intent(player, ServerAuthority.Intent.DROP, {})
+		return
+	var line := Input.is_physical_key_pressed(KEY_SHIFT)
+	var charge: float = clampf(
+		(_charge_left - Tuning.values.throw_hold_threshold)
+			/ maxf(Tuning.values.throw_charge_max - Tuning.values.throw_hold_threshold, 0.01),
+		0.0, 1.0)
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.THROW, {
+		"direction": throw_direction(),
+		"target": player.movement.cursor_jump_target(),
+		"charge": charge,
+		"line": line,
+	})
+
+
+func charge_seconds() -> float:
+	return _charge_left if _charging else 0.0
+
+
+# Kept for the checks and for anything that wants a throw without the key: a
+# full charge, an arc, at the cursor.
 func throw() -> bool:
 	if not is_holding():
 		return false
-	var direction := throw_direction()
-	if direction == Vector3.ZERO:
-		return false
 	player.begin_predicted(ServerAuthority.Intent.THROW)
 	var allowed: Variant = ServerAuthority.submit_intent(
-		player, ServerAuthority.Intent.THROW, {"direction": direction})
+		player, ServerAuthority.Intent.THROW, {
+			"direction": throw_direction(),
+			"target": player.movement.cursor_jump_target(),
+			"charge": 1.0,
+			"line": false,
+		})
 	# A client's throw lands a round trip later; the host's is already done.
 	return allowed if allowed is bool else true
 
 
+# The heading only. Where it lands is the target in the payload; this is what a
+# straight throw uses and what an arc falls back on with no cursor.
 func throw_direction() -> Vector3:
 	var flat := player.movement.cursor_direction()
 	if flat.length_squared() < 0.01:
 		flat = -player.global_transform.basis.z
 		flat.y = 0.0
 		flat = flat.normalized() if flat.length_squared() > 0.01 else Vector3.FORWARD
-	var angle := deg_to_rad(Tuning.values.throw_up_angle_deg)
-	return (flat * cos(angle) + Vector3.UP * sin(angle)).normalized()
+	return flat
 
 
 # Put down rather than thrown. Also an intent: the table is the only thing that
@@ -135,6 +187,7 @@ func drop() -> void:
 func escape_press() -> void:
 	if not is_held():
 		return
+	player.stamina = maxf(0.0, player.stamina - Tuning.values.stamina_escape_press)
 	player.begin_predicted(ServerAuthority.Intent.ESCAPE)
 	ServerAuthority.submit_intent(player, ServerAuthority.Intent.ESCAPE, {})
 
@@ -156,6 +209,26 @@ func on_force_received() -> void:
 
 
 func _leave_held() -> void:
+	# Stage E: put down beside whoever was holding us, not dropped from hand
+	# height above their head. A body freed over the holder landed back on that
+	# head, and the ground step then wiped the recoil it had just been given --
+	# which is why the escape push measured nothing at all.
+	if is_instance_valid(holder):
+		var away := player.global_position - holder.global_position
+		away.y = 0.0
+		if away.length_squared() < 0.0001:
+			# Pinned to the holder's own x and z, so there is no "away" to use:
+			# out behind them, the same side the server's recoil pushes.
+			away = -holder.global_transform.basis.z
+			away.y = 0.0
+		if away.length_squared() < 0.0001:
+			away = Vector3.FORWARD
+		if away.length_squared() > 0.0001:
+			away = away.normalized()
+			player.global_position = Vector3(
+				holder.global_position.x + away.x * Player.BODY_RADIUS * 2.2,
+				holder.global_position.y,
+				holder.global_position.z + away.z * Player.BODY_RADIUS * 2.2)
 	clear_holder()
 	player.clear_predicted()
 	if player.state == Player.State.GRABBED:
@@ -177,6 +250,24 @@ func _physics_process(delta: float) -> void:
 	var judge := _judge()
 	if judge == null:
 		return
+
+	# Stage E: what we are carrying is part of what we weigh, which is how a
+	# heavy load slows the walk and lowers the jump without a rule of its own.
+	var load := 0.0
+	if is_instance_valid(held):
+		load = judge.weight_of(held)
+		if is_inf(load):
+			load = 0.0
+	player.stats.held_weight = load
+
+	if _charging:
+		_charge_left += delta
+		player.stamina = maxf(0.0, player.stamina
+			- Tuning.values.stamina_charge_per_sec * delta)
+	elif is_instance_valid(held):
+		player.stamina = maxf(0.0, player.stamina
+			- Tuning.values.stamina_hold_per_sec * delta)
+
 	var holder_peer := judge.holder_of(player)
 	var my_target := judge.held_by(player.get_multiplayer_authority())
 
@@ -226,6 +317,9 @@ func _physics_process(delta: float) -> void:
 	if held != null:
 		# The hand emptied: a throw or a put-down has been answered.
 		player.clear_predicted()
+		_charging = false
+		_charge_left = 0.0
+		player.stats.held_weight = 0.0
 	held = null
 	if player.state == Player.State.GRABBING:
 		player.change_state(Player.State.IDLE)

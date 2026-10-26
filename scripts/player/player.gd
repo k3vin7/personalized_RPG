@@ -286,7 +286,8 @@ func _update_fall_tracking(previous: int, new_state: int) -> void:
 	_fall_tracking = false
 	if previous != State.AIRBORNE:
 		return
-	if new_state == State.IDLE or new_state == State.MOVE or new_state == State.DASH:
+	if new_state == State.IDLE or new_state == State.MOVE or new_state == State.DASH \
+			or new_state == State.GRABBING:
 		_resolve_fall_damage()
 	# Caught a wall, grabbed, stunned or dead: nothing landed, so nothing hurts.
 
@@ -348,8 +349,13 @@ func default_snap_length() -> float:
 	return _default_snap
 
 
+# Standing on the ground, whatever the hands are doing. GRABBING belongs here:
+# stage E takes out the rules that forbade jumping, dashing and shoving while
+# carrying something, and every one of them was written as "is this body
+# grounded" -- so a holder that was not grounded was a holder that could not
+# act.
 func is_grounded_state() -> bool:
-	return state == State.IDLE or state == State.MOVE
+	return state == State.IDLE or state == State.MOVE or state == State.GRABBING
 
 
 func _physics_process(delta: float) -> void:
@@ -559,17 +565,19 @@ func apply_force_event(event: Dictionary) -> void:
 	if climb != null and climb.is_climbing():
 		# Knocked off the wall rather than pushed along it.
 		climb.detach(0.0)
+	if movement != null:
+		# 4-chapter: a push becomes this body's velocity, and the ground step
+		# must not write the move order over it on the next frame. Told for
+		# every force, not only the ones that land on a grounded body: a body
+		# freed from a hold at ground level is airborne for a single frame and
+		# then lands, and the escape recoil was being wiped on that landing.
+		movement.note_pushed()
 	if state == State.AIRBORNE:
 		# Already flying: the push bends the arc and costs nothing, which is
 		# what makes throwing a team mate a thing you can help with.
 		velocity += change
 	else:
 		velocity = change
-		if movement != null:
-			# 4-chapter: on the ground the push becomes the velocity. Telling
-			# the movement means the ground step carries it instead of writing
-			# the move order over it on the next frame.
-			movement.note_pushed()
 		if change.y > ForceSystem.UPWARD_LAUNCH:
 			change_state(State.AIRBORNE)
 		# B-d: whether this hurt, and whether it stuns, was decided by the

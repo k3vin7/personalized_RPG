@@ -45,6 +45,9 @@ func placed() -> void:
 		judge.harness_forgive_move.rpc_id(1)
 
 
+# Stage E: G is one key -- a press charges and the release decides. These
+# checks were written when a second press threw, so where they mean "throw it"
+# they now say so: grab.throw() is the full-charge arc at the cursor.
 func tick_request(action: Callable) -> void:
 	Net.queue_physics(action)
 	for _frame in range(3):
@@ -189,7 +192,7 @@ func _host_hold_checks() -> void:
 	var from := heavy.global_position
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(_local.global_position + Vector3.RIGHT * 10.0)
-		_local.movement.interact())
+		_local.grab.throw())
 	await get_tree().create_timer(1.2).timeout
 	expect(heavy.holder_peer == 0 and _judge.hold_count() == 0, "throw_cleared_the_row")
 	expect(heavy.global_position.distance_to(from) > 1.0, "host_throw_moved_the_rock")
@@ -370,22 +373,24 @@ func _rock_versus_player_check() -> void:
 	expect(_local.grab.is_holding(), "rock_in_hand_for_hit_check")
 	var hp_before := victim.hp
 	var stood := victim.global_position
-	# Thrown flat. At the documented 35 degrees the rock leaves a hand 1.7 m
-	# above the thrower's own origin and passes over a 1.8 m body until about
-	# 9 m out: that is the arc, measured in stage 7's sweep, not a force that
-	# fails to land. What is under test here is the landing.
-	var angle_was: float = Tuning.values.throw_up_angle_deg
-	Tuning.values.throw_up_angle_deg = 0.0
+	# A straight line at the body. Stage E replaced the fixed 35 degree lob
+	# with an arc solved to the cursor and a line on shift, so the old trick of
+	# setting throw_up_angle_deg to zero does nothing now -- the line is what
+	# "thrown flat at someone" means.
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(victim.global_position)
-		_local.movement.interact())
+		ServerAuthority.submit_intent(_local, ServerAuthority.Intent.THROW, {
+			"direction": _local.grab.throw_direction(),
+			"target": victim.global_position,
+			"charge": 1.0,
+			"line": true,
+		}))
 	var closest := INF
 	var sampled := 0.0
 	while sampled < 2.0:
 		await get_tree().physics_frame
 		sampled += get_physics_process_delta_time()
 		closest = minf(closest, rock.global_position.distance_to(victim.global_position))
-	Tuning.values.throw_up_angle_deg = angle_was
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
 	var moved := Vector2(victim.global_position.x - stood.x, victim.global_position.z - stood.z).length()
 	note("rock_vs_player closest=%.2f touching_at=%.2f hp=%.0f-%.0f moved=%.2f" % [
@@ -466,7 +471,7 @@ func client_rock(rock_path: NodePath) -> void:
 	expect(_local.state == Player.State.GRABBING, "client_holder_state_follows_table")
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(_local.global_position + Vector3.RIGHT * 10.0)
-		_local.movement.interact())
+		_local.grab.throw())
 	await get_tree().create_timer(1.0).timeout
 	expect(not _local.grab.is_holding(), "client_throw_cleared_its_hand")
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
@@ -515,7 +520,11 @@ func client_escape() -> void:
 	note("escape peak_speed=%.2f pushed=%.2f lowest_y=%.2f recoil_tuning=%.2f" % [
 		peak, pushed, lowest, Tuning.values.escape_recoil_power])
 	expect(_local.state != Player.State.GRABBED, "client_freed_itself")
-	expect(peak > 1.0, "escape_recoil_arrived_as_force")
+	# Measured as distance, not as a speed caught in flight. The push is
+	# protected for force_slide_time and then rubs off, so whether a sampler
+	# sees the peak depends on which frames it lands on; where the body ended
+	# up does not. Stage E measures the peak itself, from the press.
+	expect(pushed > 0.15, "escape_recoil_arrived_as_force")
 	stage_done.rpc_id(1, "escaped")
 
 

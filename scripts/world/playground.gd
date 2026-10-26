@@ -165,6 +165,12 @@ func _run_smoke() -> void:
 		get_tree().root.add_child(checks)
 		checks.run(self)
 		return
+	if Net.auto_only == "E":
+		var ec := preload("res://scripts/tests/e_checks.gd").new()
+		ec.name = "EChecks"
+		get_tree().root.add_child(ec)
+		ec.run(self)
+		return
 	if Net.auto_only == "D":
 		var dc := preload("res://scripts/tests/d_checks.gd").new()
 		dc.name = "DChecks"
@@ -1054,7 +1060,7 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 		# a world height and can be put beside the lip it has to clear.
 		var apex: float = local.hand_position().y + rise * rise / (2.0 * Tuning.values.gravity)
 		local.movement.set_aim_override(local.global_position + Vector3(0.0, 0.0, -20.0))
-		local.movement.interact()
+		local.grab.throw()
 		await get_tree().create_timer(3.0).timeout
 		local.movement.set_aim_override(Vector3.INF)
 		print("PLAYGROUND_STAGE8_THROW strength=%.0f mate=%.0fkg mult=%.2f speed=%.1f stand_off=%.2f predicted_apex=%.2f needed=%.2f landed_y=%.2f landed_z=%.2f on_top=%s" % [
@@ -1197,6 +1203,10 @@ func _hand_grab(local: Player, rock: Rock) -> bool:
 	return local.grab.is_holding()
 
 
+# Stage E made G one key: a press with full hands starts a charge and the
+# release decides between a put-down, an arc and a line. These legs were
+# written when a second press threw, so the ones that mean "throw it" now say
+# grab.throw() -- a full charge, an arc, at the cursor.
 func _run_stage7_checks(local: Player) -> void:
 	# Each rock is picked up where it lies, then carried to the measuring lane
 	# and thrown. Measured in the lane rather than on the spot because a throw
@@ -1224,7 +1234,7 @@ func _run_stage7_checks(local: Player) -> void:
 		# edge in the way.
 		local.movement.set_aim_override(THROW_LANE + Vector3(20.0, 0.0, 0.0))
 		var from := local.global_position
-		var thrown := local.movement.interact()
+		var thrown := local.grab.throw()
 		await get_tree().create_timer(2.5).timeout
 		print("PLAYGROUND_STAGE7_ROCK weight=%.0f picked=%s carrying=%s thrown=%s flew=%.2f landed_y=%.2f" % [
 			rock.weight, picked, carrying, thrown,
@@ -1240,7 +1250,11 @@ func _run_stage7_checks(local: Player) -> void:
 		# that it lands short. This distance is a function of gravity: it was
 		# nine metres while rocks were still falling at the project's 9.8, and
 		# at nine metres under the tuned 22 the rock now lands in front of it.
-		await _settle(local, Vector3(dummy.global_position.x, 1.0, dummy.global_position.z + 5.0))
+		# Three metres, not five. A line throw leaves a hand 2.6 m up and drops
+		# about a metre over five, which put the rock within four centimetres
+		# of a scarecrow's surface -- a margin smaller than the distance this
+		# check samples at. Closer, the line arrives high on the body.
+		await _settle(local, Vector3(dummy.global_position.x, 1.0, dummy.global_position.z + 3.0))
 		# Brought to hand rather than walked to: the throw is what is under test.
 		await _hand_grab(local, rock_0)
 		print("PLAYGROUND_STAGE7_INHAND gap=%.2f" % rock_0.global_position.distance_to(local.hand_position()))
@@ -1252,7 +1266,20 @@ func _run_stage7_checks(local: Player) -> void:
 		Tuning.values.throw_up_angle_deg = 0.0
 		var dummy_hp := dummy.hp
 		var dummy_at := dummy.global_position
-		local.movement.interact()
+		# A line at it: stage E solves an arc to the cursor instead of throwing
+		# at a fixed angle, so setting throw_up_angle_deg to zero no longer
+		# flattens anything.
+		# Aimed at the chest rather than the origin. A line throw drops about
+		# half a metre over five metres, and aiming at the centre left the
+		# rock passing 0.80 m away when 0.76 m is a touch -- a four centimetre
+		# margin, which is smaller than the twelve centimetres this check
+		# samples at and so cannot be told from a hit.
+		ServerAuthority.submit_intent(local, ServerAuthority.Intent.THROW, {
+			"direction": local.grab.throw_direction(),
+			"target": dummy.global_position + Vector3.UP * 0.35,
+			"charge": 1.0,
+			"line": true,
+		})
 		# Watched all the way in: a miss and a hit that does nothing look the
 		# same in the result, and they are not the same problem.
 		var closest := INF
@@ -1380,7 +1407,7 @@ func _run_stage7_team(local: Player) -> void:
 		var held_offset := remote.global_position.y - local.global_position.y
 		local.movement.set_aim_override(local.global_position + Vector3(20.0, 0.0, 0.0))
 		var from := remote.global_position
-		local.movement.interact()
+		local.grab.throw()
 		await get_tree().create_timer(2.5).timeout
 		print("PLAYGROUND_STAGE7_TEAMTHROW weight=%.0f held_above=%.2f flew=%.2f landed_y=%.2f state=%s" % [
 			weight, held_offset, _flat(remote.global_position - from),
@@ -1393,7 +1420,7 @@ func _run_stage7_team(local: Player) -> void:
 	# A thrown team mate is in the air, so a shove bends their arc again.
 	if await _grab_remote(local, remote):
 		local.movement.set_aim_override(local.global_position + Vector3(20.0, 0.0, 0.0))
-		local.movement.interact()
+		local.grab.throw()
 		await get_tree().create_timer(0.35).timeout
 		var mid_air := remote.state == Player.State.AIRBORNE
 		var before := remote.global_position
@@ -1481,7 +1508,12 @@ func _run_rock_vs_player(local: Player, remote: Player) -> void:
 		var hp_before := remote.hp
 		var stood := remote.global_position
 		local.movement.set_aim_override(remote.global_position)
-		local.movement.interact()
+		ServerAuthority.submit_intent(local, ServerAuthority.Intent.THROW, {
+			"direction": local.grab.throw_direction(),
+			"target": remote.global_position,
+			"charge": 1.0,
+			"line": true,
+		})
 		var closest := INF
 		var passing_height := 0.0
 		var sampled := 0.0

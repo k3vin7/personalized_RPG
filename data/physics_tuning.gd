@@ -65,6 +65,24 @@ extends Resource
 @export var throw_up_angle_deg: float = 35.0
 @export var grab_range: float = 1.5
 @export var lift_per_strength: float = 2.0
+# Stage E. One hand on a weapon halves what the other can lift.
+@export var grab_one_hand_strength_mult: float = 2.0
+@export var one_hand_weapon: bool = false
+# The one key: let go before the threshold and it is a put-down, hold past it
+# and it is a throw whose charge runs to throw_charge_max.
+@export var throw_hold_threshold: float = 1.0
+@export var throw_charge_max: float = 1.5
+# A full charge throws an arc this far, or a straight line this fast.
+@export var throw_arc_max_range_base: float = 10.0
+@export var throw_line_power_base: float = 12.0
+# How near the cursor a thing has to be to count as the thing being aimed at.
+# Without it, aiming at a rock that someone else just took picks up whoever is
+# standing behind it.
+@export var grab_cursor_radius: float = 1.0
+# 6-chapter stamina costs.
+@export var stamina_hold_per_sec: float = 5.0
+@export var stamina_charge_per_sec: float = 8.0
+@export var stamina_escape_press: float = 3.0
 @export var grabbed_escape_presses: int = 5
 @export var grabbed_escape_window: float = 2.0
 @export var shove_damage: float = 3.0

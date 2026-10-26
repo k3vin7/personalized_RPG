@@ -47,6 +47,9 @@ func placed() -> void:
 		judge.harness_forgive_move.rpc_id(1)
 
 
+# Stage E: G is one key -- a press charges and the release decides. These
+# checks were written when a second press threw, so where they mean "throw it"
+# they now say so: grab.throw() is the full-charge arc at the cursor.
 func tick_request(action: Callable) -> void:
 	Net.queue_physics(action)
 	for _frame in range(3):
@@ -294,7 +297,7 @@ func client_rock(rock_path: NodePath) -> void:
 		_local.movement.set_aim_override(_local.global_position + Vector3.RIGHT * 10.0))
 	await get_tree().create_timer(0.2).timeout
 	# G again, which is a throw.
-	await tick_request(func() -> void: _local.movement.interact())
+	await tick_request(func() -> void: _local.grab.throw())
 	await get_tree().create_timer(1.0).timeout
 	expect(not _local.grab.is_holding(), "client_throw_through_door")
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))

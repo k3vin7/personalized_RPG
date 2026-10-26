@@ -30,8 +30,6 @@ const CATCH_PROBES := 8
 # DOC: the stand in for a shield bash until there is a shield. Ground only.
 # The shove's reach, angle, ally bonus and cooldown moved to PhysicsTuning in
 # B-c, with the ruling: they are numbers the server judges with now.
-const CARRY_SPEED_SCALE := 0.7
-
 enum Armed {
 	NONE,
 	JUMP,
@@ -317,7 +315,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("grab_throw"):
+		# Stage E: with something in your hands G starts a charge and the
+		# release decides what it was. With empty hands it is still a grab.
 		Net.queue_physics(interact)
+		get_viewport().set_input_as_handled()
+		return
+	if event.is_action_released("grab_throw"):
+		if player.grab != null:
+			Net.queue_physics(player.grab.release_throw_key)
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("dash"):
@@ -393,8 +398,8 @@ func _ground_step(delta: float) -> void:
 		_pending_air_target = null
 		set_target(queued)
 
-	if _jump_buffer_left > 0.0 and player.state != Player.State.GRABBING \
-			and (player.is_grounded_state() or _coyote_left > 0.0):
+	if _jump_buffer_left > 0.0 \
+			and (player.is_grounded_state() or player.state == Player.State.GRABBING or _coyote_left > 0.0):
 		_launch_jump()
 		return
 
@@ -756,7 +761,10 @@ func _cursor_jump_velocity(current: Vector3) -> Vector3:
 # reach.
 func interact() -> bool:
 	if player.grab != null and player.grab.is_holding():
-		return player.grab.throw()
+		# Not a throw yet: the charge starts and the release decides between a
+		# put-down, an arc and a line.
+		player.grab.press_throw()
+		return true
 	# The weapon rack is a local prop with no force behind it, so it does not
 	# go through the force door. Weapon approval is its own stage.
 	for node in player.get_tree().get_nodes_in_group(WeaponRack.INTERACT_GROUP):
@@ -983,13 +991,14 @@ func _cursor_ground_point() -> Variant:
 	return plane.intersects_ray(from, direction)
 
 
+# Stage E: no carry penalty of its own any more. What a body is carrying is in
+# its weight, and the weight is already in ratio() -- so a heavy load slows the
+# walk, lowers the jump and shortens the dash by the same formula that makes a
+# heavy character slower than a light one. The flat 70 percent and the outright
+# ban on jumping, dashing and shoving while holding something are gone with it.
 func move_speed() -> float:
-	var speed: float = Tuning.values.base_move_speed * Tuning.ratio_mult(
+	return Tuning.values.base_move_speed * Tuning.ratio_mult(
 		player.stats.ratio(), Tuning.values.ratio_k_speed)
-	if player.state == Player.State.GRABBING:
-		# DOC: 70% while carrying something, and no jump or dash at all.
-		speed *= CARRY_SPEED_SCALE
-	return speed
 
 
 func _click_to_target() -> void:

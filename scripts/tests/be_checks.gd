@@ -244,12 +244,12 @@ func _contest_check() -> void:
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(rock.global_position)
 		_local.movement.interact())
-	# Watched rather than read at the end. At 200 ms the loser's intent is
-	# formed against a rock that has already been taken, and the next candidate
-	# under its cursor may well be the winner's own body -- which is correct,
-	# and is not the question. The question is whether the table ever let two
-	# peers hold the same rock.
+	# Stage E made the grab name its target: a body that aimed at the rock and
+	# lost the race fails, rather than picking up whoever was standing behind
+	# it. So the question is both halves of that -- exactly one of them got the
+	# rock, and neither of them came away holding a person instead.
 	var holders := {}
+	var grabbed_a_person := 0
 	var refused_while_held := true
 	var watched := 0.0
 	while watched < 2.0 + _lag * 10.0:
@@ -260,12 +260,18 @@ func _contest_check() -> void:
 			holders[who] = true
 			var other := _local if who != 1 else victim
 			refused_while_held = refused_while_held and not _judge.can_grab(other, rock)
+		# Either of them holding a body rather than the rock they aimed at.
+		for peer in [1, _client_peer()]:
+			var carried := _judge.held_by(peer)
+			if carried != null and carried is Player:
+				grabbed_a_person += 1
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
-	note("contest: the rock was held by %s during the window, table now %s (host=1 client=%d)" % [
-		str(holders.keys()), _judge.describe_holds(), _client_peer()])
+	note("contest: the rock was held by %s, frames holding a person instead: %d, table now %s (host=1 client=%d)" % [
+		str(holders.keys()), grabbed_a_person, _judge.describe_holds(), _client_peer()])
 	expect(_judge.hold_count() <= 2, "nobody_holds_two_things_at_once")
 	expect(holders.size() == 1, "only_one_of_them_ever_held_the_rock")
 	expect(refused_while_held, "the_loser_is_refused_by_the_row")
+	expect(grabbed_a_person == 0, "and_the_one_aiming_at_the_rock_never_grabbed_a_person")
 	await tick_request(func() -> void:
 		if _judge.holder_of(rock) == 1:
 			_local.grab.drop())
@@ -420,9 +426,11 @@ func client_rock(rock_path: NodePath) -> void:
 	if _local.grab.is_holding():
 		report_latency.rpc_id(1, "grab press to hold", Time.get_ticks_msec() - pressed)
 	expect(_local.grab.is_holding(), "client_hold_arrived")
+	# Stage E: G is one key, so a second press charges rather than throws.
+	# grab.throw() is what "throw it" means now -- a full charge at the cursor.
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(_local.global_position + Vector3.RIGHT * 10.0)
-		_local.movement.interact())
+		_local.grab.throw())
 	await _settle_wait(1.2)
 	expect(not _local.grab.is_holding(), "client_hand_empty_after_throw")
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
