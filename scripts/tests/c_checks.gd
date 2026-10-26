@@ -12,6 +12,9 @@ const HOME := Vector3(0.0, 0.9, 11.0)
 const GAP_LANE_X := -15.0
 const GAP_NEAR := Vector3(-15.0, 0.9, 1.0)
 const GAP_TARGET := Vector3(-15.0, 0.0, -5.0)
+# PlayerMovement.COYOTE_TIME plus a little: a press inside that window is a
+# jump, not a catch.
+const COYOTE_WAIT := 0.2
 
 var _world: Node3D
 var _local: Player
@@ -103,6 +106,7 @@ func run(world: Node3D) -> void:
 	var warnings := _judge.move_warnings
 	await _jump_checks()
 	await _dash_checks()
+	await _air_space_checks()
 	await _smart_key_checks()
 	await _gap_edge_check()
 	await _stamina_check()
@@ -278,6 +282,101 @@ func _dash_checks() -> void:
 	expect(strong_reach > reach + 0.2, "strength_raises_the_dash_distance")
 	expect(absf(float(strong["distance"]) - strong_reach) < 0.4, "the_longer_dash_is_actually_travelled")
 	await tick_request(func() -> void: _local.stats.strength = 10.0)
+
+
+# ------------------------------- Space off the ground: the wall, and the dash
+
+# The user-facing bug C-2 introduced: with the smart key off, a press in the
+# air only armed a jump, so nothing ever reached the catch buffer and a body
+# could not take hold of a wall any more. Space off the ground has three jobs
+# and none of them is "aim"; this measures two of them.
+func _air_space_checks() -> void:
+	var wall := _world.find_child("ClimbWall_0", true, false) as Node3D
+	if wall == null:
+		expect(false, "the_climb_ring_is_in_the_level")
+		return
+	# Just off the wall's face, in the air, falling. The face is at z = 11.7
+	# and a body stands a radius off it.
+	var face_z: float = wall.global_position.z - 0.3
+	var beside := Vector3(wall.global_position.x, 2.5, face_z - Player.BODY_RADIUS - 0.12)
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = beside
+		_local.velocity = Vector3(0.0, -0.5, 0.0)
+		_local.floor_snap_length = 0.0
+		_local.change_state(Player.State.AIRBORNE))
+	# The coyote window has to close first. A body that was on the ground a
+	# tenth of a second ago gets a jump out of the press, before the catch is
+	# ever considered -- which is correct, and is not what this measures.
+	await get_tree().create_timer(COYOTE_WAIT).timeout
+	# Space, in the air, with the smart key off: this is a wall catch.
+	var was: bool = Tuning.values.smart_key_enabled
+	Tuning.values.smart_key_enabled = false
+	Net.queue_physics(_local.movement.press_jump)
+	var caught := false
+	var waited := 0.0
+	while waited < 1.2 and not caught:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		caught = _local.climb != null and _local.climb.is_climbing()
+	note("space in the air: caught the wall=%s after %.2fs, state=%s, armed=%d" % [
+		caught, waited, Player.State.keys()[_local.state], _local.movement.armed_action()])
+	expect(caught, "space_in_the_air_takes_hold_of_a_wall")
+	expect(_local.movement.armed_action() == PlayerMovement.Armed.NONE, "a_press_in_the_air_arms_nothing")
+	if caught:
+		await tick_request(func() -> void: _local.climb.detach(0.0))
+		await _wait(1.0)
+
+	# The whole path a person takes: stand in front of a wall, jump at it, and
+	# press Space on the way in.
+	var ground := Vector3(wall.global_position.x, 0.9, face_z - 2.0)
+	var aim := Vector3(wall.global_position.x, 0.9, face_z - Player.BODY_RADIUS)
+	await tick_request(func() -> void:
+		placed()
+		if _local.climb != null and _local.climb.is_climbing():
+			_local.climb.detach(0.0)
+		_local.global_position = ground
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target()
+		_local.movement.set_aim_override(aim)
+		_local.movement.cast_jump())
+	var flown := 0.0
+	var grabbed := false
+	while flown < 2.0 and not grabbed:
+		await get_tree().physics_frame
+		flown += get_physics_process_delta_time()
+		# Pressed as the wall comes into reach, which is what a person does.
+		if _local.state == Player.State.AIRBORNE \
+				and absf(_local.global_position.z - (face_z - Player.BODY_RADIUS)) < 0.5:
+			_local.movement.press_jump()
+		grabbed = _local.climb != null and _local.climb.is_climbing()
+	note("jumped at the wall then pressed space: caught=%s after %.2fs at y=%.2f" % [
+		grabbed, flown, _local.global_position.y])
+	expect(grabbed, "jump_at_a_wall_then_space_takes_hold")
+	await tick_request(func() -> void:
+		if _local.climb != null and _local.climb.is_climbing():
+			_local.climb.detach(0.0)
+		_local.movement.set_aim_override(Vector3.INF))
+	await _wait(1.0)
+
+	# And Space during a dash is the dash jump, not an aim.
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = HOME
+		_local.velocity = Vector3.ZERO
+		_local.stamina = Tuning.values.stamina_max
+		_local.movement.cancel_target()
+		_local.movement.set_aim_override(HOME + Vector3(8.0, 0.0, 0.0))
+		_local.movement.request_dash())
+	await get_tree().create_timer(0.08).timeout
+	var dashing := _local.movement.is_dashing()
+	Net.queue_physics(_local.movement.press_jump)
+	var jumped := await _left_the_ground()
+	note("space during a dash: was dashing=%s, left the ground=%s" % [dashing, jumped])
+	expect(dashing and jumped, "space_during_a_dash_is_the_dash_jump")
+	await _wait(1.5)
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	Tuning.values.smart_key_enabled = was
 
 
 # ------------------------------------------------------- 5-chapter smart key

@@ -105,6 +105,20 @@ func cancel_target() -> void:
 # Space. With the smart key on this jumps now; with it off it arms the jump and
 # shows where it would land, and the left button casts it.
 func press_jump() -> void:
+	if not player.is_grounded_state():
+		# Off the ground Space is not a jump to aim. It is the wall catch, and
+		# the coyote jump for a body that walked off something a moment ago,
+		# and the jump out of a dash -- all three decided in the physics step
+		# from these two buffers. So the press goes straight to them and arms
+		# nothing: there is no cursor to pick, and nothing to left-click.
+		#
+		# C-2 sent every press through the smart key and broke all three: with
+		# the key off (the default) a press in the air only armed a jump that
+		# could never be cast, so a body could no longer take hold of a wall.
+		_disarm()
+		_jump_buffer_left = JUMP_BUFFER
+		_catch_buffer_left = CATCH_BUFFER
+		return
 	if Tuning.values.smart_key_enabled:
 		cast_jump()
 		return
@@ -321,8 +335,13 @@ func _physics_process(delta: float) -> void:
 		_coyote_left = maxf(0.0, _coyote_left - delta)
 
 	if _armed != Armed.NONE:
-		# The rings follow the cursor for as long as the key is armed.
-		_refresh_indicator()
+		if not player.is_grounded_state():
+			# Shoved, fell, or dashed off while aiming: there is nothing left to
+			# cast, so the rings go rather than follow a body in flight.
+			_disarm()
+		else:
+			# The rings follow the cursor for as long as the key is armed.
+			_refresh_indicator()
 
 	if player.state == Player.State.STUNNED:
 		# Physics keeps running while stunned; only the input stops.
