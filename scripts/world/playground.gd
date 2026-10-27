@@ -165,6 +165,12 @@ func _run_smoke() -> void:
 		get_tree().root.add_child(checks)
 		checks.run(self)
 		return
+	if Net.auto_only == "G":
+		var gc := preload("res://scripts/tests/g_checks.gd").new()
+		gc.name = "GChecks"
+		get_tree().root.add_child(gc)
+		gc.run(self)
+		return
 	if Net.auto_only == "F":
 		var fc := preload("res://scripts/tests/f_checks.gd").new()
 		fc.name = "FChecks"
@@ -1743,17 +1749,29 @@ func _build_ground() -> void:
 
 
 func _build_stairs() -> void:
-	# 0.5 / 1.0 / 1.5 / 2.0 m, each 3 x 3: the jump height ladder.
-	var heights := [0.5, 1.0, 1.5, 2.0]
+	# The jump height ladder. F follow-up: it stopped at 2.0 m, so strength 20
+	# and 30 had nothing left to climb onto and measured the same 2.0 m as
+	# strength 10 -- the ladder was the limit, not the jump. Rungs now run past
+	# the strongest budget (3.46 m standing apex at strength 30).
+	var heights := [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+	# 3.5 m apart rather than 4.5: eight rungs at the old spacing ran into the
+	# high platform at x 11 to 17. Boxes are 3 wide, so there is still half a
+	# metre of daylight between them.
 	for index in heights.size():
 		var height: float = heights[index]
+		# z 16.5 rather than 14: at 14 the 1.5 m rung landed inside the climb
+		# ring's 0 degree wall (x -9.5 to -6.5, z 11.7 to 12.3) and a body put
+		# in front of it to jump started inside a wall. The ring reaches z 12.3
+		# and the plaza ends at 18, so a 3 deep row centred on 16.5 fits with
+		# nothing in it.
+		var at := Vector3(-16.0 + float(index) * 3.5, height * 0.5, 16.5)
 		_box(
 			"Step_%.1f" % height,
-			Vector3(-15.0 + float(index) * 4.5, height * 0.5, 14.0),
+			at,
 			Vector3(3.0, height, 3.0),
 			Color("656b72"),
 			WORLD_LAYER)
-		_sign("%.1fm" % height, Vector3(-15.0 + float(index) * 4.5, height + 1.2, 14.0), Color.WHITE)
+		_sign("%.1fm" % height, Vector3(at.x, height + 1.2, at.z), Color.WHITE)
 
 
 func _build_gaps() -> void:
@@ -1801,9 +1819,9 @@ const CLIMB_RING_ANGLES := [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0]
 
 
 func _build_walls() -> void:
-	# Climbable faces all the way round the ring. The two that point across the
-	# view are side faces: up and down only, by the stage F rule, and marked
-	# the same way as the rest.
+	# Walls all the way round the ring, each climbable on every side that
+	# stands up from the ground. The two that point across the view are side
+	# faces: up and down only, by the stage F rule.
 	for degrees in CLIMB_RING_ANGLES:
 		var yaw := deg_to_rad(float(degrees))
 		var outward := Vector3(sin(yaw), 0.0, cos(yaw))
@@ -1811,45 +1829,24 @@ func _build_walls() -> void:
 			"ClimbWall_%d" % roundi(rad_to_deg(yaw)),
 			CLIMB_RING_CENTRE + outward * CLIMB_RING_RADIUS + Vector3.UP * 3.0,
 			Vector3(3.0, 6.0, 0.6),
-			# Stage F: the box itself is plain wall. The climbable side gets a
-			# panel of its own, so which face can be climbed is something you
-			# can see rather than something you have to try.
-			Color("5d646b"),
+			# F follow-up: the whole box is the climb colour, because the whole
+			# box can be climbed. A single green panel said one face of four,
+			# which is no longer the rule.
+			Color("6f9a63"),
 			CLIMBABLE_LAYER,
 			false,
 			yaw)
-		_mark_climb_face(wall, outward, Vector3(3.0, 6.0, 0.6))
 		# The label says which way it points, so the rule can be read off the
 		# map rather than worked out.
 		_sign(
 			"%d°" % roundi(rad_to_deg(yaw)),
 			wall.position + Vector3.UP * 3.6,
 			Color("c8ffc8"))
-	_sign("CLIMB RING (%d면, 90/270은 옆면)" % CLIMB_RING_ANGLES.size(),
+	_sign("CLIMB RING (%d벽, 전면 등반, 90/270은 옆면)" % CLIMB_RING_ANGLES.size(),
 		CLIMB_RING_CENTRE + Vector3.UP * 8.0, Color("c8ffc8"))
 	# Smooth wall: looks similar, cannot be climbed.
 	_box("SmoothWall", Vector3(16.0, 2.0, 2.0), Vector3(6.0, 4.0, 0.6), Color("555b62"), WALL_LAYER)
 	_sign("SMOOTH (등반 불가)", Vector3(16.0, 5.0, 2.0), Color.WHITE)
-
-
-# DOC (stage F): the one face of this wall that may be climbed, marked in the
-# wall's metadata for the rule and with a panel for the eye. Everything else
-# about the box -- its back, its two thin edges -- is wall.
-func _mark_climb_face(wall: StaticBody3D, outward: Vector3, size: Vector3) -> void:
-	wall.set_meta(PlayerClimb.CLIMB_FACES_META, [outward.normalized()])
-	var panel := MeshInstance3D.new()
-	panel.name = "ClimbFace"
-	var quad := QuadMesh.new()
-	quad.size = Vector2(size.x * 0.92, size.y * 0.94)
-	panel.mesh = quad
-	# Just proud of the face, in the wall's own local space: the box is turned
-	# by its yaw and the panel turns with it.
-	panel.position = Vector3(0.0, 0.0, size.z * 0.5 + 0.02)
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color("6f9a63")
-	material.roughness = 0.9
-	panel.material_override = material
-	wall.add_child(panel)
 
 
 func _build_time_boundary() -> void:

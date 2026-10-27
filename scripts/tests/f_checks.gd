@@ -24,6 +24,10 @@ var _reported := {}
 # A lambda copies the locals it reads, so a value worked out inside one comes
 # back on a field.
 var _aimed := Vector3.ZERO
+# A lambda copies the locals it reads, so anything a tick_request has to hand
+# back lives here instead. This has caught out every stage's checks so far.
+var _decided := ""
+var _distance := 0.0
 
 
 func expect(condition: bool, label: String) -> void:
@@ -93,6 +97,7 @@ func run(world: Node3D) -> void:
 	await _side_face_checks()
 	await _faded_face_check()
 	await _two_peer_check()
+	await _click_rule_checks()
 	await _reach_table()
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_f")
 	print("F_RESULT lag=%s peer=%d checks=%d failures=%d" % [_label, _peer_id, _checks, _failures])
@@ -136,30 +141,116 @@ func _attach(degrees: float, from_behind := false) -> bool:
 	return _flag
 
 
-# ----------------------------------------------- only the marked face holds
+# ------------------------------------- every face that stands up can be climbed
 
 func _marked_face_checks() -> void:
 	var wall := _ring_wall(0.0)
-	expect(wall != null and wall.has_meta(PlayerClimb.CLIMB_FACES_META), "the_wall_says_which_face_is_climbable")
+	expect(wall != null, "the_ring_wall_exists")
 	if wall == null:
 		return
-	var faces: Array = wall.get_meta(PlayerClimb.CLIMB_FACES_META)
-	note("ClimbWall_0 marked faces: %s, panel child=%s" % [
-		str(faces), wall.find_child("ClimbFace", false, false) != null])
-	expect(wall.find_child("ClimbFace", false, false) != null, "and_shows_it")
+	expect((wall.collision_layer & Playground.CLIMBABLE_LAYER) != 0,
+		"the_wall_is_on_the_climbable_layer")
+	# F follow-up: the wall is what is marked, not one face of it, so the green
+	# panel that used to name a single side is gone.
+	expect(wall.find_child("ClimbFace", false, false) == null,
+		"no_single_face_is_singled_out_any_more")
 
-	expect(await _attach(0.0), "the_marked_face_can_be_climbed")
+	expect(await _attach(0.0), "the_face_pointing_at_the_camera_can_be_climbed")
 	expect(_local.climb.is_climbing(), "and_the_body_is_on_it")
 	await tick_request(func() -> void: _local.climb.detach(0.0))
 	await _wait(0.8)
 
-	# The back of the same wall is wall, not a climbing face.
-	var refused := not await _attach(0.0, true)
+	# The back of the same wall stands up from the ground too, so it holds.
+	var held := await _attach(0.0, true)
 	note("the back of the same wall: attached=%s state=%s" % [
-		not refused, Player.State.keys()[_local.state]])
-	expect(refused, "the_unmarked_back_of_the_same_wall_does_not_hold")
-	expect(not _local.climb.is_climbing(), "and_the_body_stays_off_it")
+		held, Player.State.keys()[_local.state]])
+	expect(held, "the_back_of_the_same_wall_holds_as_well")
+	expect(_local.climb.is_climbing(), "and_the_body_is_on_that_too")
+	await tick_request(func() -> void: _local.climb.detach(0.0))
 	await _wait(0.5)
+
+	# A top is not a face: it is somewhere to stand, and the rule says so
+	# without needing a body put on one.
+	expect(not PlayerClimb.face_is_climbable(wall, Vector3.UP),
+		"the_top_of_a_climb_wall_is_not_a_climbing_face")
+	expect(PlayerClimb.face_is_climbable(wall, _outward(0.0)),
+		"and_a_side_of_it_is")
+	var smooth := _world.find_child("SmoothWall", true, false) as CollisionObject3D
+	expect(smooth != null and not PlayerClimb.face_is_climbable(smooth, Vector3(0.0, 0.0, 1.0)),
+		"a_smooth_wall_is_still_not_climbable")
+	await _wait(0.3)
+
+
+# ------------------------------------ what the right button means, by surface
+
+func _click_rule_checks() -> void:
+	var boundary := _world.get_node_or_null("TimeBoundary") as TimeBoundary
+	# The slab lives under the navigation region so it is part of the bake, so
+	# the boundary's own handle on it is what finds it, not a path.
+	var face := boundary.face as CollisionObject3D if boundary != null else null
+	expect(face != null, "the_3m_cut_face_exists")
+	if face == null:
+		return
+	await tick_request(func() -> void:
+		placed()
+		_judge.server_respawn(_local)
+		if _local.climb.is_climbing():
+			_local.climb.detach(0.0)
+		_local.global_position = HOME
+		_local.movement.cancel_target())
+	await _wait(0.5)
+
+	# The grass on top of the 3 m ledge. This is the one that used to hang the
+	# body off the face instead of walking it anywhere.
+	var top := Vector3(TimeBoundary.SEAM.x, TimeBoundary.TOP_Y, boundary.face_z() - 1.0)
+	await tick_request(func() -> void:
+		_decided = _local.movement.order_from_surface(face, top, Vector3.UP)
+		_distance = _local.movement.climb_request_distance())
+	note("right click on the ledge top: decided=%s climb_request=%.2f" % [_decided, _distance])
+	expect(_decided == "move", "clicking_the_top_of_a_climb_wall_is_a_move")
+	expect(_distance < 0.0, "and_leaves_no_climb_order_behind")
+
+	# The face of the same body, pointed at head on.
+	var front := Vector3(TimeBoundary.SEAM.x, 1.5, boundary.face_z())
+	await tick_request(func() -> void:
+		_decided = _local.movement.order_from_surface(face, front, Vector3(0.0, 0.0, 1.0)))
+	note("right click on the same body's face: decided=%s" % _decided)
+	expect(_decided == "climb", "clicking_a_climbable_face_head_on_is_a_climb")
+
+	# A wall that is not climbable is neither.
+	var smooth := _world.find_child("SmoothWall", true, false) as CollisionObject3D
+	await tick_request(func() -> void:
+		_decided = _local.movement.order_from_surface(
+			smooth, smooth.global_position + Vector3(0.0, 0.0, 0.4), Vector3(0.0, 0.0, 1.0)))
+	note("right click on the smooth wall: decided=%s" % _decided)
+	expect(_decided == "none", "clicking_a_wall_that_is_not_climbable_orders_nothing")
+
+	# Space, aimed at a climbable face: a jump, never a climb order.
+	await tick_request(func() -> void: _local.movement.cancel_target())
+	var wall := _ring_wall(0.0)
+	var wall_face := RING_CENTRE + _outward(0.0) * (RING_RADIUS + 0.3) + Vector3.UP * 2.0
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = wall_face + _outward(0.0) * 2.0
+		_local.global_position.y = 0.9
+		_local.velocity = Vector3.ZERO)
+	await _wait(0.5)
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(wall_face)
+		# Pressed the way the key is pressed, then cast: with the smart key off
+		# the press arms and the left button casts, and the point is that
+		# neither step ever turns into a climb order.
+		_local.movement.press_jump()
+		_local.movement.cast_armed())
+	await _beat(1.6)
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(Vector3.INF)
+		_distance = _local.movement.climb_request_distance()
+		_decided = Player.State.keys()[_local.state])
+	note("space aimed at a climb face: climb_request=%.2f state=%s" % [_distance, _decided])
+	expect(_distance < 0.0, "space_never_becomes_a_climb_order")
+	expect(not _local.climb.is_climbing(), "and_does_not_put_the_body_on_the_wall")
+	await _wait(0.4)
 
 
 # ------------------------------------------- a side face goes up and down only
@@ -303,7 +394,7 @@ func _reach_table() -> void:
 		var cap := _local.leap_speed_cap()
 		var highest := 0.0
 		var rungs := PackedStringArray()
-		for height in [0.5, 1.0, 1.5, 2.0]:
+		for height in [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]:
 			var rung := _world.find_child("Step_%s" % String.num(float(height), 1).replace(".", "_"), true, false) as Node3D
 			if rung == null:
 				continue
@@ -311,7 +402,9 @@ func _reach_table() -> void:
 			rungs.append("%.1f:%s" % [float(height), "yes" if onto else "no"])
 			if onto:
 				highest = maxf(highest, float(height))
-		# And the 3 m climb ledge, which is what the climb faces are placed on.
+		# And the 3 m climb ledge. Tried from the same stand-offs as the rungs:
+		# it is the one ledge in the map at that height, so whether a strong
+		# body can jump it rather than climb it is worth knowing.
 		var boundary := _world.get_node_or_null("TimeBoundary") as TimeBoundary
 		var ledge := false
 		if boundary != null:
@@ -320,11 +413,14 @@ func _reach_table() -> void:
 			# gives h = (B^2 - d^2) / 2B with B = cap^2/g -- so a table taken
 			# from four metres out would be measuring the distance, not the
 			# strength.
-			ledge = await _jump_onto_point(
-				Vector3(TimeBoundary.SEAM.x, 0.9, boundary.face_z() + 1.2),
-				Vector3(TimeBoundary.SEAM.x, TimeBoundary.TOP_Y + Player.BODY_HALF_HEIGHT,
-					boundary.face_z() - 1.0),
-				TimeBoundary.TOP_Y)
+			for stand_off: float in STAND_OFFS:
+				ledge = await _jump_onto_point(
+					Vector3(TimeBoundary.SEAM.x, 0.9, boundary.face_z() + stand_off),
+					Vector3(TimeBoundary.SEAM.x, TimeBoundary.TOP_Y + Player.BODY_HALF_HEIGHT,
+						boundary.face_z() - 1.0),
+					TimeBoundary.TOP_Y)
+				if ledge:
+					break
 			rungs.append("%.1f:%s" % [TimeBoundary.TOP_Y, "yes" if ledge else "no"])
 			if ledge:
 				highest = maxf(highest, TimeBoundary.TOP_Y)
@@ -336,11 +432,29 @@ func _reach_table() -> void:
 	await tick_request(func() -> void: _local.stats.strength = 10.0)
 
 
+# F follow-up: the old table jumped from 3 m back at every height, so what it
+# measured was the walk-up, not the strength -- the reach a leap has falls away
+# with the distance to the ledge. One stand-off is not enough either: close in,
+# a steep launch scrapes up the rung's own face and loses its forward travel,
+# and far out the budget runs out of height. So a few are tried and the answer
+# is whether any of them gets the body up there, which is the question being
+# asked.
+const STAND_OFFS := [1.0, 2.0]
+const AIM_INSETS := [0.6, 1.5]
+
+
 func _jump_onto(rung: Node3D, height: float) -> bool:
-	return await _jump_onto_point(
-		Vector3(rung.global_position.x, 0.9, 11.0),
-		Vector3(rung.global_position.x, height + Player.BODY_HALF_HEIGHT, rung.global_position.z),
-		height)
+	var near_face := rung.global_position.z - 1.5
+	for stand_off: float in STAND_OFFS:
+		for inset: float in AIM_INSETS:
+			var onto := await _jump_onto_point(
+				Vector3(rung.global_position.x, 0.9, near_face - stand_off),
+				Vector3(rung.global_position.x, height + Player.BODY_HALF_HEIGHT,
+					near_face + inset),
+				height)
+			if onto:
+				return true
+	return false
 
 
 func _jump_onto_point(from: Vector3, aim: Vector3, height: float) -> bool:

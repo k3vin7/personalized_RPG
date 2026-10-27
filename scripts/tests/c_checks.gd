@@ -225,8 +225,12 @@ func _jump_checks() -> void:
 		return
 	# The aim is where the body origin should end up, which is a half height
 	# above the surface it is standing on.
-	var top := Vector3(step.global_position.x, 1.0 + Player.BODY_HALF_HEIGHT, step.global_position.z)
-	var onto := await _jump_at(Vector3(top.x, 0.9, 11.0), top)
+	# Measured off the rung's own near face rather than from a fixed z: the F
+	# follow-up moved the ladder row to clear the climb ring, and a hard coded
+	# start put the cursor past the leap reach, which read as the jump being
+	# clamped rather than as the check standing in the wrong place.
+	var top := _rung_aim(step, 1.0)
+	var onto := await _jump_at(_rung_stand(step), top)
 	note("onto the 1 m step: landed y=%.2f miss %.2f apex %.2f speed %.2f" % [
 		(onto["landed"] as Vector3).y, onto["miss"], (onto["plan"] as Dictionary).get("apex", 0.0), onto["speed"]])
 	expect((onto["landed"] as Vector3).y > 1.5, "the_jump_got_up_onto_the_step")
@@ -244,8 +248,8 @@ func _jump_checks() -> void:
 		var rung := _world.find_child("Step_%s" % String.num(float(height), 1).replace(".", "_"), true, false) as Node3D
 		if rung == null:
 			continue
-		var rung_top := Vector3(rung.global_position.x, float(height) + Player.BODY_HALF_HEIGHT, rung.global_position.z)
-		var tried := await _jump_at(Vector3(rung_top.x, 0.9, 11.0), rung_top)
+		var rung_top := _rung_aim(rung, float(height))
+		var tried := await _jump_at(_rung_stand(rung), rung_top)
 		var landed_on: bool = (tried["landed"] as Vector3).y > float(height) + 0.5
 		var rung_plan: Dictionary = tried["plan"]
 		note("step ladder: %.1f m rung -> landed y=%.2f on_top=%s | apex %.2f launch %.2f/%.2f at_limit=%s" % [
@@ -256,6 +260,20 @@ func _jump_checks() -> void:
 	expect(float(near["plan_speed"]) <= cap + 0.01 and float(far["plan_speed"]) <= cap + 0.01
 		and float(standing["plan_speed"]) <= cap + 0.01 and float(beyond["plan_speed"]) <= cap + 0.01
 		and float(onto["plan_speed"]) <= cap + 0.01, "every_launch_is_inside_the_cap")
+
+
+# A metre off the rung's near face, and aimed just inside its near edge. The
+# boxes are 3 deep, so aiming at the centre asks for a jump 1.5 m longer than
+# the one being measured.
+func _rung_stand(rung: Node3D) -> Vector3:
+	return Vector3(rung.global_position.x, 0.9, rung.global_position.z - 2.5)
+
+
+func _rung_aim(rung: Node3D, height: float) -> Vector3:
+	return Vector3(
+		rung.global_position.x,
+		height + Player.BODY_HALF_HEIGHT,
+		rung.global_position.z - 1.0)
 
 
 # ------------------------------------------------- the dash is the same budget

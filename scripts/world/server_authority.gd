@@ -118,6 +118,9 @@ var _shove_cooldown := {}
 # B-d vitals bookkeeping, all server side.
 # peer -> {peak: float, tracking: bool, hold: float}
 var _fall_watch := {}
+# Stage G: peer -> what put it in the air last (who, and whether a party
+# member). Read by the fall ruling and the kill plane, cleared by both.
+var _flight_source := {}
 # peer -> seconds until the body comes back
 var _respawn_left := {}
 var fall_mismatches := 0
@@ -790,6 +793,9 @@ func send_force(target: Node, event: Dictionary) -> void:
 		# B-e: and the push is remembered, because it is the reason this body
 		# is about to be moving faster than its own legs explain.
 		_remember_force(target as Player, event)
+		# Stage G: and who sent it, so the fall that follows knows whether a
+		# party member is the reason this body is in the air.
+		_note_flight_source(target as Player, event)
 	ForceSystem.send(target, event)
 
 
@@ -935,9 +941,16 @@ func _rule_fall(actor: Player, payload: Dictionary) -> Variant:
 	if not Tuning.values.fall_damage_enabled or height <= Tuning.values.fall_damage_min_height:
 		return true
 	var damage: float = (height - Tuning.values.fall_damage_min_height) * Tuning.values.fall_damage_per_meter
+	# Stage G: the damage is taken whoever started the flight. The flag only
+	# decides whether a party member's launch is allowed to finish the job.
+	var spared := false
+	if not Tuning.values.ally_fall_death and ally_started_this_flight(peer) and damage >= actor.hp:
+		damage = maxf(actor.hp - 1.0, 0.0)
+		spared = true
+	_clear_flight_source(peer)
 	server_damage(actor, damage, "fall")
-	print("PLAYGROUND_FALL_DAMAGE peer=%s height=%.2f damage=%.1f hp=%.0f" % [
-		actor.name, height, damage, actor.hp])
+	print("PLAYGROUND_FALL_DAMAGE peer=%s height=%.2f damage=%.1f hp=%.0f ally_spared=%s" % [
+		actor.name, height, damage, actor.hp, spared])
 	return true
 
 
@@ -963,6 +976,13 @@ func _watch_vitals(delta: float) -> void:
 			watch["hold"] = maxf(0.0, float(watch["hold"]) - delta)
 			if float(watch["hold"]) <= 0.0:
 				watch["peak"] = y
+				# Stage G: a push that never took this body off the ground is
+				# not the reason for a fall it takes later. Age is what tells
+				# the two apart: the record of a launch is new on the frame it
+				# is made, and the body is airborne from the next step on, so
+				# only a record that has sat here through the whole grace
+				# without a flight is a stale one.
+				_expire_flight_source(peer)
 		_fall_watch[peer] = watch
 		_check_move(player, delta)
 
@@ -974,7 +994,16 @@ func _watch_vitals(delta: float) -> void:
 		# Out of the world. Checked here rather than on the owner so that one
 		# place decides a death, from the position the server has.
 		if y < Tuning.values.kill_plane_y:
-			server_kill(player, "kill_plane")
+			# Stage G: out of the world is normally the end. With the flag off
+			# a party member's launch may not be the death of you, so the body
+			# is put back home alive instead -- it cannot be left down there.
+			if not Tuning.values.ally_fall_death and ally_started_this_flight(peer):
+				_clear_flight_source(peer)
+				print("PLAYGROUND_ALLY_FALL_SPARED peer=%s y=%.2f" % [player.name, y])
+				server_respawn(player)
+			else:
+				_clear_flight_source(peer)
+				server_kill(player, "kill_plane")
 
 
 # -------------------------------------------------------- the move check
@@ -1170,6 +1199,40 @@ func _can_keep_holding(holder: Player) -> bool:
 		# Its own jump keeps the hold; coming off an edge does not.
 		return holder.sync_jumped
 	return true
+
+
+# Stage G: the force that put this body in the air, kept until the fall it
+# leads to has been ruled on. Not a time window: a co-op launch can be in the
+# air for well over a second and the landing still has to know what started it.
+func _note_flight_source(target: Player, event: Dictionary) -> void:
+	var peer := target.get_multiplayer_authority()
+	var source := int(event.get("source_peer", 0))
+	if source == 0 or source == peer:
+		return
+	_flight_source[peer] = {
+		"by": source,
+		"ally": bool(event.get("is_ally_source", false)),
+		"id": int(event.get("id", 0)),
+		"at": float(Time.get_ticks_msec()) / 1000.0,
+	}
+
+
+func ally_started_this_flight(peer: int) -> bool:
+	var record: Dictionary = _flight_source.get(peer, {})
+	return bool(record.get("ally", false))
+
+
+func _clear_flight_source(peer: int) -> void:
+	_flight_source.erase(peer)
+
+
+func _expire_flight_source(peer: int) -> void:
+	var record: Dictionary = _flight_source.get(peer, {})
+	if record.is_empty():
+		return
+	var age := float(Time.get_ticks_msec()) / 1000.0 - float(record.get("at", 0.0))
+	if age >= FALL_PEAK_HOLD:
+		_flight_source.erase(peer)
 
 
 func _peer_present(peer: int) -> bool:

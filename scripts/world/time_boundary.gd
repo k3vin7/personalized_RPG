@@ -58,11 +58,10 @@ func build(region: NavigationRegion3D) -> void:
 		Vector3(SEAM.x, TOP_Y * 0.5, SEAM.z + FACE_PROUD * 0.5 - FACE_THICKNESS * 0.5),
 		Vector3(WIDTH, TOP_Y, FACE_THICKNESS + FACE_PROUD),
 		null)
+	# A climb wall, and so climbable on every side of it that stands up from
+	# the ground. Its top is a top, which the click rule reads as somewhere to
+	# walk rather than something to hang off.
 	face.collision_layer = Playground.CLIMBABLE_LAYER
-	# Stage F: the cut can only face the camera, so the front is the one side
-	# of it that may be climbed. Marked rather than assumed, like every other
-	# climbable face.
-	face.set_meta(PlayerClimb.CLIMB_FACES_META, [Vector3(0.0, 0.0, 1.0)])
 	var wall_material := ShaderMaterial.new()
 	wall_material.shader = preload("res://shaders/dither_fade.gdshader")
 	wall_material.set_shader_parameter("albedo", Color("6f9a63"))

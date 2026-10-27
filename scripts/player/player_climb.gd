@@ -18,15 +18,12 @@ const ARRIVE := 0.25
 const MANTLE_TIME := 0.3
 const DETACH_PUSH := 2.0
 const EDGE_PROBE := 0.45
-# Stage F: a face is climbable only if it is marked as one. The mark is a
-# normal in this list, in the wall's own metadata, put there by whoever built
-# the wall -- so the same box can have one face you can climb and three you
-# cannot.
-const CLIMB_FACES_META := "climb_faces"
-# How closely the face being touched has to match a marked one. 0.9 is about
-# 25 degrees, which is loose enough for a contact normal off a corner and tight
-# enough that the next face along never matches.
-const FACE_MATCH := 0.9
+# F follow-up: every face of a climb wall that stands square to the ground can
+# be climbed, not one chosen face of it. What marks a wall as climbable is the
+# wall, on the climbable layer and coloured for it; which side you take hold of
+# is yours to pick. Flatter than this against vertical and the face is a slope
+# or a top, which is walked on rather than climbed.
+const VERTICAL_LIMIT := 0.3
 # 4-chapter, stage F: squarer to the view than this and the face is a front or
 # a back, which can be climbed in any direction. Flatter and it is a side face,
 # which can only be climbed up and down.
@@ -68,11 +65,10 @@ func attach(body: CollisionObject3D, contact: Vector3, normal: Vector3) -> bool:
 	# DOC: a smooth wall is not climbable however hard it is clicked.
 	if body == null or (body.collision_layer & Playground.CLIMBABLE_LAYER) == 0:
 		return false
-	# DOC (stage F): and a climbable wall is not climbable on every side. Only
-	# the faces it is marked with count, so the back and the two thin edges of
-	# a climb panel are walls like any other.
-	if not face_is_marked(body, flat.normalized()):
-		print("PLAYGROUND_CLIMB_REFUSED wall=%s face=%s" % [body.name, flat.normalized()])
+	# F follow-up: any face of it that stands square to the ground. A top or a
+	# slope is not a face to climb, and that is the only side ruled out.
+	if not face_is_climbable(body, normal):
+		print("PLAYGROUND_CLIMB_REFUSED wall=%s face=%s" % [body.name, normal])
 		return false
 	wall = body
 	wall_normal = flat.normalized()
@@ -88,22 +84,22 @@ func attach(body: CollisionObject3D, contact: Vector3, normal: Vector3) -> bool:
 	return true
 
 
-# Is this the side of the wall that is meant to be climbed? A wall with no
-# marks at all is treated as climbable all over, which is what every wall in
-# the map was before stage F and what a new one is until it says otherwise.
-static func face_is_marked(body: CollisionObject3D, normal: Vector3) -> bool:
+# A climb wall, taken hold of on a face that stands up from the ground. Both
+# halves matter: the layer says this wall is climbable at all, and the normal
+# says this side of it is a wall rather than a floor or a lid.
+static func face_is_climbable(body: CollisionObject3D, normal: Vector3) -> bool:
 	if body == null:
 		return false
-	if not body.has_meta(CLIMB_FACES_META):
-		return true
-	var faces: Array = body.get_meta(CLIMB_FACES_META)
-	for face: Vector3 in faces:
-		var flat := Vector3(face.x, 0.0, face.z)
-		if flat.length_squared() < 0.0001:
-			continue
-		if normal.dot(flat.normalized()) >= FACE_MATCH:
-			return true
-	return false
+	if (body.collision_layer & Playground.CLIMBABLE_LAYER) == 0:
+		return false
+	return is_vertical_face(normal)
+
+
+# Square to the ground, give or take. A top or a slope answers no.
+static func is_vertical_face(normal: Vector3) -> bool:
+	if not normal.is_finite() or normal.length_squared() < 0.0001:
+		return false
+	return absf(normal.normalized().dot(Vector3.UP)) <= VERTICAL_LIMIT
 
 
 # DOC (stage F): a face squarer to the view than SIDE_FACE_LIMIT is a front or
@@ -207,9 +203,9 @@ func _wall_continues(offset: Vector3) -> bool:
 	var hit := player.get_world_3d().direct_space_state.intersect_ray(query)
 	if hit.is_empty():
 		return false
-	# The wall going on is not enough: the face has to go on as well, or a
-	# climb would carry on round a corner onto a side nobody marked.
-	return face_is_marked(hit.get("collider") as CollisionObject3D, wall_normal)
+	# The wall going on is not enough: it has to still be a climb wall, so a
+	# climb never carries on round a corner onto a smooth one.
+	return face_is_climbable(hit.get("collider") as CollisionObject3D, wall_normal)
 
 
 func _check_ends() -> void:

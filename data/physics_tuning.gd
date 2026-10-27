@@ -140,5 +140,11 @@ extends Resource
 @export var fall_damage_min_height: float = 4.0
 @export var fall_damage_per_meter: float = 8.0
 @export var fall_damage_enabled: bool = true
+# Stage G: whether a fall that a party member caused -- a throw or a shove --
+# is allowed to be the death of you. The landing damage is taken either way
+# (the co-op launch is a finisher with a price); this only decides whether it
+# may reach zero. Off: the fall leaves 1 HP, and going past the kill plane puts
+# the body back home alive instead of killing it.
+@export var ally_fall_death: bool = false
 @export var kill_plane_y: float = -20.0
 @export var respawn_delay: float = 2.0

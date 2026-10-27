@@ -776,6 +776,10 @@ func interact() -> bool:
 	return false
 
 
+# Flat enough to stand on. The same number the walk target has always used.
+const TOP_SURFACE := 0.6
+
+
 # The click path and anything else that wants a climb go through here, so a
 # test exercises exactly what the button does.
 func order_climb(body: CollisionObject3D, contact: Vector3, normal: Vector3) -> void:
@@ -1016,16 +1020,36 @@ func _click_to_target() -> void:
 	var hit := player.get_world_3d().direct_space_state.intersect_ray(query)
 	if hit.is_empty():
 		return
-	var normal := hit.get("normal", Vector3.ZERO) as Vector3
-	var collider := hit.get("collider") as CollisionObject3D
-	if collider != null and (collider.collision_layer & Player.CLIMBABLE_LAYER) != 0:
+	order_from_surface(
+		hit.get("collider") as CollisionObject3D,
+		hit["position"] as Vector3,
+		hit.get("normal", Vector3.ZERO) as Vector3)
+
+
+# F follow-up: what the right button means, decided by the surface the cursor
+# actually landed on rather than by the layer of the body behind it.
+#
+# A top is somewhere to stand, so clicking one is a move even when the body it
+# belongs to is a climb wall. That is what hung the body on the 3 m cut face
+# when the grass above it was clicked: the face is on the climbable layer, so
+# every click anywhere on that body became a climb order. Only pointing at a
+# climbable face head on is a climb now. Space never comes through here at all,
+# so a jump cannot turn into a climb order whatever it is aimed at.
+#
+# Returns what it decided, so a check can read the button's own answer.
+func order_from_surface(collider: CollisionObject3D, point: Vector3, normal: Vector3) -> String:
+	if normal.dot(Vector3.UP) >= TOP_SURFACE:
+		_clear_climb_request()
+		# Out of reach is still an order: the path stops at the nearest place
+		# it can get to, which is what the gap edges are for.
+		set_target(point)
+		return "move"
+	if PlayerClimb.face_is_climbable(collider, normal):
 		# Walk to the foot of the wall first; the attach happens on arrival.
-		order_climb(collider, hit["position"] as Vector3, normal)
-		return
+		order_climb(collider, point, normal)
+		return "climb"
 	_clear_climb_request()
-	if normal.dot(Vector3.UP) < 0.6:
-		return
-	set_target(hit["position"] as Vector3)
+	return "none"
 
 
 func _desired_velocity() -> Vector3:
