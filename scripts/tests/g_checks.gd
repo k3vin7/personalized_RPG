@@ -146,37 +146,26 @@ func _ally_flag_checks() -> void:
 func _ally_void_checks() -> void:
 	var was: bool = Tuning.values.ally_fall_death
 
-	# Off: it cannot be left down there, so it comes home alive instead.
-	Tuning.values.ally_fall_death = false
-	await _revive()
-	await _ally_push()
-	await tick_request(func() -> void:
-		placed()
-		_local.global_position = VOID_SPOT)
-	await _wait(1.2)
-	await tick_request(func() -> void:
-		_hp = _local.hp
-		_dead = _local.sync_dead)
-	note("void after an ally launch, flag off: hp=%.1f dead=%s y=%.2f" % [
-		_hp, _dead, _local.global_position.y])
-	expect(not _dead, "the_kill_plane_spares_an_ally_launch_with_the_flag_off")
-	expect(_local.global_position.y > Tuning.values.kill_plane_y,
-		"and_puts_the_body_back_in_the_world")
-
-	# On: out of the world is the end.
-	Tuning.values.ally_fall_death = true
-	await _revive()
-	await _ally_push()
-	await tick_request(func() -> void:
-		placed()
-		_local.global_position = VOID_SPOT)
-	await _wait(1.2)
-	await tick_request(func() -> void: _dead = _local.sync_dead)
-	note("void after an ally launch, flag on: dead=%s" % _dead)
-	expect(_dead, "and_kills_it_with_the_flag_on")
+	# The cliff is not landing damage, so the flag has no say in it: a party
+	# member's launch that puts a body out of the world kills it either way.
+	for flag in [false, true]:
+		Tuning.values.ally_fall_death = flag
+		await _revive()
+		await _ally_push()
+		await tick_request(func() -> void:
+			placed()
+			_local.global_position = VOID_SPOT)
+		await _wait(1.2)
+		await tick_request(func() -> void:
+			_hp = _local.hp
+			_dead = _local.sync_dead)
+		note("void after an ally launch, flag %s: hp=%.1f dead=%s" % [
+			"on" if flag else "off", _hp, _dead])
+		expect(_dead, "an_ally_launch_into_the_void_kills_with_the_flag_%s" % (
+			"on" if flag else "off"))
+		await _wait(Tuning.values.respawn_delay + 1.5)
 
 	Tuning.values.ally_fall_death = was
-	await _wait(Tuning.values.respawn_delay + 1.0)
 	await _revive()
 
 

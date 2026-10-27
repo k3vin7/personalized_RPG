@@ -994,16 +994,12 @@ func _watch_vitals(delta: float) -> void:
 		# Out of the world. Checked here rather than on the owner so that one
 		# place decides a death, from the position the server has.
 		if y < Tuning.values.kill_plane_y:
-			# Stage G: out of the world is normally the end. With the flag off
-			# a party member's launch may not be the death of you, so the body
-			# is put back home alive instead -- it cannot be left down there.
-			if not Tuning.values.ally_fall_death and ally_started_this_flight(peer):
-				_clear_flight_source(peer)
-				print("PLAYGROUND_ALLY_FALL_SPARED peer=%s y=%.2f" % [player.name, y])
-				server_respawn(player)
-			else:
-				_clear_flight_source(peer)
-				server_kill(player, "kill_plane")
+			# Stage G: out of the world is always the end, whoever put the body
+			# there. ally_fall_death decides one thing only -- whether a party
+			# member's launch may kill you with the landing damage -- and the
+			# empty ground is not landing damage.
+			_clear_flight_source(peer)
+			server_kill(player, "kill_plane")
 
 
 # -------------------------------------------------------- the move check
