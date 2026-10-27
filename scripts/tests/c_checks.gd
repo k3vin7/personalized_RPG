@@ -389,10 +389,12 @@ func _air_space_checks() -> void:
 	if wall == null:
 		expect(false, "the_climb_ring_is_in_the_level")
 		return
-	# Just off the wall's face, in the air, falling. The face is at z = 11.7
-	# and a body stands a radius off it.
-	var face_z: float = wall.global_position.z - 0.3
-	var beside := Vector3(wall.global_position.x, 2.5, face_z - Player.BODY_RADIUS - 0.12)
+	# Just off the wall's climbable face, in the air, falling. Stage F marked
+	# the ring's outward faces as the ones that can be climbed, so that is the
+	# side to approach: the inward face is wall now, like the back of any other
+	# panel.
+	var face_z: float = wall.global_position.z + 0.3
+	var beside := Vector3(wall.global_position.x, 2.5, face_z + Player.BODY_RADIUS + 0.12)
 	await tick_request(func() -> void:
 		placed()
 		_local.global_position = beside
@@ -423,8 +425,8 @@ func _air_space_checks() -> void:
 
 	# The whole path a person takes: stand in front of a wall, jump at it, and
 	# press Space on the way in.
-	var ground := Vector3(wall.global_position.x, 0.9, face_z - 2.0)
-	var aim := Vector3(wall.global_position.x, 0.9, face_z - Player.BODY_RADIUS)
+	var ground := Vector3(wall.global_position.x, 0.9, face_z + 2.0)
+	var aim := Vector3(wall.global_position.x, 0.9, face_z + Player.BODY_RADIUS)
 	await tick_request(func() -> void:
 		placed()
 		if _local.climb != null and _local.climb.is_climbing():
@@ -441,7 +443,7 @@ func _air_space_checks() -> void:
 		flown += get_physics_process_delta_time()
 		# Pressed as the wall comes into reach, which is what a person does.
 		if _local.state == Player.State.AIRBORNE \
-				and absf(_local.global_position.z - (face_z - Player.BODY_RADIUS)) < 0.5:
+				and absf(_local.global_position.z - (face_z + Player.BODY_RADIUS)) < 0.5:
 			_local.movement.press_jump()
 		grabbed = _local.climb != null and _local.climb.is_climbing()
 	note("jumped at the wall then pressed space: caught=%s after %.2fs at y=%.2f" % [

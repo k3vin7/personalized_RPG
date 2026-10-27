@@ -59,6 +59,10 @@ func build(region: NavigationRegion3D) -> void:
 		Vector3(WIDTH, TOP_Y, FACE_THICKNESS + FACE_PROUD),
 		null)
 	face.collision_layer = Playground.CLIMBABLE_LAYER
+	# Stage F: the cut can only face the camera, so the front is the one side
+	# of it that may be climbed. Marked rather than assumed, like every other
+	# climbable face.
+	face.set_meta(PlayerClimb.CLIMB_FACES_META, [Vector3(0.0, 0.0, 1.0)])
 	var wall_material := ShaderMaterial.new()
 	wall_material.shader = preload("res://shaders/dither_fade.gdshader")
 	wall_material.set_shader_parameter("albedo", Color("6f9a63"))

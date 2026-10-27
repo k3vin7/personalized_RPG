@@ -8,7 +8,11 @@ extends Node
 const PARK_HOST := Vector3(-10.0, 0.9, 10.0)
 const PARK_CLIENT := Vector3(-14.0, 0.9, 13.0)
 # Far enough apart that neither body is in the other's grab range.
-const HIT_LANE := Vector3(-16.0, 0.9, 6.0)
+# Stage F put the climb ring's 270 degree face back, and its box sits at
+# (-14, 6) spanning z 4.5 to 7.5 -- right across the old lane, so the rock was
+# stopped by a wall 1.3 m short of the target. This is stage 7's throw lane,
+# which that stage measures as clear for 12 m.
+const HIT_LANE := Vector3(-14.0, 1.0, 8.0)
 
 var _world: Node3D
 var _local: Player
@@ -381,20 +385,27 @@ func _rock_versus_player_check() -> void:
 		_local.movement.set_aim_override(victim.global_position)
 		ServerAuthority.submit_intent(_local, ServerAuthority.Intent.THROW, {
 			"direction": _local.grab.throw_direction(),
+			# Carried for the shape check only: measured, a line throw reads
+			# the heading and never this, so moving it changes nothing.
 			"target": victim.global_position,
 			"charge": 1.0,
 			"line": true,
 		}))
 	var closest := INF
+	var passing_height := 0.0
 	var sampled := 0.0
 	while sampled < 2.0:
 		await get_tree().physics_frame
 		sampled += get_physics_process_delta_time()
-		closest = minf(closest, rock.global_position.distance_to(victim.global_position))
+		var gap := rock.global_position.distance_to(victim.global_position)
+		if gap < closest:
+			closest = gap
+			passing_height = rock.global_position.y - victim.global_position.y
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
 	var moved := Vector2(victim.global_position.x - stood.x, victim.global_position.z - stood.z).length()
-	note("rock_vs_player closest=%.2f touching_at=%.2f hp=%.0f-%.0f moved=%.2f" % [
-		closest, Rock.radius_for(rock.weight) + Player.BODY_RADIUS, hp_before, victim.hp, moved])
+	note("rock_vs_player closest=%.2f touching_at=%.2f passing_height=%.2f thrower_y=%.2f victim_y=%.2f hp=%.0f-%.0f moved=%.2f" % [
+		closest, Rock.radius_for(rock.weight) + Player.BODY_RADIUS, passing_height,
+		_local.global_position.y, victim.global_position.y, hp_before, victim.hp, moved])
 	expect(victim.hp < hp_before, "bug5_thrown_rock_damages_a_person")
 	expect(moved > 0.2, "bug5_thrown_rock_knocks_a_person_back")
 

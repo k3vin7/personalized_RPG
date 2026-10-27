@@ -165,6 +165,12 @@ func _run_smoke() -> void:
 		get_tree().root.add_child(checks)
 		checks.run(self)
 		return
+	if Net.auto_only == "F":
+		var fc := preload("res://scripts/tests/f_checks.gd").new()
+		fc.name = "FChecks"
+		get_tree().root.add_child(fc)
+		fc.run(self)
+		return
 	if Net.auto_only == "E":
 		var ec := preload("res://scripts/tests/e_checks.gd").new()
 		ec.name = "EChecks"
@@ -1786,13 +1792,18 @@ const CLIMB_RING_RADIUS := 6.0
 # 90 and 270 degrees are left out on purpose: a face pointing across the view
 # cannot be aimed at properly, and since the camera never rotates it is the
 # level's job never to place one.
-const CLIMB_RING_ANGLES := [0.0, 45.0, 135.0, 180.0, 225.0, 315.0]
+# Stage F put 90 and 270 back. They were left out because a face pointing
+# across the view cannot be aimed at with a cursor ray -- which is exactly what
+# the side face rule is for: those two are climbed up and down only, and their
+# height is solved against a camera facing plane instead of their own. Without
+# them the map had no side face at all, so the rule had nothing to stand on.
+const CLIMB_RING_ANGLES := [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0]
 
 
 func _build_walls() -> void:
-	# Climbable faces in a ring, minus the two that would point across the view.
-	# Every wall here meets the camera squarely enough to aim at, so climbing
-	# works the same on all of them and the side face rule is gone entirely.
+	# Climbable faces all the way round the ring. The two that point across the
+	# view are side faces: up and down only, by the stage F rule, and marked
+	# the same way as the rest.
 	for degrees in CLIMB_RING_ANGLES:
 		var yaw := deg_to_rad(float(degrees))
 		var outward := Vector3(sin(yaw), 0.0, cos(yaw))
@@ -1800,20 +1811,45 @@ func _build_walls() -> void:
 			"ClimbWall_%d" % roundi(rad_to_deg(yaw)),
 			CLIMB_RING_CENTRE + outward * CLIMB_RING_RADIUS + Vector3.UP * 3.0,
 			Vector3(3.0, 6.0, 0.6),
-			Color("6f9a63"),
+			# Stage F: the box itself is plain wall. The climbable side gets a
+			# panel of its own, so which face can be climbed is something you
+			# can see rather than something you have to try.
+			Color("5d646b"),
 			CLIMBABLE_LAYER,
 			false,
 			yaw)
+		_mark_climb_face(wall, outward, Vector3(3.0, 6.0, 0.6))
 		# The label says which way it points, so the rule can be read off the
 		# map rather than worked out.
 		_sign(
 			"%d°" % roundi(rad_to_deg(yaw)),
 			wall.position + Vector3.UP * 3.6,
 			Color("c8ffc8"))
-	_sign("CLIMB RING (8면)", CLIMB_RING_CENTRE + Vector3.UP * 8.0, Color("c8ffc8"))
+	_sign("CLIMB RING (%d면, 90/270은 옆면)" % CLIMB_RING_ANGLES.size(),
+		CLIMB_RING_CENTRE + Vector3.UP * 8.0, Color("c8ffc8"))
 	# Smooth wall: looks similar, cannot be climbed.
 	_box("SmoothWall", Vector3(16.0, 2.0, 2.0), Vector3(6.0, 4.0, 0.6), Color("555b62"), WALL_LAYER)
 	_sign("SMOOTH (등반 불가)", Vector3(16.0, 5.0, 2.0), Color.WHITE)
+
+
+# DOC (stage F): the one face of this wall that may be climbed, marked in the
+# wall's metadata for the rule and with a panel for the eye. Everything else
+# about the box -- its back, its two thin edges -- is wall.
+func _mark_climb_face(wall: StaticBody3D, outward: Vector3, size: Vector3) -> void:
+	wall.set_meta(PlayerClimb.CLIMB_FACES_META, [outward.normalized()])
+	var panel := MeshInstance3D.new()
+	panel.name = "ClimbFace"
+	var quad := QuadMesh.new()
+	quad.size = Vector2(size.x * 0.92, size.y * 0.94)
+	panel.mesh = quad
+	# Just proud of the face, in the wall's own local space: the box is turned
+	# by its yaw and the panel turns with it.
+	panel.position = Vector3(0.0, 0.0, size.z * 0.5 + 0.02)
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color("6f9a63")
+	material.roughness = 0.9
+	panel.material_override = material
+	wall.add_child(panel)
 
 
 func _build_time_boundary() -> void:

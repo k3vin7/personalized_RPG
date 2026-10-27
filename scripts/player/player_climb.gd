@@ -18,6 +18,19 @@ const ARRIVE := 0.25
 const MANTLE_TIME := 0.3
 const DETACH_PUSH := 2.0
 const EDGE_PROBE := 0.45
+# Stage F: a face is climbable only if it is marked as one. The mark is a
+# normal in this list, in the wall's own metadata, put there by whoever built
+# the wall -- so the same box can have one face you can climb and three you
+# cannot.
+const CLIMB_FACES_META := "climb_faces"
+# How closely the face being touched has to match a marked one. 0.9 is about
+# 25 degrees, which is loose enough for a contact normal off a corner and tight
+# enough that the next face along never matches.
+const FACE_MATCH := 0.9
+# 4-chapter, stage F: squarer to the view than this and the face is a front or
+# a back, which can be climbed in any direction. Flatter and it is a side face,
+# which can only be climbed up and down.
+const SIDE_FACE_LIMIT := 0.7
 
 var player: Player
 
@@ -55,6 +68,12 @@ func attach(body: CollisionObject3D, contact: Vector3, normal: Vector3) -> bool:
 	# DOC: a smooth wall is not climbable however hard it is clicked.
 	if body == null or (body.collision_layer & Playground.CLIMBABLE_LAYER) == 0:
 		return false
+	# DOC (stage F): and a climbable wall is not climbable on every side. Only
+	# the faces it is marked with count, so the back and the two thin edges of
+	# a climb panel are walls like any other.
+	if not face_is_marked(body, flat.normalized()):
+		print("PLAYGROUND_CLIMB_REFUSED wall=%s face=%s" % [body.name, flat.normalized()])
+		return false
 	wall = body
 	wall_normal = flat.normalized()
 	wall_plane = Plane(wall_normal, contact)
@@ -67,6 +86,32 @@ func attach(body: CollisionObject3D, contact: Vector3, normal: Vector3) -> bool:
 	player.change_state(Player.State.CLIMB)
 	print("PLAYGROUND_CLIMB_ATTACH normal=%s edge_on=%.2f" % [wall_normal, _view_alignment()])
 	return true
+
+
+# Is this the side of the wall that is meant to be climbed? A wall with no
+# marks at all is treated as climbable all over, which is what every wall in
+# the map was before stage F and what a new one is until it says otherwise.
+static func face_is_marked(body: CollisionObject3D, normal: Vector3) -> bool:
+	if body == null:
+		return false
+	if not body.has_meta(CLIMB_FACES_META):
+		return true
+	var faces: Array = body.get_meta(CLIMB_FACES_META)
+	for face: Vector3 in faces:
+		var flat := Vector3(face.x, 0.0, face.z)
+		if flat.length_squared() < 0.0001:
+			continue
+		if normal.dot(flat.normalized()) >= FACE_MATCH:
+			return true
+	return false
+
+
+# DOC (stage F): a face squarer to the view than SIDE_FACE_LIMIT is a front or
+# a back and may be climbed in any direction. One flatter to the view is a side
+# face: up and down only, because left and right on it would be travel into or
+# out of the screen that the player cannot judge.
+func is_side_face() -> bool:
+	return _view_alignment() <= SIDE_FACE_LIMIT
 
 
 # How squarely this face meets the view. 1.0 is straight on, 0.0 is edge on.
@@ -96,6 +141,11 @@ func wall_target() -> Vector3:
 
 func set_wall_target(point: Vector3) -> void:
 	_target = point + wall_normal * HANG_DISTANCE
+	if is_side_face():
+		# Up and down only: the sideways part of the order is dropped rather
+		# than refused, so a click above you still takes you up a side face.
+		_target.x = player.global_position.x
+		_target.z = player.global_position.z
 	_has_target = true
 
 
@@ -154,7 +204,12 @@ func _wall_continues(offset: Vector3) -> bool:
 	var from := player.global_position + offset + wall_normal * 0.1
 	var query := PhysicsRayQueryParameters3D.create(from, from - wall_normal * (HANG_DISTANCE + 0.4), Playground.CLIMBABLE_LAYER)
 	query.collide_with_areas = false
-	return not player.get_world_3d().direct_space_state.intersect_ray(query).is_empty()
+	var hit := player.get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty():
+		return false
+	# The wall going on is not enough: the face has to go on as well, or a
+	# climb would carry on round a corner onto a side nobody marked.
+	return face_is_marked(hit.get("collider") as CollisionObject3D, wall_normal)
 
 
 func _check_ends() -> void:
