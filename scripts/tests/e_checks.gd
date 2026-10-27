@@ -19,9 +19,16 @@ var _checks := 0
 var _failures := 0
 var _stage_done := ""
 var _lag := 0.0
+var _reported := {}
 var _label := "0"
 var _flag := false
 var _number := 0.0
+
+
+# A clear 14 m of plaza to measure a walk along: z 14 misses the climb ring
+# (z up to 12.3), the step ladder (z 15 and up) and the high platform (x 11 and
+# up), and the props all stand at z 2 and z 6.
+const WALK_LANE := Vector3(-8.0, 0.9, 14.0)
 
 
 func expect(condition: bool, label: String) -> void:
@@ -96,6 +103,7 @@ func run(world: Node3D) -> void:
 	await _carry_weight_checks()
 	await _target_id_checks()
 	await _dummy_grab_check()
+	await _dummy_carry_walk_check()
 	await _rock_versus_player_check()
 	await _second_push_check()
 	await _escape_checks()
@@ -343,6 +351,111 @@ func _dummy_grab_check() -> void:
 		if _local.grab.is_holding():
 			_local.grab.drop())
 	await _wait(0.8)
+
+
+# ------------------------- carrying a scarecrow slows the walk, not speeds it up
+
+# E follow-up, found in play: carrying a scarecrow made the walk shoot up
+# instead of slowing down. The formula was never wrong -- get_move_speed() has
+# the load in it -- so what has to be measured is the ground actually covered.
+# The scarecrow was written into the holder's hand every step with no collision
+# exception, the two capsules overlapped, and the solver pushed the holder out
+# of its own hands.
+func _dummy_carry_walk_check() -> void:
+	# The other scarecrow: Dummy_1 has just been put down by the check above
+	# and is walking itself home, so it is neither still nor where it was.
+	var dummy := _world.get_node("Dummy_0") as Dummy
+
+	# Empty handed first, down the measuring lane.
+	var free_travel := await _walk_for(WALK_LANE, 0.6)
+	var free_formula := _local.get_move_speed()
+
+	# Then with the scarecrow in hand. Picked up where it stands and carried
+	# to the lane, because the lane has to be clear of the props.
+	await _park_self(dummy.global_position - Vector3(1.0, 0.0, 0.0))
+	# Long enough for the hand to be free again after the drop above.
+	await _wait(1.0)
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(dummy.global_position)
+		_local.movement.interact())
+	await _wait(0.8)
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	expect(_local.grab.is_holding(), "scarecrow_in_hand_for_the_walk")
+	var load := _local.stats.held_weight
+	var carry_formula := _local.get_move_speed()
+	var carry_travel := await _walk_for(WALK_LANE, 0.6, false)
+
+	var measured_ratio := carry_travel / maxf(free_travel, 0.01)
+	var formula_ratio := carry_formula / maxf(free_formula, 0.01)
+	note("walk measured: empty %.2f m/s (formula %.2f) -> carrying %.0f kg %.2f m/s (formula %.2f) | measured x%.3f, formula x%.3f, still holding=%s" % [
+		free_travel, free_formula, load, carry_travel, carry_formula,
+		measured_ratio, formula_ratio, _local.grab.is_holding()])
+	expect(carry_travel <= free_travel + 0.05, "carrying_a_scarecrow_does_not_speed_the_walk_up")
+	expect(carry_travel < free_travel - 0.05, "it_slows_it_down")
+	# By as much as the formula says and no more: the absolute speeds are not
+	# compared, because a walk measured from a standstill never reaches the
+	# formula's figure. What has to match is how much the load costs.
+	expect(absf(measured_ratio - formula_ratio) < 0.12,
+		"and_it_slows_by_what_the_load_costs_and_no_more")
+	await tick_request(func() -> void:
+		if _local.grab.is_holding():
+			_local.grab.drop())
+	await _wait(0.8)
+
+	# And the same measurement on the client's own machine, which is where a
+	# person actually plays. The host gets out of the lane first.
+	await _park_self(HOME)
+	_reported.erase("carry_walk")
+	client_carry_walk.rpc_id(
+		_client_peer(), _world.get_node("Dummy_1").get_path(), WALK_LANE)
+	var waited := 0.0
+	while not _reported.has("carry_walk") and waited < 30.0 + _lag * 20.0:
+		await get_tree().create_timer(0.1).timeout
+		waited += 0.1
+	expect(_reported.has("carry_walk"), "the_client_measured_its_own_carry_walk")
+	if _reported.has("carry_walk"):
+		var numbers: PackedFloat32Array = _reported["carry_walk"]
+		var client_measured := numbers[2] / maxf(numbers[0], 0.01)
+		var client_formula := numbers[3] / maxf(numbers[1], 0.01)
+		note("client walk measured: empty %.2f m/s (formula %.2f) -> carrying %.0f kg %.2f m/s (formula %.2f) | measured x%.3f, formula x%.3f, still holding=%s" % [
+			numbers[0], numbers[1], numbers[4], numbers[2], numbers[3],
+			client_measured, client_formula, numbers[5] > 0.5])
+		expect(numbers[5] > 0.5, "the_client_was_still_holding_it")
+		expect(numbers[2] <= numbers[0] + 0.05,
+			"carrying_does_not_speed_the_clients_walk_up_either")
+		expect(absf(client_measured - client_formula) < 0.12,
+			"and_costs_the_client_what_the_load_costs")
+
+
+# Ground actually covered per second, walking at a point. With reset false the
+# body is left as it is, so a hold is not thrown away before the measurement.
+func _walk_for(home: Vector3, seconds: float, reset := true) -> float:
+	if reset:
+		await _park_self(home)
+	else:
+		await tick_request(func() -> void:
+			placed()
+			_local.global_position = home
+			_local.velocity = Vector3.ZERO
+			_local.movement.cancel_target())
+		await _wait(0.6)
+	var walk_to := home + Vector3(14.0, 0.0, 0.0)
+	await tick_request(func() -> void: _local.movement.set_target(walk_to))
+	# The first stretch is the body getting up to speed and the path being
+	# prepared; the window after it has to end before the body arrives, or the
+	# faster one is measured coming to a stop and reads slower than the slower
+	# one. 0.6 s of run-up plus 0.6 s of window is 7.2 m at the empty walk
+	# speed, well short of the 14 m target.
+	await _beat(0.6)
+	var from := _local.global_position
+	var sampled := 0.0
+	while sampled < seconds:
+		await get_tree().physics_frame
+		sampled += get_physics_process_delta_time()
+	var travelled := Vector2(
+		_local.global_position.x - from.x, _local.global_position.z - from.z).length()
+	await tick_request(func() -> void: _local.movement.cancel_target())
+	return travelled / maxf(sampled, 0.01)
 
 
 # ------------------------------------------- a rock hitting a person
@@ -599,6 +712,41 @@ func _park_self(point: Vector3) -> void:
 
 
 # --------------------------------------------------------------------- RPCs
+
+@rpc("any_peer", "call_remote", "reliable")
+func report_numbers(what: String, values: PackedFloat32Array) -> void:
+	if multiplayer.is_server() and multiplayer.get_peers().has(multiplayer.get_remote_sender_id()):
+		_reported[what] = values
+
+
+# The client measures its own walk, because the overlap this is about happens
+# on whichever machine owns the body doing the carrying -- and in play that is
+# a client, not the host.
+@rpc("authority", "call_remote", "reliable")
+func client_carry_walk(dummy_path: NodePath, lane: Vector3) -> void:
+	var dummy := get_node_or_null(dummy_path) as Dummy
+	if dummy == null:
+		report_numbers.rpc_id(1, "carry_walk", PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0]))
+		return
+	var free_travel := await _walk_for(lane, 0.6)
+	var free_formula := _local.get_move_speed()
+	await _park_self(dummy.global_position - Vector3(1.0, 0.0, 0.0))
+	await _wait(1.0)
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(dummy.global_position)
+		_local.movement.interact())
+	await _wait(1.0)
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	var load := _local.stats.held_weight
+	var carry_formula := _local.get_move_speed()
+	var carry_travel := await _walk_for(lane, 0.6, false)
+	var holding := 1.0 if _local.grab.is_holding() else 0.0
+	await tick_request(func() -> void:
+		if _local.grab.is_holding():
+			_local.grab.drop())
+	report_numbers.rpc_id(1, "carry_walk", PackedFloat32Array([
+		free_travel, free_formula, carry_travel, carry_formula, load, holding]))
+
 
 @rpc("any_peer", "call_remote", "reliable")
 func stage_done(name_text: String) -> void:

@@ -13,6 +13,11 @@ const MAX_HP := 60.0
 # own, so the host pushes its state: without this a client saw a dummy that
 # never moved however hard it was shoved.
 const STATE_INTERVAL := 0.05
+# Further than this in one state packet and the position is snapped with
+# collision off for a moment, rather than lerped through whatever is in the
+# way. Same numbers the rock uses, for the same reason.
+const TELEPORT_STEP := 2.0
+const TELEPORT_BLIND := 0.2
 
 var home := Vector3.ZERO
 var hp := MAX_HP
@@ -26,6 +31,8 @@ var sync_hp := MAX_HP
 var _settle_left := 0.0
 var _state_left := 0.0
 var _has_state := false
+var _excepted: Node3D = null
+var _blind_left := 0.0
 var _label: Label3D
 var _material: StandardMaterial3D
 
@@ -106,6 +113,17 @@ func set_hold_display(peer: int) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# On every peer, before anything else: a body cannot be pushed by what is
+	# carrying it. Without this the scarecrow was written into the holder's
+	# hand each step, the two capsules overlapped, and the solver pushed the
+	# holder out -- which read as the walk speed suddenly shooting up while
+	# carrying one. The rock has had this since stage E; the scarecrow is held
+	# by the same table and needed the same thing.
+	_except_holder()
+	if _blind_left > 0.0:
+		_blind_left = maxf(0.0, _blind_left - delta)
+		if _blind_left == 0.0:
+			collision_layer = LAYER
 	if is_multiplayer_authority() and holder_peer != 0:
 		# Stage E: a scarecrow can be picked up, and a held body rides the hand
 		# rather than walking itself home. Whether the hold still stands is the
@@ -125,7 +143,14 @@ func _physics_process(delta: float) -> void:
 		# Shown, not simulated.
 		if not _has_state:
 			return
-		global_position = global_position.lerp(sync_position, 1.0 - exp(-18.0 * delta))
+		if global_position.distance_to(sync_position) > TELEPORT_STEP:
+			# Carried across the plaza, or thrown: lerping that would drag the
+			# capsule through everyone on the way at teleport speed.
+			global_position = sync_position
+			_blind_left = TELEPORT_BLIND
+			collision_layer = 0
+		else:
+			global_position = global_position.lerp(sync_position, 1.0 - exp(-18.0 * delta))
 		if not is_equal_approx(hp, sync_hp):
 			hp = sync_hp
 			_refresh()
@@ -175,6 +200,20 @@ func push_state(at_position: Vector3, at_hp: float) -> void:
 
 # A scarecrow is server-owned, so the body it is being carried by is looked up
 # the same way the rock looks it up.
+# Re-asserted every step rather than set once: on a client the hold row can
+# arrive before the holder's body has spawned.
+func _except_holder() -> void:
+	var holder: Node3D = _peer_player(holder_peer) if holder_peer != 0 else null
+	if holder == _excepted:
+		return
+	if is_instance_valid(_excepted):
+		remove_collision_exception_with(_excepted)
+	_excepted = null
+	if holder != null:
+		add_collision_exception_with(holder)
+		_excepted = holder
+
+
 func _peer_player(peer_id: int) -> Player:
 	if Net.spawn_root == null:
 		return null
