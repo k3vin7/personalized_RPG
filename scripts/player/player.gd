@@ -75,6 +75,12 @@ var sync_state: int = State.IDLE
 # one. It says the same thing as sync_state == DEAD today; in B-d it becomes
 # the server's word on it and sync_state keeps only the pose.
 var sync_dead := false
+
+# Stage E follow-up: whether this body is in the air because it jumped, or
+# because it came off something. The hold table needs to tell those apart --
+# a jump keeps what you are carrying, a fall does not -- and only the owner
+# knows which it was, so it travels with the pose.
+var sync_jumped := false
 # The stats travel too: a shove is worked out from the pusher's strength
 # against the target's weight, so every peer needs the target's numbers.
 var sync_strength := 10.0
@@ -123,6 +129,7 @@ var _respawning := false
 # the server has told this body to come back.
 const RESPAWN_ECHO_GRACE := 0.5
 var _respawn_echo_left := 0.0
+var _jumped_this_flight := false
 
 
 # B-d threw this switch. HP and the alive flag are written by the server and
@@ -284,6 +291,8 @@ func _update_fall_tracking(previous: int, new_state: int) -> void:
 	if not _fall_tracking:
 		return
 	_fall_tracking = false
+	_jumped_this_flight = false
+	sync_jumped = false
 	if previous != State.AIRBORNE:
 		return
 	if new_state == State.IDLE or new_state == State.MOVE or new_state == State.DASH \
@@ -384,6 +393,7 @@ func _physics_process(delta: float) -> void:
 		sync_position = global_position
 		sync_yaw = rotation.y
 		sync_state = state
+		sync_jumped = _jumped_this_flight
 		sync_strength = stats.strength
 		sync_race_weight = stats.race_weight
 		sync_gear_weight = stats.gear_weight
@@ -417,6 +427,17 @@ func _physics_process(delta: float) -> void:
 	_update_shadow()
 	if sync_state != state:
 		change_state(sync_state)
+
+
+# Set by the movement when a launch is this body's own jump, and cleared the
+# moment it is on the ground again.
+func note_jumped() -> void:
+	_jumped_this_flight = true
+	# Written here and not left to the next sync: the judge runs before the
+	# players do, so a flag set only in _physics_process is a frame old by the
+	# time the hold table looks at it -- and the table dropped what the body
+	# was carrying on the first frame of every jump.
+	sync_jumped = true
 
 
 # Told by the server. The body is stopped and put in the state here, because
@@ -572,6 +593,17 @@ func apply_force_event(event: Dictionary) -> void:
 		# freed from a hold at ground level is airborne for a single frame and
 		# then lands, and the escape recoil was being wiped on that landing.
 		movement.note_pushed()
+	if bool(event.get("spring", false)):
+		# Stage E follow-up: a team mate's push is a shield to jump off, not a
+		# nudge. The vertical is replaced by this body's own jump -- the
+		# standing jump, with whatever it is carrying in the weight -- and the
+		# push is added to that. Replacing rather than adding is what makes the
+		# result the same wherever in the arc the push arrives, which is what
+		# made the co-op launch depend on the latency before.
+		velocity.y = get_jump_velocity()
+		if state != State.AIRBORNE:
+			change_state(State.AIRBORNE)
+			note_jumped()
 	if state == State.AIRBORNE:
 		# Already flying: the push bends the arc and costs nothing, which is
 		# what makes throwing a team mate a thing you can help with.

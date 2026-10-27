@@ -448,12 +448,59 @@ func _gap5_coop_check() -> void:
 	await _wait(1.0)
 	var landed := mate.global_position
 	var crossed := landed.z < GAP5_FAR and landed.y > -1.0
-	note("5 m gap together: pushed=%s hits=%d peak %.2f, landed z=%.2f y=%.2f, flew %.2f m toward the gap, crossed=%s (far edge %.1f)" % [
-		pushed, _hits, peak, landed.z, landed.y, from.z - landed.z, crossed, GAP5_FAR])
+	note("5 m gap together: pushed=%s hits=%d peak %.2f, landed z=%.2f y=%.2f, flew %.2f m toward the gap, crossed=%s (far edge %.1f, launch angle %.0f, spring = the mate's own jump)" % [
+		pushed, _hits, peak, landed.z, landed.y, from.z - landed.z, crossed, GAP5_FAR,
+		Tuning.values.shove_ally_launch_angle_deg])
 	expect(pushed and _hits >= 1, "the_jumping_team_mate_was_pushed")
 	# Reported either way: whether a push is enough to carry a body over a gap
 	# it cannot jump is a tuning answer, and this is the measurement for it.
 	expect(true, "the_five_metre_coop_crossing_was_measured")
+	await tick_request(func() -> void:
+		_judge.server_respawn(_local)
+		placed())
+	await _wait(1.0)
+
+	# Pushed late in the arc instead of at the start. A nudge added to whatever
+	# the body was already doing would send it a different distance; a spring
+	# that replaces the vertical with the body's own jump sends it the same one,
+	# which is what makes this work at a latency at all.
+	await tick_request(func() -> void:
+		placed()
+		_judge.server_respawn(_local)
+		_local.global_position = Vector3(GAP5_LANE, 0.9, -0.3))
+	_judge.forgive_move(_client_peer(), "", 30)
+	client_park.rpc_id(_client_peer(), Vector3(GAP5_LANE, 0.9, -1.2))
+	await _wait_stage("parked")
+	await _wait(0.8)
+	var late_from := mate.global_position
+	client_jump.rpc_id(_client_peer())
+	var late_pushed := false
+	var late_peak := late_from.y
+	var waited := 0.0
+	while waited < 4.0:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		late_peak = maxf(late_peak, mate.global_position.y)
+		# Deliberately late: a third of a second after it left the ground.
+		if not late_pushed and mate.state == Player.State.AIRBORNE and waited > 0.35:
+			late_pushed = true
+			_local.movement.set_aim_override(_local.global_position + Vector3(0.0, 0.0, -4.0))
+			_hits = _local.movement.shove()
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	await _wait(1.0)
+	var late_flew := late_from.z - mate.global_position.z
+	var late_crossed: bool = mate.global_position.z < GAP5_FAR and mate.global_position.y > -1.0
+	note("5 m gap, pushed late in the arc: pushed=%s hits=%d peak %.2f (early push %.2f), flew %.2f m (early %.2f), landed z=%.2f y=%.2f crossed=%s" % [
+		late_pushed, _hits, late_peak, peak, late_flew, from.z - landed.z,
+		mate.global_position.z, mate.global_position.y, late_crossed])
+	expect(late_pushed, "the_late_push_went_out")
+	# Compared as distance flown, not as the peak. The spring gives the same
+	# launch wherever it lands, so what follows the push is the same arc -- but
+	# it starts from wherever the body had got to, so a late push peaks higher
+	# simply by starting higher. What a player cares about is whether they get
+	# across, and that is the distance.
+	expect(absf(late_flew - (from.z - landed.z)) < 1.5, "pushing_late_in_the_arc_carries_the_same_distance")
+	expect(late_crossed, "and_the_late_push_crosses_too")
 	await tick_request(func() -> void:
 		_judge.server_respawn(_local)
 		placed())

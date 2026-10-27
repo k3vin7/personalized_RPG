@@ -493,7 +493,7 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 			launched = true
 		else:
 			push = (forward + Vector3.UP * Tuning.values.shove_up_bias).normalized()
-		send_force(body, ForceSystem.make_event(
+		var event := ForceSystem.make_event(
 			ForceSystem.Kind.SHOVE,
 			push,
 			Tuning.values.shove_power,
@@ -501,7 +501,13 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 			peer,
 			is_ally,
 			Tuning.values.shove_damage,
-			Tuning.values.shove_stun_time))
+			Tuning.values.shove_stun_time)
+		if launched:
+			# The body being launched gives itself a jump's worth of lift and
+			# adds the push to it, so where in its arc the push lands stops
+			# mattering.
+			event["spring"] = true
+		send_force(body, event)
 		hits += 1
 		if launched:
 			print("PLAYGROUND_SHOVE_LAUNCH by=%s target=%s angle=%.0f" % [
@@ -1151,10 +1157,19 @@ func _enforce_holds(delta: float) -> void:
 			_end_hold(holder_peer, "target_dead")
 
 
+# Stage E follow-up: 7-6 is narrowed to what it was written for. A holder keeps
+# what it is carrying through its own jump -- the load is in the jump's weight,
+# so the jump is already shorter for it -- and drops it when something takes the
+# ground away: a push (which send_force handles before the force even goes out),
+# a fall, a stun, or being picked up.
 func _can_keep_holding(holder: Player) -> bool:
-	# GRABBING is what the owner sets once it sees the row; IDLE and MOVE are
-	# what it may still be showing for a tick either side of that.
-	return holder.state == Player.State.GRABBING or holder.is_grounded_state()
+	if holder.state == Player.State.STUNNED or holder.state == Player.State.DEAD \
+			or holder.state == Player.State.GRABBED:
+		return false
+	if holder.state == Player.State.AIRBORNE:
+		# Its own jump keeps the hold; coming off an edge does not.
+		return holder.sync_jumped
+	return true
 
 
 func _peer_present(peer: int) -> bool:

@@ -657,6 +657,7 @@ func _launch_jump() -> void:
 	player.velocity = launch
 	player.floor_snap_length = 0.0
 	player.change_state(Player.State.AIRBORNE)
+	player.note_jumped()
 	player.move_and_slide()
 
 

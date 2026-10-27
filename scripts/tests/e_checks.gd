@@ -228,6 +228,11 @@ func _carry_weight_checks() -> void:
 	await _park_self(HOME)
 	var free_speed := _local.get_move_speed()
 	var free_jump := _local.get_jump_height()
+	# The apex of a standing jump with empty hands, measured. Since stage C-2
+	# the in-place jump spends the whole leap budget upward, so get_jump_height()
+	# is the vertical half of that budget and not the height reached -- which
+	# makes it the wrong thing to compare a loaded jump against.
+	var free_apex := await _standing_apex()
 	expect(await _take(heavy), "took_the_heavy_rock")
 	await _wait(0.3)
 	var load := _local.stats.held_weight
@@ -242,19 +247,42 @@ func _carry_weight_checks() -> void:
 	expect(absf(load - heavy.weight) < 0.01, "what_is_carried_is_in_the_weight")
 	expect(carry_speed < free_speed - 0.05, "carrying_something_heavy_slows_the_walk")
 	expect(carry_jump < free_jump - 0.05, "and_lowers_the_jump")
-	# And nothing is forbidden while carrying.
+	# Nothing is forbidden while carrying, and the hold survives the jump: the
+	# load is in the jump's own weight, so the jump is already shorter for it.
+	var floor_y := _local.global_position.y
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(_local.global_position)
 		_local.movement.cast_jump())
 	var jumped := false
-	var waited := 0.0
-	while waited < 1.0 and not jumped:
+	var held_all_the_way := true
+	var peak := floor_y
+	var sampled := 0.0
+	while sampled < 1.6:
 		await get_tree().physics_frame
-		waited += get_physics_process_delta_time()
-		jumped = _local.state == Player.State.AIRBORNE
-	note("jump while carrying: left the ground=%s, still holding=%s" % [
-		jumped, _local.grab.is_holding()])
+		sampled += get_physics_process_delta_time()
+		if _local.state == Player.State.AIRBORNE:
+			jumped = true
+			held_all_the_way = held_all_the_way and _local.grab.is_holding()
+		peak = maxf(peak, _local.global_position.y)
+	note("jump while carrying %.0f kg: left the ground=%s, apex %.2f m (empty-handed %.2f m), held all the way=%s, still holding=%s" % [
+		load, jumped, peak - floor_y, free_apex, held_all_the_way, _local.grab.is_holding()])
 	expect(jumped, "a_holder_may_still_jump")
+	expect(held_all_the_way and _local.grab.is_holding(), "and_keeps_what_it_is_carrying")
+	expect(peak - floor_y < free_apex - 0.3, "the_jump_is_shorter_for_the_load")
+
+	# A fall, though, does take it: 7-6 narrowed to what it was written for.
+	var state_released := _released("holder_state")
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position += Vector3.UP * 2.5
+		_local.velocity = Vector3.ZERO
+		_local.floor_snap_length = 0.0
+		_local.change_state(Player.State.AIRBORNE))
+	await _wait(0.6)
+	note("dropped off an edge while carrying: holder_state %d -> %d, still holding=%s" % [
+		state_released, _released("holder_state"), _local.grab.is_holding()])
+	expect(_released("holder_state") > state_released, "but_a_fall_still_takes_it")
+	await _wait(1.2)
 	await _wait(1.5)
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(Vector3.INF)
@@ -541,6 +569,22 @@ func _disconnect_exception_check() -> void:
 
 
 # --------------------------------------------------------------------- helpers
+
+# A standing jump with nothing in hand, for the loaded one to be compared with.
+func _standing_apex() -> float:
+	var floor_y := _local.global_position.y
+	var peak := floor_y
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(_local.global_position)
+		_local.movement.cast_jump())
+	var sampled := 0.0
+	while sampled < 1.6:
+		await get_tree().physics_frame
+		sampled += get_physics_process_delta_time()
+		peak = maxf(peak, _local.global_position.y)
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	return peak - floor_y
+
 
 func _park_self(point: Vector3) -> void:
 	await tick_request(func() -> void:
