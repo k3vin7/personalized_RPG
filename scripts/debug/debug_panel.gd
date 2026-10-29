@@ -108,19 +108,24 @@ func _build_ui() -> void:
 		"strength": null, "weight": null, "gear": null}))
 	column.add_child(follow)
 
-	# H-2: the per-race seats. They are arrays indexed by race rather than
-	# fields, so the loop below that builds a slider per float does not see
-	# them; one slider per race each, built here.
-	column.add_child(_heading("종족 배수 (각자 로컬)"))
-	for field in ["race_tolerance_mult", "race_move_mult"]:
+	# H-2: the per-race seats. The server's table, not a local tuning value:
+	# the move multiplier is in the cap the server checks every body against,
+	# so a slider here is a request and the answer comes back replicated.
+	column.add_child(_heading("종족 배수 (서버 승인)"))
+	var judge := ServerAuthority.instance
+	for field in ServerAuthority.RACE_MULT_FIELDS:
 		for kind in Races.all_kinds():
-			var table: PackedFloat32Array = Tuning.values.get(field)
-			if kind >= table.size():
-				continue
+			var current := 1.0
+			if judge != null and field == "tolerance":
+				current = judge.race_tolerance_mult(kind)
+			elif judge != null:
+				current = judge.race_move_mult(kind)
 			column.add_child(_slider(
-				"%s[%s]" % [field, Races.label_for(kind)],
-				table[kind], 0.0, 3.0,
-				func(value: float) -> void: _set_race_mult(field, kind, value)))
+				"race_%s_mult[%s]" % [field, Races.label_for(kind)],
+				current,
+				ServerAuthority.DEBUG_RACE_MULT_RANGE.x,
+				ServerAuthority.DEBUG_RACE_MULT_RANGE.y,
+				func(value: float) -> void: _ask_race_mult(field, kind, value)))
 
 	column.add_child(_heading("튜닝 (각자 로컬)"))
 	var pull := Button.new()
@@ -196,15 +201,13 @@ func _check(field: String, value: bool) -> CheckBox:
 	return box
 
 
-# Written back into the array rather than onto a field of its own: the race id
-# is the index, which is what keeps the four numbers from drifting apart.
-func _set_race_mult(field: String, kind: int, value: float) -> void:
-	var table: PackedFloat32Array = Tuning.values.get(field)
-	if kind < 0 or kind >= table.size():
+# One entry of one table, asked for. The race id is the index, which is what
+# keeps the four numbers from drifting apart.
+func _ask_race_mult(field: String, kind: int, value: float) -> void:
+	if not is_instance_valid(player):
 		return
-	table[kind] = value
-	Tuning.values.set(field, table)
-	Tuning.notify_changed()
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.RACE_MULT, {
+		"field": field, "race": kind, "value": value})
 
 
 # One door for both sliders and the reset button.

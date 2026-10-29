@@ -18,6 +18,7 @@ var _judge: ServerAuthority
 var _peer_id := 0
 var _checks := 0
 var _failures := 0
+var _reports := {}
 var _stage_done := ""
 var _lag := 0.0
 var _label := "0"
@@ -95,6 +96,8 @@ func run(world: Node3D) -> void:
 	await _air_and_recoil_checks()
 	await _tolerance_checks()
 	await _race_table_checks()
+	await _lift_angle_checks()
+	await _race_mult_authority_checks()
 	await _ally_launch_checks()
 	await _dummy_air_check()
 	await _head_platform_checks()
@@ -353,6 +356,100 @@ func _race_table_checks() -> void:
 	_judge.harness_set_race(_local, Races.DEFAULT)
 	_judge.harness_set_race(_judge.actor_for(_client_peer()), Races.DEFAULT)
 	await _wait(0.6)
+
+
+# The lift angle: a force aimed knock_lift_angle_deg or more above the
+# horizontal is a lift and is applied whole; below it, the tolerance applies.
+func _lift_angle_checks() -> void:
+	await _place_pair(Vector3(1.0, 0.0, 0.0))
+	var steep_deg: float = Tuning.values.knock_lift_angle_deg + 15.0
+	var steep := deg_to_rad(steep_deg)
+	await tick_request(func() -> void:
+		_judge.send_force(_local, ForceSystem.make_event(
+			ForceSystem.Kind.THROW, Vector3(cos(steep), sin(steep), 0.0), 6.0, 0.0, 1, true)))
+	await _beat(0.15)
+	var lifted: Dictionary = (_judge.last_knock.get(1, {}) as Dictionary).duplicate()
+	var airborne := _local.state == Player.State.AIRBORNE
+	note("lift at %.0f deg: judged=%s h_speed %.2f vs tolerance %.2f, airborne=%s (knock_lift_angle_deg %.0f)" % [
+		steep_deg, bool(lifted.get("judged", true)),
+		float(lifted.get("h_speed", 0.0)), float(lifted.get("tolerance", 0.0)),
+		airborne, Tuning.values.knock_lift_angle_deg])
+	expect(not bool(lifted.get("judged", true)), "a_force_above_the_lift_angle_is_not_judged")
+	expect(airborne, "and_lifts_the_body_whole")
+	await _wait(1.6)
+	await _place_pair(Vector3(1.0, 0.0, 0.0))
+	var shallow_deg: float = Tuning.values.knock_lift_angle_deg - 15.0
+	var shallow := deg_to_rad(shallow_deg)
+	await tick_request(func() -> void:
+		_judge.send_force(_local, ForceSystem.make_event(
+			ForceSystem.Kind.THROW, Vector3(cos(shallow), sin(shallow), 0.0), 4.0, 0.0, 1, true)))
+	await _beat(0.15)
+	var pushed: Dictionary = (_judge.last_knock.get(1, {}) as Dictionary).duplicate()
+	note("push at %.0f deg: judged=%s h_speed %.2f vs tolerance %.2f -> %s, state %s" % [
+		shallow_deg, bool(pushed.get("judged", false)),
+		float(pushed.get("h_speed", 0.0)), float(pushed.get("tolerance", 0.0)),
+		"launched" if bool(pushed.get("launched", true)) else "slid",
+		Player.State.keys()[_local.state]])
+	expect(bool(pushed.get("judged", false)), "a_force_below_the_lift_angle_is_judged")
+	expect(not bool(pushed.get("launched", true)), "and_this_one_was_a_slide")
+	await _wait(1.0)
+
+
+# The race multipliers are the server's. The real path -- a client's slider,
+# an intent, the ruling, the table pushed back -- and the forged one.
+func _race_mult_authority_checks() -> void:
+	var mate := _judge.actor_for(_client_peer())
+	var before := _local.get_move_speed()
+	_reports.erase("race_mult")
+	client_ask_race_mult.rpc_id(_client_peer(), "move", Races.Kind.HUMAN, 1.5)
+	var waited := 0.0
+	while not _reports.has("race_mult") and waited < 10.0 + _lag * 20.0:
+		await get_tree().create_timer(0.1).timeout
+		waited += 0.1
+	var after := _local.get_move_speed()
+	note("race_move_mult[human] asked 1.5 by the client: server table %.2f, client table %s, host human move %.3f -> %.3f" % [
+		_judge.race_move_mult(Races.Kind.HUMAN), str(_reports.get("race_mult", "none")), before, after])
+	expect(is_equal_approx(_judge.race_move_mult(Races.Kind.HUMAN), 1.5), "the_server_took_the_race_multiplier")
+	expect(_reports.has("race_mult") and is_equal_approx(float(_reports.get("race_mult", 0.0)), 1.5),
+		"and_the_client_sees_the_servers_table")
+	expect(mate != null and _local.stats.race == Races.Kind.HUMAN and absf(after - before * 1.5) < 0.01,
+		"and_a_human_walks_at_the_multiplied_speed")
+
+	# Forged: the client pushes a table of its own. Refused at the door.
+	client_forge_race_mult.rpc_id(_client_peer())
+	await _wait(0.8)
+	note("a client's forged race table: server tolerance[human] %.2f, move[human] %.2f" % [
+		_judge.race_tolerance_mult(Races.Kind.HUMAN), _judge.race_move_mult(Races.Kind.HUMAN)])
+	var untouched := is_equal_approx(_judge.race_tolerance_mult(Races.Kind.HUMAN), 1.0)
+	var kept := is_equal_approx(_judge.race_move_mult(Races.Kind.HUMAN), 1.5)
+	expect(untouched and kept, "a_forged_race_table_from_a_client_is_refused")
+	ServerAuthority.submit_intent(_local, ServerAuthority.Intent.RACE_MULT, {
+		"field": "move", "race": Races.Kind.HUMAN, "value": 1.0})
+	await _wait(0.6)
+	expect(is_equal_approx(_local.get_move_speed(), before), "and_the_table_went_back_to_one")
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_ask_race_mult(field: String, race: int, value: float) -> void:
+	ServerAuthority.submit_intent(_local, ServerAuthority.Intent.RACE_MULT, {
+		"field": field, "race": race, "value": value})
+	await _wait(1.0)
+	var mine := ServerAuthority.instance.race_tolerance_mult(race)
+	if field == "move":
+		mine = ServerAuthority.instance.race_move_mult(race)
+	report_number.rpc_id(1, "race_mult", mine)
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_forge_race_mult() -> void:
+	var nines := PackedFloat32Array([9.0, 9.0, 9.0, 9.0])
+	ServerAuthority.instance.push_race_mults.rpc_id(1, nines, nines)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func report_number(key: String, value: float) -> void:
+	if multiplayer.is_server():
+		_reports[key] = value
 
 
 # Sent from the client on purpose: a hand-made event, with a verdict in it, at

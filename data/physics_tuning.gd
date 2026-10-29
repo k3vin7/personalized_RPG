@@ -124,6 +124,10 @@ extends Resource
 # always leaving the ground rather than a fast slide that happens to be called
 # one.
 @export var launch_min_up_speed: float = 2.0
+# A force aimed this steeply upward is a lift, not knockback, and is not put
+# through the tolerance at all: a body being thrown or sprung off the ground
+# has nothing to hold its ground against. Below it the comparison applies.
+@export var knock_lift_angle_deg: float = 60.0
 # How long a body may stand on another body's head before sliding off it.
 @export var head_stomp_time: float = 0.5
 # 4-chapter says a push on the ground becomes the body's velocity. The ground
@@ -147,15 +151,6 @@ extends Resource
 @export var server_speed_tolerance: float = 1.25
 @export var ally_ground_damage: bool = true
 @export var ally_ground_stun: bool = true
-
-# v4's per-race multipliers, indexed by Races.Kind (human, elf, dwarf, orc).
-# Seats, not balance: every race is at 1.0 and the numbers that belong in them
-# are feel-check questions 8 and 9. Arrays rather than four fields each so the
-# index is the race id and nothing has to be kept in step by hand.
-@export var race_tolerance_mult: PackedFloat32Array = PackedFloat32Array([1.0, 1.0, 1.0, 1.0])
-# The elf's move-speed passive, whose shape is undecided; a plain multiplier is
-# the one form that can hold the seat without deciding anything.
-@export var race_move_mult: PackedFloat32Array = PackedFloat32Array([1.0, 1.0, 1.0, 1.0])
 
 @export_group("Controls")
 # 5-chapter smart key, shared by the jump and the dash (and whatever gets a

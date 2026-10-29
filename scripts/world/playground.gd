@@ -1059,10 +1059,11 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 	var wanted := TimeBoundary.TOP_Y + Player.BODY_HALF_HEIGHT
 	var mate_weight := Races.data_for(Races.DEFAULT).body_weight
 	_harness_set_remote_weight(remote, mate_weight)
-	# 10 is the default and fails; 18 is where the arithmetic says it starts to
-	# work; 25 is past the point where ratio_mult_max caps the multiplier, so it
-	# is also the best throw the game can produce at all.
-	for strength in [10.0, 18.0, 25.0]:
+	# v4 scale. 60 is a bare human and fails -- at the lift now, not the
+	# throw: 72 kg of limit against an 80 kg team mate (intended, 결정 7).
+	# 100 lifts and throws; 150 is past the point where ratio_mult_max caps
+	# the multiplier, so it is also the best throw the game can produce.
+	for strength in [60.0, 100.0, 150.0]:
 		ServerAuthority.instance.harness_set_stats(local, strength)
 		var mult: float = Tuning.ratio_mult(strength / mate_weight, Tuning.values.ratio_k_jump)
 		var speed: float = Tuning.values.throw_power * mult

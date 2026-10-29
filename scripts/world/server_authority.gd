@@ -32,6 +32,10 @@ enum Intent {
 	# a request like every other -- the panel states a number and the server
 	# decides whether to hold the body off its race at that value.
 	STATS,
+	# H-2: the per-race multipliers (tolerance, move). A judging number on
+	# every peer, so the slider is a request and the server's table is the one
+	# that counts -- and the one the server's own move check reads.
+	RACE_MULT,
 }
 
 # Anything that can be picked up joins this group and offers
@@ -152,6 +156,15 @@ var force_history: Array[Dictionary] = []
 # H-2: the last knockback verdict per peer, for the harness to read. Server
 # only, like the ruling itself.
 var last_knock := {}
+# H-2: v4's per-race seats, indexed by Races.Kind. Written only here, by
+# _rule_race_mult, and carried to every peer by push_race_mults -- so the speed
+# a client walks at and the cap this node checks it against are one table. All
+# 1.0 on purpose: the numbers that belong in them are feel-check questions 8
+# and 9.
+var race_tolerance_mults := PackedFloat32Array([1.0, 1.0, 1.0, 1.0])
+var race_move_mults := PackedFloat32Array([1.0, 1.0, 1.0, 1.0])
+const DEBUG_RACE_MULT_RANGE := Vector2(0.0, 3.0)
+const RACE_MULT_FIELDS := ["tolerance", "move"]
 
 
 func _ready() -> void:
@@ -327,6 +340,9 @@ func _push_view() -> void:
 			"presses": int(entry.get("presses", 0)),
 		})
 	push_holds.rpc(entries)
+	# The race table rides the same heartbeat: it changes rarely, a late joiner
+	# gets it within one beat, and a dropped change is repaired by the next.
+	_push_race_mults()
 
 
 # Server -> every peer. Reliable: a dropped row would leave a client carrying
@@ -344,6 +360,44 @@ func push_holds(entries: Array) -> void:
 				"presses": int(entry.get("presses", 0)),
 			}
 	_apply_view()
+
+
+# ------------------------------------------------------- the race multipliers
+# Readable on every peer, writable only on the server, like the hold table.
+
+func race_tolerance_mult(kind: int) -> float:
+	return _race_mult(race_tolerance_mults, kind)
+
+
+func race_move_mult(kind: int) -> float:
+	return _race_mult(race_move_mults, kind)
+
+
+# A race id out of range (a client naming a race this build does not have)
+# reads as 1.0 instead of crashing the force door.
+func _race_mult(table: PackedFloat32Array, kind: int) -> float:
+	if kind < 0 or kind >= table.size():
+		return 1.0
+	return maxf(table[kind], 0.0)
+
+
+func _push_race_mults() -> void:
+	if not multiplayer.has_multiplayer_peer():
+		return
+	push_race_mults.rpc(race_tolerance_mults, race_move_mults)
+
+
+# Server -> every peer. A client that sends this is refused like any other
+# forged result, and a table of the wrong shape is ignored.
+@rpc("any_peer", "call_remote", "reliable")
+func push_race_mults(tolerance: PackedFloat32Array, move: PackedFloat32Array) -> void:
+	if not result_is_server_sent("push_race_mults", multiplayer.get_remote_sender_id()):
+		return
+	var count := Races.all_kinds().size()
+	if tolerance.size() != count or move.size() != count:
+		return
+	race_tolerance_mults = tolerance
+	race_move_mults = move
 
 
 # ---------------------------------------------------------------- the door
@@ -403,6 +457,8 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 			result = _rule_respawn(actor)
 		Intent.STATS:
 			result = _rule_stats(actor, payload)
+		Intent.RACE_MULT:
+			result = _rule_race_mult(payload)
 	if result == null:
 		return _refuse(sender, kind, "refused")
 	granted_intents += 1
@@ -457,6 +513,12 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 				if not (value is float or value is int) or not is_finite(float(value)):
 					return false
 			return payload.has("strength") or payload.has("weight") 				or payload.has("gear")
+		Intent.RACE_MULT:
+			var value: Variant = payload.get("value")
+			var field_ok := String(payload.get("field", "")) in RACE_MULT_FIELDS
+			var race_ok := Races.is_known(int(payload.get("race", -1)))
+			var value_ok := (value is float or value is int) and is_finite(float(value))
+			return field_ok and race_ok and value_ok
 		Intent.FALL:
 			return payload.has("peak") and payload.has("land") \
 				and is_finite(float(payload.get("peak", INF))) \
@@ -627,6 +689,29 @@ func _rule_stats(actor: Player, payload: Dictionary) -> Variant:
 		actor.get_multiplayer_authority(), Races.label_for(actor.stats.race),
 		actor.stats.strength, actor.stats.race_weight, actor.stats.gear_weight,
 		actor.stats.is_overridden()])
+	return true
+
+
+# The race slider. One entry of one table, clamped, then pushed to everyone.
+# A move multiplier changes what every body of that race may be seen doing, so
+# the move check forgives a beat for all of them rather than warning about a
+# speed it just approved.
+func _rule_race_mult(payload: Dictionary) -> Variant:
+	var field := String(payload.get("field", ""))
+	var kind := int(payload.get("race", -1))
+	var value := clampf(float(payload.get("value", 1.0)),
+		DEBUG_RACE_MULT_RANGE.x, DEBUG_RACE_MULT_RANGE.y)
+	if field == "tolerance":
+		race_tolerance_mults[kind] = value
+	elif field == "move":
+		race_move_mults[kind] = value
+		for peer: int in _move_watch.keys():
+			forgive_move(peer, "race_mult")
+	else:
+		return null
+	_push_race_mults()
+	print("PLAYGROUND_RACE_MULT field=%s race=%s value=%.2f" % [
+		field, Races.label_for(kind), value])
 	return true
 
 
@@ -976,7 +1061,7 @@ func _rule_knockback(target: Player, event: Dictionary) -> bool:
 		event,
 		target.stats.total_weight(),
 		target.stats.strength,
-		Tuning.race_tolerance_mult(target.stats.race),
+		race_tolerance_mult(target.stats.race),
 		target.is_grounded_state())
 	event["knock_h_speed"] = float(verdict["h_speed"])
 	event["knock_tolerance"] = float(verdict["tolerance"])

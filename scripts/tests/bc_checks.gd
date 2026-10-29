@@ -307,7 +307,7 @@ func _exception_checks() -> void:
 	# leg leaves the strength slider at 150, and a number picked by hand was a
 	# launch for a plain human and a slide for that one.
 	var over := ForceSystem.tolerance_for(
-		_local.stats.strength, Tuning.race_tolerance_mult(_local.stats.race)) * 2.0
+		_local.stats.strength, _judge.race_tolerance_mult(_local.stats.race)) * 2.0
 	expect(await _hold_then(rock, func() -> void:
 		_judge.send_force(_local, ForceSystem.make_event(
 			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.2, 0.0), over, 60.0, 1, false, 0.0, 0.0))), "hold_taken_for_push_case")

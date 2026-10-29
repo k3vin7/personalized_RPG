@@ -123,6 +123,9 @@ func change_for(event: Dictionary, total_weight: float) -> Vector3:
 #
 #     tolerance = target_strength x tolerance_per_strength x race_tolerance_mult
 #
+# The race multiplier is the server's table (ServerAuthority.race_tolerance_mult),
+# passed in by the caller, which is the server.
+#
 func tolerance_for(target_strength: float, race_mult: float) -> float:
 	# Blocking is out of scope for stage H: 막는 중이면 여기서 보정한다
 	# (자세 완성도만큼 허용치를 올리고 스태미나를 깎는다).
@@ -141,11 +144,19 @@ func tolerance_for(target_strength: float, race_mult: float) -> float:
 # Only a body standing on the ground can hold its ground. In the air or on a
 # wall the v3 rules stand, so those always read as launched.
 #
-# A force with no horizontal push at all is not knockback and is not judged:
-# "judged" says so, and the owner then applies it whole. Read literally the
-# table would swallow a straight-up throw entirely -- h_speed 0 is inside every
-# tolerance, and a slide throws the upward part away -- which would delete a
-# working feature the revision never asked about. Flagged in the H-2 report.
+# A force aimed steeply enough upward -- knock_lift_angle_deg or more above the
+# horizontal -- is a lift, not knockback, and is not judged: "judged" says so
+# and the owner applies it whole. Read without that, the table swallowed a
+# straight-up throw entirely (h_speed 0 is inside every tolerance, and a slide
+# throws the upward part away). The angle is the user's ruling on it.
+# How far above the horizontal a force points, in degrees. Straight up is 90,
+# flat is 0, and anything downward is negative.
+func lift_angle_deg(event: Dictionary) -> float:
+	var direction: Vector3 = event.get("direction", Vector3.ZERO)
+	var flat := Vector2(direction.x, direction.z).length()
+	return rad_to_deg(atan2(direction.y, flat))
+
+
 func judge_knockback(
 		event: Dictionary,
 		total_weight: float,
@@ -155,8 +166,7 @@ func judge_knockback(
 	var change := change_for(event, total_weight)
 	var h_speed := Vector2(change.x, change.z).length()
 	var tolerance := tolerance_for(target_strength, race_mult)
-	var direction: Vector3 = event.get("direction", Vector3.ZERO)
-	var judged := Vector2(direction.x, direction.z).length_squared() > 0.0001
+	var judged := lift_angle_deg(event) < Tuning.values.knock_lift_angle_deg
 	return {
 		"h_speed": h_speed,
 		"tolerance": tolerance,

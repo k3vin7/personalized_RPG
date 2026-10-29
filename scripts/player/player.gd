@@ -370,7 +370,12 @@ func dash_speed() -> float:
 # race multiplier to it, so PlayerMovement now asks this instead of its own.
 func get_move_speed() -> float:
 	var mult := Tuning.ratio_mult(get_ratio(), Tuning.values.ratio_k_speed)
-	return Tuning.values.base_move_speed * mult * Tuning.race_move_mult(stats.race)
+	# The race multiplier is the server's table, replicated to every peer, so
+	# the speed this body walks at and the speed the server checks it against
+	# come out of the same numbers.
+	var judge := ServerAuthority.instance
+	var race_mult := judge.race_move_mult(stats.race) if judge != null else 1.0
+	return Tuning.values.base_move_speed * mult * race_mult
 
 
 func default_snap_length() -> float:
