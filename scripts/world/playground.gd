@@ -58,14 +58,19 @@ func _ready() -> void:
 		add_child(dummy)
 	_sign("허수아비 (E로 밀기)", Vector3(0.0, 2.6, 2.0), Color("ffe9b0"))
 
-	# Three rocks, 5 / 10 / 20 kg. Built on every peer with the same names, so
-	# only the host's state has to travel.
-	var rock_weights := [5.0, 10.0, 20.0]
+	# Six rocks now. The light three are the old ones, kept so nothing that
+	# measured against them has to be re-measured; the heavy three are H-1's,
+	# because v4's lift limit is 72 to 120 kg and a 20 kg rock cannot tell any
+	# of the four races apart -- every one of them picks it up without noticing.
+	# Built on every peer with the same names, so only the host's state travels.
+	var rock_weights := [5.0, 10.0, 20.0, 40.0, 80.0, 120.0]
 	for index in rock_weights.size():
 		var rock := (load(ROCK_SCENE) as PackedScene).instantiate() as Rock
-		rock.setup("Rock_%d" % index, Vector3(4.0 + float(index) * 2.0, 1.0, 6.0), rock_weights[index])
+		var spot := Vector3(4.0 + float(index) * 2.0, 1.0, 6.0) if index < 3 			else Vector3(4.0 + float(index - 3) * 2.4, 1.0, 9.0)
+		rock.setup("Rock_%d" % index, spot, rock_weights[index])
 		add_child(rock)
 	_sign("돌 (G 잡기 / G 던지기)", Vector3(6.0, 2.2, 6.0), Color("dfe6ee"))
+	_sign("무거운 돌 40 / 80 / 120kg", Vector3(6.4, 2.2, 9.0), Color("dfe6ee"))
 
 	var rack := WeaponRack.new()
 	rack.name = "WeaponRack"
@@ -428,12 +433,14 @@ func _run_stage5_checks(local: Player) -> void:
 	# Stronger arms throw it further: that is the formula doing its job.
 	await _settle(local, Vector3(spot.x, 1.0, spot.z))
 	local.movement.set_aim_override(dummy.global_position)
-	local.stats.strength = 30.0
+	# H-1: double a human rather than the old 30, which was triple on the old
+	# scale. Set on the server, which is what owns an ability now.
+	ServerAuthority.instance.harness_set_stats(local, 120.0)
 	before_position = dummy.global_position
 	local.movement.shove()
 	await get_tree().create_timer(0.8).timeout
 	print("PLAYGROUND_STAGE5_STRENGTH moved=%.2f" % _flat(dummy.global_position - before_position))
-	local.stats.strength = 10.0
+	ServerAuthority.instance.harness_clear_stats(local)
 	local.movement.set_aim_override(Vector3.INF)
 	await get_tree().create_timer(3.5).timeout
 	print("PLAYGROUND_STAGE5_RETURN home_distance=%.2f hp=%.0f" % [
@@ -1050,14 +1057,13 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 	var angle := deg_to_rad(Tuning.values.throw_up_angle_deg)
 	# Clearing the lip means the body's centre, not its feet.
 	var wanted := TimeBoundary.TOP_Y + Player.BODY_HALF_HEIGHT
-	var was_strength: float = local.stats.strength
-	var mate_weight := 10.0
-	set_remote_weight.rpc_id(String(remote.name).to_int(), mate_weight)
+	var mate_weight := Races.data_for(Races.DEFAULT).body_weight
+	_harness_set_remote_weight(remote, mate_weight)
 	# 10 is the default and fails; 18 is where the arithmetic says it starts to
 	# work; 25 is past the point where ratio_mult_max caps the multiplier, so it
 	# is also the best throw the game can produce at all.
 	for strength in [10.0, 18.0, 25.0]:
-		local.stats.strength = strength
+		ServerAuthority.instance.harness_set_stats(local, strength)
 		var mult: float = Tuning.ratio_mult(strength / mate_weight, Tuning.values.ratio_k_jump)
 		var speed: float = Tuning.values.throw_power * mult
 		var rise := speed * sin(angle)
@@ -1080,7 +1086,7 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 			remote.global_position.y, remote.global_position.z,
 			remote.global_position.y > TimeBoundary.TOP_Y])
 		await get_tree().create_timer(1.0).timeout
-	local.stats.strength = was_strength
+	ServerAuthority.instance.harness_clear_stats(local)
 	# Parked out on the grass, not in the throwing lane. Stage 7 teleports our
 	# own body into that lane to measure rock throws, and a team mate left
 	# standing in it is something to land on: the rocks came down on their head
@@ -1405,10 +1411,13 @@ func _run_stage7_team(local: Player) -> void:
 	# hold is refused, correctly. The thrower is given the strength to lift it
 	# so that this leg keeps measuring what it was written to measure -- how
 	# far a heavier team mate flies -- rather than the limit it now meets.
-	var strength_was := local.stats.strength
-	local.stats.strength = 15.0
+	# H-1: the limit is strength x 1.2, so lifting a bare human (80 kg) wants 67
+	# strength and the heavy leg wants more than a human has. The thrower is
+	# given enough that this leg keeps measuring what it was written to measure
+	# -- how far a heavier team mate flies -- rather than the limit it meets.
+	ServerAuthority.instance.harness_set_stats(local, 150.0)
 	for weight in [10.0, 25.0]:
-		set_remote_weight.rpc_id(String(remote.name).to_int(), weight)
+		_harness_set_remote_weight(remote, weight)
 		await get_tree().create_timer(0.5).timeout
 		if not await _grab_remote(local, remote, lane):
 			print("PLAYGROUND_STAGE7_TEAM grab_failed weight=%.0f" % weight)
@@ -1426,8 +1435,8 @@ func _run_stage7_team(local: Player) -> void:
 			remote.global_position.y, Player.State.keys()[remote.state]])
 		local.movement.set_aim_override(Vector3.INF)
 		await get_tree().create_timer(1.5).timeout
-	set_remote_weight.rpc_id(String(remote.name).to_int(), 10.0)
-	local.stats.strength = strength_was
+	_harness_set_remote_weight(remote, NAN)
+	ServerAuthority.instance.harness_clear_stats(local)
 
 	# A thrown team mate is in the air, so a shove bends their arc again.
 	if await _grab_remote(local, remote):
@@ -1599,11 +1608,16 @@ func _grab_remote(local: Player, remote: Player, lane := THROW_LANE) -> bool:
 	return ready
 
 
-@rpc("authority", "call_remote", "reliable")
-func set_remote_weight(weight: float) -> void:
-	var local := _local_player()
-	if local != null:
-		local.stats.race_weight = weight
+# H-1: a team mate's weight is set here, on the server, rather than asked of
+# the mate's own machine. It used to be an RPC telling that peer what to weigh,
+# which is the arrangement v4 took away: the server owns an ability, so the
+# server writes it and the Vitals synchronizer carries it back. NAN puts the
+# body on its race's own weight.
+func _harness_set_remote_weight(remote: Player, weight: float) -> void:
+	var judge := ServerAuthority.instance
+	if judge == null or remote == null:
+		return
+	judge.harness_set_stats(remote, remote.stats.strength_override, weight)
 
 
 # Placed by the host so a measurement happens in a known spot. Only the body's

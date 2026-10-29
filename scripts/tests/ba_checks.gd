@@ -170,13 +170,16 @@ func _rock_checks() -> void:
 		expect(not judge.can_grab(_local, rock), "rock_rejects_far_holder")
 		placed()
 		_local.global_position = rock.global_position + Vector3(1.0, 0.3, 0.0)
-		_local.stats.strength = 1.0
+		# H-1: the 100-point scale. 20 kg needs 20/1.2 = 16.7 strength, so 10 is
+		# short of it and a human's 60 is well past. Set on the server, which is
+		# what owns an ability now.
+		judge.harness_set_stats(_local, 10.0)
 		expect(not judge.can_grab(_local, rock), "rock_rejects_insufficient_strength")
-		_local.stats.strength = 10.0
+		judge.harness_clear_stats(_local)
 		_local.change_state(Player.State.AIRBORNE)
 		expect(not judge.can_grab(_local, rock), "rock_rejects_airborne_holder")
 		_local.change_state(Player.State.IDLE)
-		expect(judge.can_grab(_local, rock), "rock_accepts_near_20kg_at_strength_10"))
+		expect(judge.can_grab(_local, rock), "rock_accepts_near_20kg_at_a_humans_strength"))
 	# Taken for real, which is what makes the duplicate refusal mean something.
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(rock.global_position)

@@ -109,6 +109,8 @@ func run(world: Node3D) -> void:
 	await _escape_checks()
 	await _exception_checks()
 	await _client_carry_jump_check()
+	await _stats_authority_checks()
+	await _race_table()
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_e")
 	await _disconnect_exception_check()
 	print("E_RESULT lag=%s peer=%d checks=%d failures=%d" % [_label, _peer_id, _checks, _failures])
@@ -119,19 +121,58 @@ func run(world: Node3D) -> void:
 # ------------------------------------------------- the lift limit, and one hand
 
 func _lift_limit_checks() -> void:
-	var heavy := _world.get_node("Rock_2") as Rock          # 20 kg
+	# H-1: the limit is strength x 1.2, so a human (60) is good for 72 kg. The
+	# old pair of checks straddled 20 kg at the 2.0 multiplier and said nothing
+	# at all on the new scale -- every race clears a 20 kg rock without
+	# noticing. These straddle each race's own limit instead, using the heavy
+	# rocks the playground grew for exactly this.
+	var rocks := {
+		40.0: _world.get_node("Rock_3") as Rock,
+		80.0: _world.get_node("Rock_4") as Rock,
+		120.0: _world.get_node("Rock_5") as Rock,
+	}
 	await _park_self(HOME)
-	await tick_request(func() -> void:
-		heavy.global_position = _local.global_position + Vector3(0.9, 0.3, 0.0))
-	await _wait(0.4)
-	await tick_request(func() -> void:
-		_local.stats.strength = 9.0
-		_flag = _judge.can_grab(_local, heavy))
-	expect(not _flag, "nine_strength_cannot_lift_twenty_kilos")
-	await tick_request(func() -> void:
-		_local.stats.strength = 10.0
-		_flag = _judge.can_grab(_local, heavy))
-	expect(_flag, "ten_strength_can")
+	var rows := PackedStringArray()
+	for kind: int in Races.all_kinds():
+		var data := Races.data_for(kind)
+		await tick_request(func() -> void: _judge.harness_set_race(_local, kind))
+		await _wait(0.3)
+		await tick_request(func() -> void: _number = _judge.lift_limit(_local))
+		var limit := _number
+		var expected: float = data.strength * Tuning.values.lift_per_strength
+		expect(absf(limit - expected) < 0.01,
+			"%s_lift_limit_is_strength_times_the_multiplier" % data.label)
+		# And the limit is what actually decides a grab, rock by rock.
+		var verdicts := PackedStringArray()
+		for weight: float in [40.0, 80.0, 120.0]:
+			var rock: Rock = rocks[weight]
+			await tick_request(func() -> void:
+				rock.freeze = false
+				rock.global_position = _local.global_position + Vector3(0.9, -0.3, 0.0)
+				rock.linear_velocity = Vector3.ZERO)
+			await _wait(0.4)
+			await tick_request(func() -> void: _flag = _judge.can_grab(_local, rock))
+			verdicts.append("%.0f:%s" % [weight, "yes" if _flag else "no"])
+			expect(_flag == (weight <= limit),
+				"%s_%.0fkg_matches_the_limit" % [data.label, weight])
+		rows.append("%s %.0f/%.0fkg -> %.0fkg [%s]" % [
+			data.label, data.strength, data.body_weight, limit,
+			" ".join(verdicts)])
+	note("lift limit by race (x%.1f): %s" % [
+		Tuning.values.lift_per_strength, " | ".join(rows)])
+
+	# A human lifts a bare elf and not a bare human: v4's intended shape, and
+	# the one that makes training something to want.
+	await tick_request(func() -> void: _judge.harness_set_race(_local, Races.Kind.HUMAN))
+	await _wait(0.3)
+	var human_limit := _judge.lift_limit(_local)
+	var elf := Races.data_for(Races.Kind.ELF).body_weight
+	var human := Races.data_for(Races.Kind.HUMAN).body_weight
+	note("a human (%.0fkg limit) against a bare elf %.0fkg and a bare human %.0fkg" % [
+		human_limit, elf, human])
+	expect(human_limit >= elf, "a_human_can_lift_a_bare_elf")
+	expect(human_limit < human, "but_not_a_bare_human")
+
 	# One hand on a weapon halves it.
 	Tuning.values.one_hand_weapon = true
 	await tick_request(func() -> void: _number = _judge.lift_limit(_local))
@@ -142,9 +183,7 @@ func _lift_limit_checks() -> void:
 	note("lift limit: both hands %.1f kg, one hand %.1f kg (mult %.1f)" % [
 		two_hands, one_hand, Tuning.values.grab_one_hand_strength_mult])
 	expect(absf(one_hand - two_hands * 0.5) < 0.01, "one_hand_halves_the_limit")
-	Tuning.values.one_hand_weapon = true
-	await tick_request(func() -> void: _flag = _judge.can_grab(_local, heavy))
-	expect(not _flag, "and_then_twenty_kilos_is_too_much")
+	expect(one_hand < elf, "and_then_a_bare_elf_is_too_much")
 	Tuning.values.one_hand_weapon = false
 
 
@@ -233,7 +272,11 @@ func _one_key_checks() -> void:
 # ------------------------------------------- carrying something heavy
 
 func _carry_weight_checks() -> void:
-	var heavy := _world.get_node("Rock_2") as Rock          # 20 kg
+	# H-1: 40 kg, not the old 20. A human is 80 kg bare, so a 20 kg rock moves
+	# the ratio from 0.75 to 0.60 and the jump by 11 cm -- less than the check's
+	# own tolerance. 40 kg is the heaviest rock a human's 72 kg limit allows,
+	# which makes it the heaviest honest load to measure the penalty with.
+	var heavy := _world.get_node("Rock_3") as Rock          # 40 kg
 	await _park_self(HOME)
 	var free_speed := _local.get_move_speed()
 	var free_jump := _local.get_jump_height()
@@ -249,8 +292,9 @@ func _carry_weight_checks() -> void:
 	var carry_jump := _local.get_jump_height()
 	# 4-chapter: the load is in the weight, the weight is in the ratio, and the
 	# ratio is in both of these. No rule of its own.
-	var ratio_free: float = _local.stats.strength / 10.0
-	var ratio_load: float = _local.stats.strength / maxf(10.0 + load, 0.1)
+	var bare: float = _local.stats.race_weight + _local.stats.gear_weight
+	var ratio_free: float = _local.stats.strength / maxf(bare, 0.1)
+	var ratio_load: float = _local.stats.strength / maxf(bare + load, 0.1)
 	note("carrying %.0f kg: speed %.2f -> %.2f, jump height %.2f -> %.2f (ratio %.2f -> %.2f)" % [
 		load, free_speed, carry_speed, free_jump, carry_jump, ratio_free, ratio_load])
 	expect(absf(load - heavy.weight) < 0.01, "what_is_carried_is_in_the_weight")
@@ -560,6 +604,128 @@ func _rock_versus_player_check() -> void:
 
 # ------------------------- a thrown team mate can be pushed again in the air
 
+# H-1: the abilities became the server's, and this is the real path -- the one
+# a person uses, not the harness door. A client's debug slider states a number,
+# the server rules on it, and the Vitals synchronizer carries the answer back,
+# so the server and both screens end up holding the same value. And the other
+# direction: a client writing the number itself gets it taken away again.
+func _stats_authority_checks() -> void:
+	var mate := _judge.actor_for(_client_peer())
+	if mate == null:
+		expect(false, "the_stats_checks_found_the_client")
+		return
+	var asked := 111.0
+	_reported.erase("stats")
+	client_ask_stats.rpc_id(_client_peer(), asked)
+	var waited := 0.0
+	while not _reported.has("stats") and waited < 20.0 + _lag * 20.0:
+		await get_tree().create_timer(0.1).timeout
+		waited += 0.1
+	expect(_reported.has("stats"), "the_client_reported_what_its_slider_did")
+	if not _reported.has("stats"):
+		return
+	var seen: PackedFloat32Array = _reported["stats"]
+	note("slider path: client asked %.0f -> client sees %.0f, server sees %.0f (race %s)" % [
+		asked, seen[0], mate.stats.strength, Races.label_for(mate.stats.race)])
+	expect(absf(mate.stats.strength - asked) < 0.01, "the_server_took_the_sliders_number")
+	expect(absf(seen[0] - asked) < 0.01, "and_the_client_sees_what_the_server_took")
+
+	# Forged: the client writes the ability itself, both the stat and the
+	# replicated field. The server's copy is the one that counts, and it comes
+	# straight back over the top.
+	_reported.erase("forged")
+	client_forge_stats.rpc_id(_client_peer(), 999.0)
+	waited = 0.0
+	while not _reported.has("forged") and waited < 20.0 + _lag * 20.0:
+		await get_tree().create_timer(0.1).timeout
+		waited += 0.1
+	expect(_reported.has("forged"), "the_client_reported_its_forgery")
+	if _reported.has("forged"):
+		var forged: PackedFloat32Array = _reported["forged"]
+		note("forged: client wrote 999 -> client ends at %.0f, server still %.0f" % [
+			forged[0], mate.stats.strength])
+		expect(absf(mate.stats.strength - asked) < 0.01,
+			"a_clients_own_write_never_reached_the_server")
+		expect(absf(forged[0] - asked) < 0.01,
+			"and_was_taken_off_the_client_again")
+
+	# Back onto the race, the way choosing a race does it.
+	_reported.erase("stats")
+	client_ask_stats.rpc_id(_client_peer(), NAN)
+	waited = 0.0
+	while not _reported.has("stats") and waited < 20.0 + _lag * 20.0:
+		await get_tree().create_timer(0.1).timeout
+		waited += 0.1
+	var bare := Races.data_for(mate.stats.race).strength
+	note("back to the race: server sees %.0f (%s is %.0f), overridden=%s" % [
+		mate.stats.strength, Races.label_for(mate.stats.race), bare,
+		mate.stats.is_overridden()])
+	expect(absf(mate.stats.strength - bare) < 0.01, "null_puts_the_body_back_on_its_race")
+	expect(not mate.stats.is_overridden(), "and_clears_the_override")
+
+
+# H-1's after table: the same rows H-0 measured before the change, now per race.
+# Formula values rather than flight times, because what H-1 changed is the
+# formula -- C and D measure the flights, and they still do.
+func _race_table() -> void:
+	await _park_self(HOME)
+	for kind: int in Races.all_kinds():
+		var data := Races.data_for(kind)
+		await tick_request(func() -> void: _judge.harness_set_race(_local, kind))
+		await _wait(0.4)
+		var cap := _local.leap_speed_cap()
+		note("race %s: strength %.0f weight %.0fkg endurance %.0f agility %.0f intellect %.0f height %.0fcm | ratio %.4f mult_jump %.4f mult_speed %.4f | move %.3f m/s, standing apex %.3f m, leap range %.3f m, dash %.3f m/s, lift %.0fkg, hp_max %.0f" % [
+			data.label, data.strength, data.body_weight, data.endurance,
+			data.agility, data.intellect, data.height_cm,
+			_local.get_ratio(),
+			Tuning.ratio_mult(_local.get_ratio(), Tuning.values.ratio_k_jump),
+			Tuning.ratio_mult(_local.get_ratio(), Tuning.values.ratio_k_speed),
+			_local.get_move_speed(), cap * cap / (2.0 * Tuning.values.gravity),
+			_local.leap_max_range(), _local.dash_speed(),
+			_judge.lift_limit(_local), _local.stats.max_hp])
+	# The one number v4 names outright: a bare human is the reference, so its
+	# multiplier is exactly 1.
+	await tick_request(func() -> void: _judge.harness_set_race(_local, Races.Kind.HUMAN))
+	await _wait(0.4)
+	var human_mult := Tuning.ratio_mult(_local.get_ratio(), Tuning.values.ratio_k_jump)
+	note("bare human ratio %.4f -> mult %.4f (ratio_ref %.2f)" % [
+		_local.get_ratio(), human_mult, Tuning.values.ratio_ref])
+	expect(absf(human_mult - 1.0) < 0.0001, "a_bare_human_is_exactly_one")
+
+
+# A leg that grabs a person often follows one that threw something at them, and
+# a parked body is not a settled one: the park is a position write, so a body
+# still carrying a push keeps moving after it lands. Rather than widen a fixed
+# wait, this waits for the two of them to actually be in reach and says how far
+# apart they ended up if they never are.
+func _await_pair_within_reach(other: Player, point: Vector3) -> float:
+	var reach: float = Tuning.values.grab_range + Player.BODY_RADIUS
+	var gap := INF
+	var waited := 0.0
+	while waited < 8.0 + _lag * 20.0:
+		var offset := other.global_position - _local.global_position
+		offset.y = 0.0
+		gap = offset.length()
+		if gap <= reach:
+			return gap
+		# Put them both back and let them settle again.
+		_judge.forgive_move(other.get_multiplayer_authority(), "", 30)
+		client_park.rpc_id(other.get_multiplayer_authority(), point + Vector3(0.9, 0.0, 0.0))
+		await _wait_stage("parked")
+		await _park_self(point)
+		waited += 2.0
+	return gap
+
+
+# v4's lift limit means a human (72 kg) cannot pick up a bare human (80 kg).
+# That is the intended shape, not something to tune away -- but the legs below
+# are about what happens once someone IS held, so the holder is handed the
+# strength to get there. On the server, which is what owns an ability now.
+func _strong_enough_for_people() -> void:
+	await tick_request(func() -> void: _judge.harness_set_stats(_local, 150.0))
+	await _wait(0.2)
+
+
 func _second_push_check() -> void:
 	var mate := _judge.actor_for(_client_peer())
 	_judge.forgive_move(_client_peer(), "", 30)
@@ -567,12 +733,17 @@ func _second_push_check() -> void:
 	await _wait_stage("parked")
 	await _wait(0.6)
 	await _park_self(LANE)
+	var gap := await _await_pair_within_reach(mate, LANE)
+	await _strong_enough_for_people()
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(mate.global_position)
 		_local.movement.interact())
 	await _wait(1.0)
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
 	if _judge.holder_of(mate) != 1:
+		note("the team mate was not picked up: %.2f m apart (reach %.2f), limit %.0f kg against %.0f kg" % [
+			gap, Tuning.values.grab_range + Player.BODY_RADIUS,
+			_judge.lift_limit(_local), _judge.weight_of(mate)])
 		expect(false, "picked_the_team_mate_up_to_throw")
 		return
 	expect(true, "picked_the_team_mate_up_to_throw")
@@ -616,6 +787,7 @@ func _escape_checks() -> void:
 	await _wait_stage("parked")
 	await _wait(0.6)
 	await _park_self(LANE)
+	await _strong_enough_for_people()
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(victim.global_position)
 		_local.movement.interact())
@@ -680,6 +852,7 @@ func _exception_checks() -> void:
 	client_park.rpc_id(_client_peer(), LANE + Vector3(0.9, 0.0, 0.0))
 	await _wait_stage("parked")
 	await _wait(0.6)
+	await _strong_enough_for_people()
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(victim.global_position)
 		_local.movement.interact())
@@ -708,6 +881,7 @@ func _exception_checks() -> void:
 	client_park.rpc_id(_client_peer(), LANE + Vector3(0.9, 0.0, 0.0))
 	await _wait_stage("parked")
 	await _wait(0.6)
+	await _strong_enough_for_people()
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(victim.global_position)
 		_local.movement.interact())
@@ -770,7 +944,7 @@ func _park_self(point: Vector3) -> void:
 		_judge.server_respawn(_local)
 		_local.global_position = point
 		_local.velocity = Vector3.ZERO
-		_local.stats.strength = 10.0
+		_judge.harness_clear_stats(_local)
 		_local.stamina = Tuning.values.stamina_max
 		_local.movement.cancel_target())
 	await _wait(0.6)
@@ -857,6 +1031,31 @@ func client_carry_jump(rock_path: NodePath) -> void:
 		holding,
 		1.0 if flag_set else 0.0,
 		1.0 if took else 0.0]))
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_ask_stats(value: float) -> void:
+	# Exactly what the debug slider does: state a number, let the server decide.
+	# NAN is the panel's "follow the race again" button.
+	await tick_request(func() -> void:
+		ServerAuthority.submit_intent(_local, ServerAuthority.Intent.STATS, {
+			"strength": null if is_nan(value) else value,
+		}))
+	# Long enough for the ruling to be made and replicated back.
+	await _wait(0.8 + _lag * 4.0)
+	report_numbers.rpc_id(1, "stats", PackedFloat32Array([_local.stats.strength]))
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_forge_stats(value: float) -> void:
+	# No result RPC exists to forge: the abilities ride the server's own
+	# synchronizer. So the forgery is the blunt one -- write the stat and the
+	# replicated field directly and see whether either sticks.
+	await tick_request(func() -> void:
+		_local.stats.strength_override = value
+		_local.sync_strength_override = value)
+	await _wait(0.8 + _lag * 4.0)
+	report_numbers.rpc_id(1, "forged", PackedFloat32Array([_local.stats.strength]))
 
 
 @rpc("any_peer", "call_remote", "reliable")

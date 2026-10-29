@@ -140,6 +140,11 @@ func _agreement_checks() -> void:
 
 	# Thrown: picked up through the door, thrown through the door.
 	await _place_both(victim)
+	# H-1: a human's 72 kg limit will not pick up a bare human (80 kg), which is
+	# v4's intended shape. These legs are about the two views agreeing once
+	# someone IS held, so the holder is handed the strength to get there -- on
+	# the server, which owns an ability now.
+	await tick_request(func() -> void: _judge.harness_set_stats(_local, 150.0))
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(victim.global_position)
 		_local.movement.interact())
@@ -210,6 +215,11 @@ func _client_action_checks() -> void:
 
 	# Grabbed by the host, escapes by itself.
 	await _place_both(victim)
+	# H-1: a human's 72 kg limit will not pick up a bare human (80 kg), which is
+	# v4's intended shape. These legs are about the two views agreeing once
+	# someone IS held, so the holder is handed the strength to get there -- on
+	# the server, which owns an ability now.
+	await tick_request(func() -> void: _judge.harness_set_stats(_local, 150.0))
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(victim.global_position)
 		_local.movement.interact())

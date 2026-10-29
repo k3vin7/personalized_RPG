@@ -217,6 +217,11 @@ func _escape_checks() -> void:
 		_local.respawn()
 		placed()
 		_local.global_position = victim.global_position + Vector3(0.9, 0.0, 0.0)
+		# H-1: a human's 72 kg limit will not pick up a bare human (80 kg), which
+		# is v4's intended shape. This leg is about the door the request comes
+		# through, not the limit, so the holder is handed the strength to get
+		# there -- on the server, which owns an ability now.
+		_judge.harness_set_stats(_local, 150.0)
 		_local.movement.set_aim_override(victim.global_position))
 	await get_tree().create_timer(0.6).timeout
 	# The host picks a person up through the same door.

@@ -9,6 +9,12 @@ const LAYER := Layers.DUMMY
 const RETURN_DELAY := 2.0
 const RETURN_SPEED := 2.0
 const MAX_HP := 60.0
+
+# The one place a scarecrow's weight is written. It used to be here as
+# MAX_HP * 0.2 for the push and again in ServerAuthority as DUMMY_WEIGHT = 12.0
+# for the lift limit: two expressions in two files that happened to agree, which
+# is the shape CLAUDE.md's eighth note warns about. The lift limit reads this.
+const WEIGHT := 12.0
 # 20 state packets a second. A dummy built in code has no synchronizer of its
 # own, so the host pushes its state: without this a client saw a dummy that
 # never moved however hard it was shoved.
@@ -94,7 +100,7 @@ func apply_force_event(event: Dictionary) -> void:
 	# the one body that still overwrote, so a second shove while it was flying
 	# replaced the first one instead of bending its arc.
 	var change := ForceSystem.change_for(
-		event, Dummy.MAX_HP * 0.2, 1.0, is_on_floor())
+		event, WEIGHT, 1.0, is_on_floor())
 	if is_on_floor():
 		velocity = change
 	else:

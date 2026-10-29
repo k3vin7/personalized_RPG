@@ -28,6 +28,10 @@ enum Intent {
 	# and where it landed; the server checks that against what it watched.
 	FALL,
 	RESPAWN,
+	# H-1: the debug sliders. The abilities became the server's, so a slider is
+	# a request like every other -- the panel states a number and the server
+	# decides whether to hold the body off its race at that value.
+	STATS,
 }
 
 # Anything that can be picked up joins this group and offers
@@ -73,7 +77,9 @@ const VIEW_HEARTBEAT := 0.5
 const INTENT_RANGE_SLACK := 1.5
 
 # A scarecrow has no stats resource of its own.
-const DUMMY_WEIGHT := 12.0
+# Read off the scarecrow rather than written again here: the push and the lift
+# limit have to be weighing the same body.
+const DUMMY_WEIGHT := Dummy.WEIGHT
 
 # How far a reported fall may differ from the one the server watched before the
 # server stops believing it. A client's own peak is the better number -- it is
@@ -392,6 +398,8 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 			result = _rule_fall(actor, payload)
 		Intent.RESPAWN:
 			result = _rule_respawn(actor)
+		Intent.STATS:
+			result = _rule_stats(actor, payload)
 	if result == null:
 		return _refuse(sender, kind, "refused")
 	granted_intents += 1
@@ -434,6 +442,18 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 			return _target_for(payload) != null
 		Intent.DROP, Intent.ESCAPE, Intent.RESPAWN:
 			return true
+		Intent.STATS:
+			# Either field may be absent (leave it alone) or null (follow the
+			# race again). A number has to be a number.
+			for field in ["strength", "weight"]:
+				if not payload.has(field):
+					continue
+				var value: Variant = payload[field]
+				if value == null:
+					continue
+				if not (value is float or value is int) or not is_finite(float(value)):
+					return false
+			return payload.has("strength") or payload.has("weight")
 		Intent.FALL:
 			return payload.has("peak") and payload.has("land") \
 				and is_finite(float(payload.get("peak", INF))) \
@@ -565,6 +585,87 @@ func face_shove(direction: Vector3) -> void:
 			# The shove was allowed: the press has its answer.
 			if actor.predicted_action == Intent.SHOVE:
 				actor.clear_predicted())
+
+
+# The debug sliders' own bounds, which is all they are: not a rule about how
+# strong anyone may be, just the range the panel can ask for. Kept here because
+# the server is what enforces them, and a bound only the panel knew would be a
+# bound a forged intent could walk past.
+const DEBUG_STRENGTH_RANGE := Vector2(1.0, 150.0)
+const DEBUG_WEIGHT_RANGE := Vector2(20.0, 200.0)
+
+
+# H-1: a slider asks, the server answers. null means "follow the race again",
+# which is also what choosing a race does.
+func _rule_stats(actor: Player, payload: Dictionary) -> Variant:
+	if actor == null or actor.stats == null:
+		return null
+	if payload.has("strength"):
+		var asked: Variant = payload["strength"]
+		actor.stats.strength_override = NAN if asked == null else clampf(
+			float(asked), DEBUG_STRENGTH_RANGE.x, DEBUG_STRENGTH_RANGE.y)
+	if payload.has("weight"):
+		var asked_weight: Variant = payload["weight"]
+		actor.stats.weight_override = NAN if asked_weight == null else clampf(
+			float(asked_weight), DEBUG_WEIGHT_RANGE.x, DEBUG_WEIGHT_RANGE.y)
+	# The body may now be stronger or heavier than it was a frame ago, and the
+	# move check compares what it sees against what its strength explains.
+	forgive_move(actor.get_multiplayer_authority(), "stats_changed")
+	print("PLAYGROUND_STATS peer=%d race=%s strength=%.1f weight=%.1f overridden=%s" % [
+		actor.get_multiplayer_authority(), Races.label_for(actor.stats.race),
+		actor.stats.strength, actor.stats.race_weight, actor.stats.is_overridden()])
+	return true
+
+
+# For the automated checks only, and deliberately not an RPC: the abilities are
+# the server's, so the one door open from outside is Intent.STATS above. A
+# check runs on the host and sets a number here, on the server, for whichever
+# body it likes -- the Vitals synchronizer carries it to that body's own
+# machine. Gated on the run being an automated one, so in a session a person
+# started it does nothing at all and says so.
+#
+# Pass NAN to put a body back on its race's own number.
+func harness_set_stats(player: Player, strength: float, weight := INF) -> bool:
+	if not is_judge():
+		return false
+	if not Net.auto_smoke:
+		push_warning("harness_set_stats is for --auto runs; ignored")
+		print("PLAYGROUND_HARNESS_STATS_REFUSED peer=%s" % (
+			player.name if player != null else "?"))
+		return false
+	if player == null or player.stats == null:
+		return false
+	player.stats.strength_override = strength
+	if not is_inf(weight):
+		player.stats.weight_override = weight
+	forgive_move(player.get_multiplayer_authority(), "harness_stats")
+	return true
+
+
+# The other half: put a body back on its race, which is what a check doing a
+# sweep wants when it is done.
+func harness_clear_stats(player: Player) -> bool:
+	return harness_set_stats(player, NAN, NAN)
+
+
+# H-4 gives a race its own intent and a pedestal to ask from. Until then this
+# is how a check gets a body onto one, and it is the server that writes it, the
+# same as every other ability. Choosing a race drops the debug overrides, which
+# is v4's "choosing a race again goes back to the race's values".
+func harness_set_race(player: Player, kind: int) -> bool:
+	if not is_judge():
+		return false
+	if not Net.auto_smoke:
+		push_warning("harness_set_race is for --auto runs; ignored")
+		print("PLAYGROUND_HARNESS_RACE_REFUSED peer=%s" % (
+			player.name if player != null else "?"))
+		return false
+	if player == null or player.stats == null or not Races.is_known(kind):
+		return false
+	player.stats.race = kind
+	player.stats.clear_overrides()
+	forgive_move(player.get_multiplayer_authority(), "harness_race")
+	return true
 
 
 # Whether a hold may start: the table first, then reach, then the lift limit,

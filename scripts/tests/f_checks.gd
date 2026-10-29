@@ -382,11 +382,13 @@ func _two_peer_check() -> void:
 # ----------------------------- how high a ledge a jump can reach, by strength
 
 func _reach_table() -> void:
-	for strength in [10.0, 20.0, 30.0]:
+	# H-1: the races' own strengths rather than the old 10/20/30, so the table
+	# says what an elf, a human and an orc can get onto.
+	for strength in [50.0, 60.0, 80.0, 100.0]:
 		await tick_request(func() -> void:
 			placed()
 			_judge.server_respawn(_local)
-			_local.stats.strength = float(strength)
+			_judge.harness_set_stats(_local, float(strength))
 			_local.global_position = HOME
 			_local.velocity = Vector3.ZERO
 			_local.movement.cancel_target())
@@ -429,7 +431,7 @@ func _reach_table() -> void:
 		note("strength %.0f: cap %.2f, standing apex %.2f m, ledge the budget allows from 1 m out %.2f m | rungs %s -> highest actually reached %.1f m" % [
 			strength, cap, budget * 0.5, reach_at_one, " ".join(rungs), highest])
 		expect(highest > 0.0, "a_body_at_strength_%.0f_can_get_onto_something" % strength)
-	await tick_request(func() -> void: _local.stats.strength = 10.0)
+	await tick_request(func() -> void: _judge.harness_clear_stats(_local))
 
 
 # F follow-up: the old table jumped from 3 m back at every height, so what it

@@ -8,10 +8,13 @@ extends CanvasLayer
 # body's weight. Tuning changes stay local so two people can experiment side by
 # side; the button pulls the host's numbers when they want to compare.
 
+# H-1: the 100-point scale. An orc is 100 strength and 140 kg, so the old
+# 1-40 / 3-30 sliders could not reach any of the four races. The bounds the
+# server enforces are its own (DEBUG_STRENGTH_RANGE / DEBUG_WEIGHT_RANGE);
+# these are the panel's, and they sit inside them.
 const STAT_RANGES := {
-	"strength": Vector2(1.0, 40.0),
-	"race_weight": Vector2(3.0, 30.0),
-	"gear_weight": Vector2(0.0, 30.0),
+	"strength": Vector2(1.0, 150.0),
+	"race_weight": Vector2(20.0, 200.0),
 }
 const ARC_STEPS := 90
 
@@ -77,15 +80,24 @@ func _build_ui() -> void:
 		boundary_toggle.toggled.connect(func(on: bool) -> void: Tuning.debug_boundaries_visible = on)
 		column.add_child(boundary_toggle)
 
-	column.add_child(_heading("능력치 (동기화됨)"))
+	# H-1: the abilities are the server's, so a slider states a number and the
+	# server decides. Moving one holds this body off its race at that value;
+	# the button puts it back on the race, which is also what choosing a race
+	# at a pedestal does.
+	column.add_child(_heading("능력치 (서버 승인)"))
 	for field in STAT_RANGES.keys():
 		var range_values: Vector2 = STAT_RANGES[field]
+		var intent_key := "strength" if field == "strength" else "weight"
 		column.add_child(_slider(
 			field,
 			float(player.stats.get(field)),
 			range_values.x,
 			range_values.y,
-			func(value: float) -> void: player.stats.set(field, value)))
+			func(value: float) -> void: _ask_stats({intent_key: value})))
+	var follow := Button.new()
+	follow.text = "종족 값으로 되돌리기"
+	follow.pressed.connect(func() -> void: _ask_stats({"strength": null, "weight": null}))
+	column.add_child(follow)
 
 	column.add_child(_heading("튜닝 (각자 로컬)"))
 	var pull := Button.new()
@@ -161,13 +173,29 @@ func _check(field: String, value: bool) -> CheckBox:
 	return box
 
 
+# One door for both sliders and the reset button.
+func _ask_stats(payload: Dictionary) -> void:
+	if not is_instance_valid(player):
+		return
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.STATS, payload)
+
+
 func _refresh_readout() -> void:
 	var movement := player.movement
 	_readout.text = "\n".join(PackedStringArray([
 		"상태: %s   지상: %s" % [Player.State.keys()[player.state], player.is_on_floor()],
 		"속도: (%.2f, %.2f, %.2f)" % [player.velocity.x, player.velocity.y, player.velocity.z],
-		"ratio: %.3f   점프 높이: %.2f m   초기 속도: %.2f" % [
-			player.get_ratio(), player.get_jump_height(), player.get_jump_velocity()],
+		"종족: %s%s   근력 %.0f  무게 %.0fkg (장비 %.0f, 든 것 %.0f)  키 %.0fcm" % [
+			Races.label_for(player.stats.race),
+			" (슬라이더)" if player.stats.is_overridden() else "",
+			player.stats.strength, player.stats.total_weight(),
+			player.stats.gear_weight, player.stats.held_weight,
+			player.stats.height_cm],
+		"지구력 %.0f  민첩 %.0f  지능 %.0f" % [
+			player.stats.endurance, player.stats.agility, player.stats.intellect],
+		"ratio: %.3f (기준 %.2f)   점프 높이: %.2f m   초기 속도: %.2f" % [
+			player.get_ratio(), Tuning.values.ratio_ref,
+			player.get_jump_height(), player.get_jump_velocity()],
 		"이동 속도: %.2f m/s" % player.get_move_speed(),
 		"이동 의도: %.2f초 남음" % (movement.intent_seconds_left() if movement != null else 0.0),
 		"HP: %.0f / %.0f" % [player.hp, player.stats.max_hp],

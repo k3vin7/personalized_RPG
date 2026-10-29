@@ -318,7 +318,7 @@ func _dash_checks() -> void:
 	var asked_two := await _dash_to(HOME, 2.0)
 	var asked_far := await _dash_to(HOME, 20.0)
 	var asked_short := await _dash_to(HOME, 0.4)
-	note("dash at strength 10: speed %.2f (= cap %.2f x %.1f) max %.2f m (= leap range) | cursor 2 m -> %.2f m in %.2f s | cursor 0.4 m -> %.2f m" % [
+	note("dash, bare human: speed %.2f (= cap %.2f x %.1f) max %.2f m (= leap range) | cursor 2 m -> %.2f m in %.2f s | cursor 0.4 m -> %.2f m" % [
 		speed, cap, Tuning.values.dash_speed_mult, reach,
 		asked_two["distance"], asked_two["seconds"], asked_short["distance"]])
 	note("dash full: %.2f m in %.2f s = %.1f m/s (stage C was 4.00 m in 0.18 s = 22.2 m/s)" % [
@@ -329,17 +329,19 @@ func _dash_checks() -> void:
 	expect(absf(float(asked_short["distance"]) - Tuning.values.dash_min_distance) < 0.35, "a_near_cursor_still_travels_the_minimum")
 
 	# Strength is in the cap, so it moves the speed and the distance together.
-	await tick_request(func() -> void: _local.stats.strength = 20.0)
+	# H-1: a human is 60, so double it rather than the old 20 -- the point of
+	# the check is that more strength is more dash, not any one number.
+	await tick_request(func() -> void: _judge.harness_set_stats(_local, 120.0))
 	var strong_speed := _local.dash_speed()
 	var strong_reach := _local.movement.dash_max_distance()
 	var strong := await _dash_to(HOME, 20.0)
-	note("dash at strength 20: speed %.2f (cap %.2f) max %.2f m -> travelled %.2f m in %.2f s" % [
+	note("dash at double strength: speed %.2f (cap %.2f) max %.2f m -> travelled %.2f m in %.2f s" % [
 		strong_speed, _local.leap_speed_cap(), strong_reach,
 		strong["distance"], strong["seconds"]])
 	expect(strong_speed > speed + 0.5, "strength_raises_the_dash_speed")
 	expect(strong_reach > reach + 0.2, "strength_raises_the_dash_distance")
 	expect(absf(float(strong["distance"]) - strong_reach) < 0.4, "the_longer_dash_is_actually_travelled")
-	await tick_request(func() -> void: _local.stats.strength = 10.0)
+	await tick_request(func() -> void: _judge.harness_clear_stats(_local))
 
 
 # ------------------------- picking up the rock you are standing on top of

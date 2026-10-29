@@ -172,11 +172,14 @@ func _host_hold_checks() -> void:
 	await tick_request(func() -> void:
 		heavy.global_position = _local.global_position + Vector3(0.9, 0.3, 0.0))
 	await get_tree().create_timer(0.3).timeout
+	# H-1: lift_per_strength is 1.2, so 20 kg wants 16.7 strength. The pair
+	# straddles that rather than the old 9/10, which straddled 20 kg at 2.0.
 	await tick_request(func() -> void:
-		_local.stats.strength = 9.0
-		expect(not _judge.can_grab(_local, heavy), "lift_limit_refuses_20kg_at_strength_9")
-		_local.stats.strength = 10.0
-		expect(_judge.can_grab(_local, heavy), "lift_limit_allows_20kg_at_strength_10"))
+		_judge.harness_set_stats(_local, 15.0)
+		expect(not _judge.can_grab(_local, heavy), "lift_limit_refuses_20kg_at_strength_15")
+		_judge.harness_set_stats(_local, 20.0)
+		expect(_judge.can_grab(_local, heavy), "lift_limit_allows_20kg_at_strength_20")
+		_judge.harness_clear_stats(_local))
 	# Reach is ruled on the server's view of where the body is.
 	await tick_request(func() -> void:
 		heavy.global_position = _local.global_position + Vector3(8.0, 0.3, 0.0))
@@ -244,6 +247,11 @@ func _escape_checks() -> void:
 		_local.respawn()
 		placed()
 		_local.global_position = victim.global_position + Vector3(0.9, 0.0, 0.0)
+		# H-1: a human's 72 kg limit will not pick up a bare human (80 kg), which
+		# is v4's intended shape. These legs are about what happens once someone
+		# IS held, so the holder is handed the strength to get there -- on the
+		# server, which owns an ability now.
+		_judge.harness_set_stats(_local, 150.0)
 		_local.movement.set_aim_override(victim.global_position))
 	await get_tree().create_timer(0.6).timeout
 	await tick_request(func() -> void: _local.movement.interact())
@@ -302,6 +310,11 @@ func _exception_checks() -> void:
 		_local.respawn()
 		placed()
 		_local.global_position = victim.global_position + Vector3(0.9, 0.0, 0.0)
+		# H-1: a human's 72 kg limit will not pick up a bare human (80 kg), which
+		# is v4's intended shape. These legs are about what happens once someone
+		# IS held, so the holder is handed the strength to get there -- on the
+		# server, which owns an ability now.
+		_judge.harness_set_stats(_local, 150.0)
 		_local.movement.set_aim_override(victim.global_position))
 	await get_tree().create_timer(0.6).timeout
 	await tick_request(func() -> void: _local.movement.interact())

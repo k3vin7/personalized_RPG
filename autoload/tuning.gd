@@ -26,11 +26,16 @@ func _ready() -> void:
 	values = loaded.duplicate(true) if loaded != null else PhysicsTuning.new()
 
 
-# ratio_mult(ratio, k) = clamp(1 + k * ln(ratio), min, max)
-# Log so that a bigger ratio keeps helping but with falling returns, and so the
-# default ratio of 1.0 lands exactly on a multiplier of 1.0.
+# ratio_mult(ratio, k) = clamp(1 + k * ln(ratio / ratio_ref), min, max)
+# Log so that a bigger ratio keeps helping but with falling returns, and
+# divided by the reference so that the body the _base values were measured on
+# -- v4's human at training 0, bare, at 0.75 -- lands exactly on 1.0. The
+# reference used to be an implicit 1.0, which was the same thing back when a
+# character was 10 strength over 10 kg.
 func ratio_mult(ratio: float, k: float) -> float:
-	return clampf(1.0 + k * log(maxf(ratio, 0.0001)), values.ratio_mult_min, values.ratio_mult_max)
+	var reference: float = maxf(values.ratio_ref, 0.0001)
+	return clampf(1.0 + k * log(maxf(ratio, 0.0001) / reference),
+		values.ratio_mult_min, values.ratio_mult_max)
 
 
 func notify_changed() -> void:

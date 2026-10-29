@@ -33,6 +33,11 @@ extends Resource
 @export var jump_aim_deadzone: float = 1.2
 
 @export_group("Strength to weight")
+# v4: the ratio a multiplier of 1.0 stands at. A human at training 0, bare, is
+# 60 strength over 80 kg = 0.75, so every _base value below is what that human
+# gets and every other body is read against it. Before v4 the reference was an
+# implicit 1.0, which only made sense while strength was 10 and weight was 10.
+@export var ratio_ref: float = 0.75
 @export var ratio_k_jump: float = 0.35
 @export var ratio_k_speed: float = 0.30
 @export var ratio_mult_min: float = 0.7
@@ -64,7 +69,10 @@ extends Resource
 @export var throw_power: float = 11.0
 @export var throw_up_angle_deg: float = 35.0
 @export var grab_range: float = 1.5
-@export var lift_per_strength: float = 2.0
+# v4: 1.2, down from 2.0. A human (60) lifts 72 kg, which is an elf (60) but
+# not another human (80) -- being unable to carry your own team mate until you
+# have trained is the intended shape, not a rounding accident.
+@export var lift_per_strength: float = 1.2
 # Stage E. One hand on a weapon halves what the other can lift.
 @export var grab_one_hand_strength_mult: float = 2.0
 @export var one_hand_weapon: bool = false

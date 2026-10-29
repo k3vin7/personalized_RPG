@@ -239,19 +239,21 @@ func _air_and_recoil_checks() -> void:
 func _brace_checks() -> void:
 	var mate := await _place_pair(Vector3(1.0, 0.0, 0.0))
 	# Same push twice: once against an ordinary body, once against a stronger
-	# one. Strength is the mate's, so it is set on the mate's own machine.
-	set_strength.rpc_id(_client_peer(), 10.0)
+	# one. H-1: the mate's strength is set on the server, which owns it now --
+	# it used to be set on the mate's own machine, which is exactly the thing
+	# v4 took away. 60 is a human; 120 is double.
+	_judge.harness_set_stats(mate, 60.0)
 	await _wait(0.5)
 	var weak := await _shove_east(mate)
 	await _wait(Tuning.values.shove_cooldown + 0.6)
 	mate = await _place_pair(Vector3(1.0, 0.0, 0.0))
-	set_strength.rpc_id(_client_peer(), 30.0)
+	_judge.harness_set_stats(mate, 120.0)
 	await _wait(0.5)
 	var strong := await _shove_east(mate)
-	note("brace: strength 10 moved %.2f m, strength 30 moved %.2f m (k_brace %.2f)" % [
+	note("brace: strength 60 moved %.2f m, strength 120 moved %.2f m (k_brace %.2f)" % [
 		weak["moved"], strong["moved"], Tuning.values.k_brace])
 	expect(float(strong["moved"]) < float(weak["moved"]) - 0.05, "a_stronger_body_is_moved_less_on_the_ground")
-	set_strength.rpc_id(_client_peer(), 10.0)
+	_judge.harness_clear_stats(mate)
 	await _wait(Tuning.values.shove_cooldown + 0.5)
 
 
@@ -614,11 +616,6 @@ func client_park(point: Vector3) -> void:
 		_local.movement.set_aim_override(Vector3.INF))
 	await _wait(0.4)
 	stage_done.rpc_id(1, "parked")
-
-
-@rpc("authority", "call_remote", "reliable")
-func set_strength(value: float) -> void:
-	await tick_request(func() -> void: _local.stats.strength = value)
 
 
 @rpc("authority", "call_remote", "reliable")

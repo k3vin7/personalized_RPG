@@ -81,12 +81,19 @@ var sync_dead := false
 # a jump keeps what you are carrying, a fall does not -- and only the owner
 # knows which it was, so it travels with the pose.
 var sync_jumped := false
-# The stats travel too: a shove is worked out from the pusher's strength
-# against the target's weight, so every peer needs the target's numbers.
-var sync_strength := 10.0
-var sync_race_weight := 10.0
-var sync_gear_weight := 0.0
 var sync_weapon: int = WeaponKinds.Kind.NONE
+
+# H-1: the stats travel on the Vitals synchronizer, which is the server's, not
+# on the pose one, which is the owner's. A shove is worked out from the pusher's
+# strength against the target's weight, so every peer needs the target's
+# numbers -- but a client stating its own was a client telling the server what
+# to judge it by. What crosses now is the race id and whatever the debug
+# sliders are holding it off; the abilities themselves come out of the race
+# resource, which every peer already has.
+var sync_race: int = Races.DEFAULT
+var sync_strength_override := NAN
+var sync_weight_override := NAN
+var sync_gear_weight := 0.0
 
 var movement: PlayerMovement
 var climb: PlayerClimb
@@ -367,7 +374,29 @@ func is_grounded_state() -> bool:
 	return state == State.IDLE or state == State.MOVE or state == State.GRABBING
 
 
+# The stats half of the step, run on every peer and on every body: the side
+# that owns the Vitals synchronizer publishes what the server ruled, and
+# everyone else takes it. Separate from the pose half below, because the two
+# halves have different owners -- the pose is the body's own machine and the
+# abilities are the server's.
+func _sync_stats() -> void:
+	if stats == null:
+		return
+	if vitals_are_mine():
+		sync_race = stats.race
+		sync_strength_override = stats.strength_override
+		sync_weight_override = stats.weight_override
+		sync_gear_weight = stats.gear_weight
+		return
+	if Races.is_known(sync_race):
+		stats.race = sync_race
+	stats.strength_override = sync_strength_override
+	stats.weight_override = sync_weight_override
+	stats.gear_weight = sync_gear_weight
+
+
 func _physics_process(delta: float) -> void:
+	_sync_stats()
 	if is_local():
 		# The server owns the flag; this is the body catching up with it, which
 		# covers a death ruled while the result message was still in flight.
@@ -394,15 +423,9 @@ func _physics_process(delta: float) -> void:
 		sync_yaw = rotation.y
 		sync_state = state
 		sync_jumped = _jumped_this_flight
-		sync_strength = stats.strength
-		sync_race_weight = stats.race_weight
-		sync_gear_weight = stats.gear_weight
 		sync_weapon = weapon
 		_update_shadow()
 		return
-	stats.strength = sync_strength
-	stats.race_weight = sync_race_weight
-	stats.gear_weight = sync_gear_weight
 	if sync_weapon != weapon:
 		_apply_weapon(sync_weapon)
 	if _teleport_blind_left > 0.0:

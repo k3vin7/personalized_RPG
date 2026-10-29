@@ -1,0 +1,14 @@
+[gd_resource type="Resource" script_class="RaceData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/race_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = 3
+label = "오크"
+strength = 100.0
+endurance = 80.0
+agility = 60.0
+intellect = 10.0
+height_cm = 220.0
+body_weight = 140.0
