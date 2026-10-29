@@ -189,11 +189,26 @@ func _lift_limit_checks() -> void:
 
 # --------------------------------------------- the one key: tap, arc, line
 
+# Measured: putting a rock beside a body sometimes knocks that body into the
+# air -- a teleported rigid body resolves its new contacts, and the log says
+# ROCK_HIT target=1 speed=4.99 followed by airborne=true. can_grab() wants a
+# grounded holder, so the take then fails and every leg built on it fails with
+# it (about one run in ten). So: drop the rock a little lower than the hands
+# rather than above them, stop it dead in both axes, and if the body did get
+# lifted, wait for the landing before reaching for it.
 func _take(rock: Rock) -> bool:
 	await tick_request(func() -> void:
-		rock.global_position = _local.global_position + Vector3(0.9, 0.3, 0.0)
-		rock.linear_velocity = Vector3.ZERO)
+		rock.freeze = false
+		rock.global_position = _local.global_position + Vector3(0.9, -0.3, 0.0)
+		rock.linear_velocity = Vector3.ZERO
+		rock.angular_velocity = Vector3.ZERO)
 	await _wait(0.4)
+	var settling := 0.0
+	while settling < 2.0 and not _local.is_grounded_state():
+		await get_tree().physics_frame
+		settling += get_physics_process_delta_time()
+	if settling > 0.0:
+		note("the rock's placement lifted the holder; waited %.2f s for the landing" % settling)
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(rock.global_position)
 		_local.movement.interact())
@@ -649,6 +664,64 @@ func _stats_authority_checks() -> void:
 		expect(absf(forged[0] - asked) < 0.01,
 			"and_was_taken_off_the_client_again")
 
+	# Gear: the same door, a different field. No race value to fall back to, so
+	# null means bare.
+	_reported.erase("gear")
+	client_ask_gear.rpc_id(_client_peer(), 50.0)
+	waited = 0.0
+	while not _reported.has("gear") and waited < 20.0 + _lag * 20.0:
+		await get_tree().create_timer(0.1).timeout
+		waited += 0.1
+	expect(_reported.has("gear"), "the_client_reported_what_the_gear_slider_did")
+	if _reported.has("gear"):
+		var gear: PackedFloat32Array = _reported["gear"]
+		note("gear slider: asked 50 -> client sees %.0fkg (total %.0fkg), server sees %.0fkg (total %.0fkg), move %.3f -> %.3f m/s" % [
+			gear[0], gear[1], mate.stats.gear_weight, mate.stats.total_weight(),
+			gear[3], gear[2]])
+		expect(absf(mate.stats.gear_weight - 50.0) < 0.01, "the_server_took_the_gear_weight")
+		expect(absf(gear[0] - 50.0) < 0.01, "and_the_client_sees_it")
+		expect(gear[2] < gear[3] - 0.01, "and_being_equipped_is_slower_than_bare")
+
+	# The harness door is for --auto runs only. Flipped off and called, it has
+	# to refuse -- that gate is what keeps it from being a way round the server
+	# in a session a person started.
+	var was_auto := Net.auto_smoke
+	Net.auto_smoke = false
+	var refused_stats := _judge.harness_set_stats(mate, 123.0)
+	var refused_race := _judge.harness_set_race(mate, Races.Kind.ORC)
+	Net.auto_smoke = was_auto
+	note("harness door with auto off: set_stats=%s set_race=%s (strength still %.0f, race still %s)" % [
+		refused_stats, refused_race, mate.stats.strength,
+		Races.label_for(mate.stats.race)])
+	expect(not refused_stats, "harness_set_stats_refuses_outside_an_auto_run")
+	expect(not refused_race, "harness_set_race_refuses_outside_an_auto_run")
+	expect(absf(mate.stats.strength - asked) < 0.01, "and_changed_nothing")
+	expect(mate.stats.race == Races.DEFAULT, "and_left_the_race_alone")
+
+	# And the client trying to do it itself, by every route it has. There is no
+	# stats result RPC to forge -- the abilities ride the server's own
+	# synchronizer -- so what a client can actually reach is the harness door
+	# (which is not an RPC, and refuses off the judge) and its own fields.
+	_reported.erase("direct")
+	client_direct_stats.rpc_id(_client_peer())
+	waited = 0.0
+	while not _reported.has("direct") and waited < 20.0 + _lag * 20.0:
+		await get_tree().create_timer(0.1).timeout
+		waited += 0.1
+	expect(_reported.has("direct"), "the_client_reported_its_direct_attempts")
+	if _reported.has("direct"):
+		var direct: PackedFloat32Array = _reported["direct"]
+		note("client's own attempts: harness door returned %s | after writing 777/777/77 it holds strength %.0f weight %.0f gear %.0f, server holds %.0f %.0f %.0f" % [
+			direct[0] > 0.5, direct[1], direct[2], direct[3],
+			mate.stats.strength, mate.stats.race_weight, mate.stats.gear_weight])
+		expect(direct[0] < 0.5, "the_harness_door_refuses_a_client")
+		expect(absf(mate.stats.strength - asked) < 0.01,
+			"a_clients_own_strength_write_never_reached_the_server")
+		expect(absf(mate.stats.gear_weight - 50.0) < 0.01,
+			"nor_its_gear_write")
+		expect(absf(direct[1] - asked) < 0.01 and absf(direct[3] - 50.0) < 0.01,
+			"and_both_were_taken_off_the_client_again")
+
 	# Back onto the race, the way choosing a race does it.
 	_reported.erase("stats")
 	client_ask_stats.rpc_id(_client_peer(), NAN)
@@ -657,11 +730,12 @@ func _stats_authority_checks() -> void:
 		await get_tree().create_timer(0.1).timeout
 		waited += 0.1
 	var bare := Races.data_for(mate.stats.race).strength
-	note("back to the race: server sees %.0f (%s is %.0f), overridden=%s" % [
+	note("back to the race: server sees %.0f (%s is %.0f), gear %.0f, overridden=%s" % [
 		mate.stats.strength, Races.label_for(mate.stats.race), bare,
-		mate.stats.is_overridden()])
+		mate.stats.gear_weight, mate.stats.is_overridden()])
 	expect(absf(mate.stats.strength - bare) < 0.01, "null_puts_the_body_back_on_its_race")
 	expect(not mate.stats.is_overridden(), "and_clears_the_override")
+	expect(absf(mate.stats.gear_weight) < 0.01, "and_takes_the_gear_off")
 
 
 # H-1's after table: the same rows H-0 measured before the change, now per race.
@@ -842,7 +916,12 @@ func _exception_checks() -> void:
 		_local.velocity = Vector3.ZERO
 		_local.floor_snap_length = 0.0
 		_local.change_state(Player.State.AIRBORNE))
-	await _wait(0.5)
+	# Leaving the ground is the one verdict that waits: a body seen airborne
+	# without its jump flag is also what a client looks like for a sample after
+	# it lands, so the server makes the verdict last HOLD_LOST_GRACE before
+	# acting on it. The window is read from the constant rather than written
+	# again here -- a bare 0.5 s was 0.25 s of margin and failed now and then.
+	await _wait(ServerAuthority.HOLD_LOST_GRACE + 0.5)
 	expect(_released("holder_state") > state_released, "e5_holder_off_the_ground_dropped_it")
 	await _wait(1.2)
 
@@ -1040,6 +1119,8 @@ func client_ask_stats(value: float) -> void:
 	await tick_request(func() -> void:
 		ServerAuthority.submit_intent(_local, ServerAuthority.Intent.STATS, {
 			"strength": null if is_nan(value) else value,
+		} if not is_nan(value) else {
+			"strength": null, "weight": null, "gear": null,
 		}))
 	# Long enough for the ruling to be made and replicated back.
 	await _wait(0.8 + _lag * 4.0)
@@ -1056,6 +1137,42 @@ func client_forge_stats(value: float) -> void:
 		_local.sync_strength_override = value)
 	await _wait(0.8 + _lag * 4.0)
 	report_numbers.rpc_id(1, "forged", PackedFloat32Array([_local.stats.strength]))
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_ask_gear(value: float) -> void:
+	var bare_speed := _local.get_move_speed()
+	await tick_request(func() -> void:
+		ServerAuthority.submit_intent(_local, ServerAuthority.Intent.STATS, {
+			"gear": value,
+		}))
+	await _wait(0.8 + _lag * 4.0)
+	report_numbers.rpc_id(1, "gear", PackedFloat32Array([
+		_local.stats.gear_weight, _local.stats.total_weight(),
+		_local.get_move_speed(), bare_speed]))
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_direct_stats() -> void:
+	# Every route a client has to an ability, tried in turn. The harness door
+	# first: it is not an RPC, so this is the client calling it on its own
+	# ServerAuthority, where is_judge() is false.
+	var door := false
+	var judge := ServerAuthority.instance
+	if judge != null:
+		door = judge.harness_set_stats(_local, 777.0, 777.0, 77.0)
+	# Then the blunt one: write the stat and the replicated field directly.
+	await tick_request(func() -> void:
+		_local.stats.strength_override = 777.0
+		_local.stats.weight_override = 777.0
+		_local.stats.gear_weight = 77.0
+		_local.sync_strength_override = 777.0
+		_local.sync_weight_override = 777.0
+		_local.sync_gear_weight = 77.0)
+	await _wait(0.8 + _lag * 4.0)
+	report_numbers.rpc_id(1, "direct", PackedFloat32Array([
+		1.0 if door else 0.0,
+		_local.stats.strength, _local.stats.race_weight, _local.stats.gear_weight]))
 
 
 @rpc("any_peer", "call_remote", "reliable")

@@ -445,7 +445,7 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 		Intent.STATS:
 			# Either field may be absent (leave it alone) or null (follow the
 			# race again). A number has to be a number.
-			for field in ["strength", "weight"]:
+			for field in ["strength", "weight", "gear"]:
 				if not payload.has(field):
 					continue
 				var value: Variant = payload[field]
@@ -453,7 +453,7 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 					continue
 				if not (value is float or value is int) or not is_finite(float(value)):
 					return false
-			return payload.has("strength") or payload.has("weight")
+			return payload.has("strength") or payload.has("weight") 				or payload.has("gear")
 		Intent.FALL:
 			return payload.has("peak") and payload.has("land") \
 				and is_finite(float(payload.get("peak", INF))) \
@@ -593,6 +593,10 @@ func face_shove(direction: Vector3) -> void:
 # bound a forged intent could walk past.
 const DEBUG_STRENGTH_RANGE := Vector2(1.0, 150.0)
 const DEBUG_WEIGHT_RANGE := Vector2(20.0, 200.0)
+# Gear is not a system yet, so this slider is the only way to put weight on a
+# body that is not its own and not what it is carrying -- which is what the
+# bare-versus-equipped comparison needs.
+const DEBUG_GEAR_RANGE := Vector2(0.0, 80.0)
 
 
 # H-1: a slider asks, the server answers. null means "follow the race again",
@@ -608,12 +612,18 @@ func _rule_stats(actor: Player, payload: Dictionary) -> Variant:
 		var asked_weight: Variant = payload["weight"]
 		actor.stats.weight_override = NAN if asked_weight == null else clampf(
 			float(asked_weight), DEBUG_WEIGHT_RANGE.x, DEBUG_WEIGHT_RANGE.y)
+	if payload.has("gear"):
+		var asked_gear: Variant = payload["gear"]
+		# Gear has no "follow the race" state: bare is zero.
+		actor.stats.gear_weight = 0.0 if asked_gear == null else clampf(
+			float(asked_gear), DEBUG_GEAR_RANGE.x, DEBUG_GEAR_RANGE.y)
 	# The body may now be stronger or heavier than it was a frame ago, and the
 	# move check compares what it sees against what its strength explains.
 	forgive_move(actor.get_multiplayer_authority(), "stats_changed")
-	print("PLAYGROUND_STATS peer=%d race=%s strength=%.1f weight=%.1f overridden=%s" % [
+	print("PLAYGROUND_STATS peer=%d race=%s strength=%.1f weight=%.1f gear=%.1f overridden=%s" % [
 		actor.get_multiplayer_authority(), Races.label_for(actor.stats.race),
-		actor.stats.strength, actor.stats.race_weight, actor.stats.is_overridden()])
+		actor.stats.strength, actor.stats.race_weight, actor.stats.gear_weight,
+		actor.stats.is_overridden()])
 	return true
 
 
@@ -625,7 +635,8 @@ func _rule_stats(actor: Player, payload: Dictionary) -> Variant:
 # started it does nothing at all and says so.
 #
 # Pass NAN to put a body back on its race's own number.
-func harness_set_stats(player: Player, strength: float, weight := INF) -> bool:
+func harness_set_stats(player: Player, strength: float, weight := INF,
+		gear := INF) -> bool:
 	if not is_judge():
 		return false
 	if not Net.auto_smoke:
@@ -638,6 +649,8 @@ func harness_set_stats(player: Player, strength: float, weight := INF) -> bool:
 	player.stats.strength_override = strength
 	if not is_inf(weight):
 		player.stats.weight_override = weight
+	if not is_inf(gear):
+		player.stats.gear_weight = 0.0 if is_nan(gear) else gear
 	forgive_move(player.get_multiplayer_authority(), "harness_stats")
 	return true
 
@@ -645,7 +658,7 @@ func harness_set_stats(player: Player, strength: float, weight := INF) -> bool:
 # The other half: put a body back on its race, which is what a check doing a
 # sweep wants when it is done.
 func harness_clear_stats(player: Player) -> bool:
-	return harness_set_stats(player, NAN, NAN)
+	return harness_set_stats(player, NAN, NAN, NAN)
 
 
 # H-4 gives a race its own intent and a pedestal to ask from. Until then this
@@ -664,6 +677,7 @@ func harness_set_race(player: Player, kind: int) -> bool:
 		return false
 	player.stats.race = kind
 	player.stats.clear_overrides()
+	player.stats.gear_weight = 0.0
 	forgive_move(player.get_multiplayer_authority(), "harness_race")
 	return true
 

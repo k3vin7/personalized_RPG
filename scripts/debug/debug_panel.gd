@@ -15,6 +15,10 @@ extends CanvasLayer
 const STAT_RANGES := {
 	"strength": Vector2(1.0, 150.0),
 	"race_weight": Vector2(20.0, 200.0),
+	# Gear is not a system yet, and this is the only way to put weight on a
+	# body that is neither its own nor what it is carrying -- which is what
+	# comparing bare against equipped needs.
+	"gear_weight": Vector2(0.0, 80.0),
 }
 const ARC_STEPS := 90
 
@@ -87,7 +91,11 @@ func _build_ui() -> void:
 	column.add_child(_heading("능력치 (서버 승인)"))
 	for field in STAT_RANGES.keys():
 		var range_values: Vector2 = STAT_RANGES[field]
-		var intent_key := "strength" if field == "strength" else "weight"
+		var intent_key := "strength"
+		if field == "race_weight":
+			intent_key = "weight"
+		elif field == "gear_weight":
+			intent_key = "gear"
 		column.add_child(_slider(
 			field,
 			float(player.stats.get(field)),
@@ -96,7 +104,8 @@ func _build_ui() -> void:
 			func(value: float) -> void: _ask_stats({intent_key: value})))
 	var follow := Button.new()
 	follow.text = "종족 값으로 되돌리기"
-	follow.pressed.connect(func() -> void: _ask_stats({"strength": null, "weight": null}))
+	follow.pressed.connect(func() -> void: _ask_stats({
+		"strength": null, "weight": null, "gear": null}))
 	column.add_child(follow)
 
 	column.add_child(_heading("튜닝 (각자 로컬)"))
