@@ -108,6 +108,7 @@ func run(world: Node3D) -> void:
 	await _second_push_check()
 	await _escape_checks()
 	await _exception_checks()
+	await _client_carry_jump_check()
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_e")
 	await _disconnect_exception_check()
 	print("E_RESULT lag=%s peer=%d checks=%d failures=%d" % [_label, _peer_id, _checks, _failures])
@@ -425,6 +426,70 @@ func _dummy_carry_walk_check() -> void:
 			"carrying_does_not_speed_the_clients_walk_up_either")
 		expect(absf(client_measured - client_formula) < 0.12,
 			"and_costs_the_client_what_the_load_costs")
+
+
+# A holder keeps what it carries through its own jump -- and the server is the
+# one that decides, from sync_jumped. That flag is the owner's, so for a client
+# the server only ever has the replicated copy, and it was missing from the
+# replication config: player.tscn declared properties/7 before properties/3,
+# which SceneReplicationConfig refuses, so sync_jumped was dropped and the
+# server read a default false. Every client that jumped with something in its
+# hands had it taken away; the host, reading its own flag, kept it. A rock is
+# used rather than a scarecrow because a put-down scarecrow walks home, and the
+# host places it, because the host owns it.
+func _client_carry_jump_check() -> void:
+	var rock := _world.get_node("Rock_1") as Rock
+	var client := _judge.actor_for(_client_peer())
+	if rock == null or client == null:
+		expect(false, "the_client_carry_jump_check_found_its_pieces")
+		return
+	var stand := Vector3(-16.0, 0.9, 12.0)
+	await _park_self(HOME)
+	_judge.forgive_move(_client_peer(), "", 30)
+	client_park.rpc_id(_client_peer(), stand)
+	await _wait_stage("parked")
+	await tick_request(func() -> void:
+		rock.freeze = false
+		rock.global_position = stand + Vector3(0.9, -0.3, 0.0)
+		rock.linear_velocity = Vector3.ZERO)
+	await _wait(0.8)
+	_reported.erase("carry_jump")
+	client_carry_jump.rpc_id(_client_peer(), rock.get_path())
+	# Sampled on the server, every physics frame: the state and the jump flag
+	# reach it as two values and the order they arrive in is the whole bug, so
+	# the sequence the server actually saw is what gets reported.
+	var waited := 0.0
+	var seen := PackedStringArray()
+	var kept_through_the_air := true
+	while not _reported.has("carry_jump") and waited < 30.0 + _lag * 20.0:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		var holds_now := _judge.held_by(_client_peer()) != null
+		if client.state == Player.State.AIRBORNE and not holds_now:
+			kept_through_the_air = false
+		var stamp := "%s/%s/%s" % [
+			Player.State.keys()[client.state],
+			"J" if client.sync_jumped else "-",
+			"H" if holds_now else "-"]
+		if seen.is_empty() or seen[seen.size() - 1] != stamp:
+			seen.append(stamp)
+	note("server's view, state/jumped/hold: %s" % " ".join(seen))
+	expect(kept_through_the_air, "the_server_never_saw_the_client_airborne_without_its_load")
+	expect(_reported.has("carry_jump"), "the_client_reported_its_carry_jump")
+	if not _reported.has("carry_jump"):
+		return
+	var n: PackedFloat32Array = _reported["carry_jump"]
+	# What the server itself read off the wire while the client was in the air.
+	# The hold is not read here: the client lets go itself before it reports, so
+	# the table is empty by now whatever happened during the jump. What the jump
+	# did is in held_all_the_way and in the server's own sequence above.
+	note("client jump while carrying %.0f kg: took the rock=%s, left the ground=%s, apex %.2f m, held all the way=%s, still holding at the end of the flight=%s | server saw sync_jumped=%s" % [
+		n[3], n[6] > 0.5, n[0] > 0.5, n[1], n[2] > 0.5, n[4] > 0.5, n[5] > 0.5])
+	expect(n[6] > 0.5, "the_client_took_the_rock")
+	expect(n[0] > 0.5, "the_client_holder_may_still_jump")
+	expect(n[5] > 0.5, "the_server_saw_the_clients_own_jump_flag")
+	expect(n[2] > 0.5 and n[4] > 0.5,
+		"and_the_client_keeps_what_it_carries_through_its_own_jump")
 
 
 # Ground actually covered per second, walking at a point. With reset false the
@@ -746,6 +811,52 @@ func client_carry_walk(dummy_path: NodePath, lane: Vector3) -> void:
 			_local.grab.drop())
 	report_numbers.rpc_id(1, "carry_walk", PackedFloat32Array([
 		free_travel, free_formula, carry_travel, carry_formula, load, holding]))
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_carry_jump(rock_path: NodePath) -> void:
+	var rock := get_node_or_null(rock_path) as Node3D
+	if rock == null:
+		report_numbers.rpc_id(1, "carry_jump", PackedFloat32Array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+		return
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(rock.global_position)
+		_local.movement.interact())
+	await _wait(1.0 + _lag * 2.0)
+	var took := _local.grab.is_holding()
+	var load := _local.stats.held_weight
+	var floor_y := _local.global_position.y
+	# Straight up: the cursor on our own feet is how a jump in place is asked
+	# for, and it keeps the measurement about the hold rather than the landing.
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(_local.global_position)
+		_local.movement.cast_jump())
+	var jumped := false
+	var held_all_the_way := true
+	var flag_set := false
+	var peak := floor_y
+	var sampled := 0.0
+	while sampled < 1.6:
+		await get_tree().physics_frame
+		sampled += get_physics_process_delta_time()
+		if _local.state == Player.State.AIRBORNE:
+			jumped = true
+			held_all_the_way = held_all_the_way and _local.grab.is_holding()
+			flag_set = flag_set or _local.sync_jumped
+		peak = maxf(peak, _local.global_position.y)
+	var holding := 1.0 if _local.grab.is_holding() else 0.0
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(Vector3.INF)
+		if _local.grab.is_holding():
+			_local.grab.drop())
+	report_numbers.rpc_id(1, "carry_jump", PackedFloat32Array([
+		1.0 if jumped else 0.0,
+		peak - floor_y,
+		1.0 if held_all_the_way else 0.0,
+		load,
+		holding,
+		1.0 if flag_set else 0.0,
+		1.0 if took else 0.0]))
 
 
 @rpc("any_peer", "call_remote", "reliable")

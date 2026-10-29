@@ -44,6 +44,15 @@ const INTENT_TIMEOUT := 1.0
 # because the state proving it had not arrived yet.
 const HOLD_GRACE := 0.6
 
+# A holder's state and its "did I jump" flag are two replicated values, and
+# the server does not get them in step: measured, a client's own jump is seen
+# as AIRBORNE with the flag set, and then as AIRBORNE with the flag already
+# back to false, because the landing clears the flag a sample before the state
+# catches up. _can_keep_holding() reads that one combination as the ground
+# being taken away, so acting on the first frame of it took the rock off every
+# client that jumped while carrying one. The verdict has to last this long.
+const HOLD_LOST_GRACE := 0.25
+
 # Given only to a holder that was standing on what it just picked up: the floor
 # is now in its hands, so it is airborne through no fault of its own and would
 # otherwise drop the rock on the frame it lifted it -- meaning the rock you
@@ -226,6 +235,8 @@ func _take_hold(holder_peer: int, target: Node3D) -> void:
 		"confirmed": holder != null and holder.is_local(),
 		"presses": 0,
 		"window": 0.0,
+		# How long the holder has looked unable to keep this, in a row.
+		"lost": 0.0,
 	}
 	_view_dirty = true
 	# Applied at once, not only when the view is rebuilt later in the step: the
@@ -1173,13 +1184,31 @@ func _enforce_holds(delta: float) -> void:
 			record["confirmed"] = true
 		record["settle"] = maxf(0.0, float(record.get("settle", 0.0)) - delta)
 		if float(record["settle"]) == 0.0 \
-				and (bool(record["confirmed"]) or float(record["grace"]) == 0.0) \
-				and not _can_keep_holding(holder):
-			_end_hold(holder_peer, "holder_state")
-			continue
+				and (bool(record["confirmed"]) or float(record["grace"]) == 0.0):
+			# Stunned, dead or picked up says nothing about a jump, so it is
+			# acted on at once; only the airborne verdict needs the window.
+			if _hold_lost_at_once(holder):
+				_end_hold(holder_peer, "holder_state")
+				continue
+			if _can_keep_holding(holder):
+				record["lost"] = 0.0
+			else:
+				record["lost"] = float(record.get("lost", 0.0)) + delta
+				if float(record["lost"]) >= HOLD_LOST_GRACE:
+					_end_hold(holder_peer, "holder_state")
+					continue
 		# A body that died in someone's hands is not still in them.
 		if target is Player and (target as Player).state == Player.State.DEAD:
 			_end_hold(holder_peer, "target_dead")
+
+
+# The half of the verdict that carries no ambiguity: none of these three can
+# be confused with a body partway through its own jump, so none of them waits
+# for HOLD_LOST_GRACE.
+func _hold_lost_at_once(holder: Player) -> bool:
+	return holder.state == Player.State.STUNNED \
+			or holder.state == Player.State.DEAD \
+			or holder.state == Player.State.GRABBED
 
 
 # Stage E follow-up: 7-6 is narrowed to what it was written for. A holder keeps
