@@ -120,6 +120,13 @@ var _weapon_node: Node3D
 # A short line under the name: escape progress, and anything else worth reading
 # off the body.
 var overhead_note := ""
+# v4 H-2: the knockback readout, replicated so it shows on every screen and not
+# only on the machine that was pushed.
+var sync_knock := ""
+var _knock_left := 0.0
+# Long enough to read after a shove lands, short enough that it is gone before
+# the next one.
+const KNOCK_SHOW_TIME := 2.0
 # B-c: a read-only copy of a row in ServerAuthority's hold table, written by
 # set_hold_display() on every peer and decided nowhere else.
 var holder_peer := 0
@@ -357,8 +364,13 @@ func dash_speed() -> float:
 	return leap_speed_cap() * Tuning.values.dash_speed_mult
 
 
+# The one move-speed formula. It was written twice -- here and in
+# PlayerMovement.move_speed() -- which is hazard 8 exactly: two copies of a
+# number that have to agree, each consistent with itself. H-2 needed to add the
+# race multiplier to it, so PlayerMovement now asks this instead of its own.
 func get_move_speed() -> float:
-	return Tuning.values.base_move_speed * Tuning.ratio_mult(get_ratio(), Tuning.values.ratio_k_speed)
+	var mult := Tuning.ratio_mult(get_ratio(), Tuning.values.ratio_k_speed)
+	return Tuning.values.base_move_speed * mult * Tuning.race_move_mult(stats.race)
 
 
 func default_snap_length() -> float:
@@ -404,6 +416,13 @@ func _physics_process(delta: float) -> void:
 		# can arrive before the flag packet that cleared the death, and without
 		# it the body stood up and was put straight back down as dead.
 		_respawn_echo_left = maxf(0.0, _respawn_echo_left - delta)
+		if _knock_left > 0.0:
+			# Ours to clear: the readout is written by the force we received,
+			# so it is cleared on the same machine and replicated out again.
+			_knock_left -= delta
+			if _knock_left <= 0.0:
+				sync_knock = ""
+				_apply_state_colour()
 		if _predicted_left > 0.0:
 			_predicted_left -= delta
 			if _predicted_left <= 0.0:
@@ -597,14 +616,24 @@ func apply_force_event(event: Dictionary) -> void:
 	if not is_local() or state == State.DEAD or sync_dead:
 		return
 	# 4-chapter, in one call: the push scaled by the pusher's strength against
-	# our weight, divided by what our own strength braces against it. Standing
-	# still, a strong body is moved less; in the air there is nothing to brace
-	# with and the push lands whole.
-	var change := ForceSystem.change_for(
-		event, stats.total_weight(), get_ratio(), is_grounded_state())
-	if grab != null:
-		# 7-6: being pushed frees a held body and empties a holder's hands. The
-		# force then applies to whatever state that left us in.
+	# our weight. v4 deleted the term that let our own strength hold part of a
+	# push back, so strength no longer shortens this -- it decided the verdict
+	# below instead.
+	var change := ForceSystem.change_for(event, stats.total_weight())
+	# v4's knockback verdict, ruled by the server before the event was sent. We
+	# apply what we were handed and never work one out for ourselves. Absent
+	# means nobody ruled -- a force raised with no server in the loop -- and
+	# then the old rule stands: the push lands whole.
+	var launched := bool(event.get("knock_launched", true))
+	if not launched:
+		# Within tolerance: we hold our ground. Only the horizontal is kept,
+		# the existing slide window carries it, and nothing below stuns us.
+		change.y = 0.0
+	_show_knock(event, launched)
+	if grab != null and launched:
+		# 7-6: being pushed frees a held body and empties a holder's hands --
+		# but only a push that launched us. 결정 2: a body that slid keeps what
+		# it is carrying, and the server's hold table agrees with this.
 		grab.on_force_received()
 	if climb != null and climb.is_climbing():
 		# Knocked off the wall rather than pushed along it.
@@ -633,16 +662,43 @@ func apply_force_event(event: Dictionary) -> void:
 		velocity += change
 	else:
 		velocity = change
-		if change.y > ForceSystem.UPWARD_LAUNCH:
+		if launched:
+			# Over the tolerance: this is leaving the ground, so it leaves the
+			# ground properly. Without the floor the up component is whatever
+			# the push's own angle gave it, and a flat shove would have read as
+			# a launch while the body never came off the floor -- which is the
+			# one thing the two words have to tell apart.
+			if velocity.y < Tuning.values.launch_min_up_speed:
+				velocity.y = Tuning.values.launch_min_up_speed
 			change_state(State.AIRBORNE)
-		# B-d: whether this hurt, and whether it stuns, was decided by the
-		# server before the event was sent. stun_apply is that verdict.
-		var stun := float(event.get("stun_apply", 0.0))
-		if stun > 0.0:
-			_apply_stun(stun)
-	print("PLAYGROUND_FORCE peer=%s power=%.2f airborne=%s hp=%.0f vel=(%.2f, %.2f, %.2f) y=%.2f" % [
-		name, change.length(), state == State.AIRBORNE, hp,
+			# B-d: whether this hurt, and whether it stuns, was decided by the
+			# server before the event was sent. stun_apply is that verdict,
+			# and v4 only fills it in for a launch.
+			var stun := float(event.get("stun_apply", 0.0))
+			if stun > 0.0:
+				_apply_stun(stun)
+	print("PLAYGROUND_FORCE peer=%s power=%.2f verdict=%s airborne=%s hp=%.0f vel=(%.2f, %.2f, %.2f) y=%.2f" % [
+		name, change.length(), "launched" if launched else "slid",
+		state == State.AIRBORNE, hp,
 		velocity.x, velocity.y, velocity.z, global_position.y])
+
+
+# The debug readout the work order asks for: the last force event's h_speed
+# against the tolerance it was compared with, over the target's head. On the
+# owner's synchronizer rather than a local label, because the person who wants
+# to read it is usually the one who did the pushing.
+func _show_knock(event: Dictionary, launched: bool) -> void:
+	if not event.has("knock_tolerance"):
+		return
+	if not bool(event.get("knock_judged", true)):
+		# Nothing to compare: a push with no horizontal part is not knockback.
+		return
+	sync_knock = "%.1f / %.1f %s" % [
+		float(event.get("knock_h_speed", 0.0)),
+		float(event.get("knock_tolerance", 0.0)),
+		"튕겨나감" if launched else "미끄러짐"]
+	_knock_left = KNOCK_SHOW_TIME
+	_apply_state_colour()
 
 
 func _apply_stun(seconds: float) -> void:
@@ -821,3 +877,5 @@ func _apply_state_colour() -> void:
 			_label.text += " (%s?)" % PREDICT_NAMES.get(predicted_action, "동작")
 		if overhead_note != "":
 			_label.text += "\n" + overhead_note
+		if sync_knock != "":
+			_label.text += "\n" + sync_knock

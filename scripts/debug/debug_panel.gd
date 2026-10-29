@@ -108,6 +108,20 @@ func _build_ui() -> void:
 		"strength": null, "weight": null, "gear": null}))
 	column.add_child(follow)
 
+	# H-2: the per-race seats. They are arrays indexed by race rather than
+	# fields, so the loop below that builds a slider per float does not see
+	# them; one slider per race each, built here.
+	column.add_child(_heading("종족 배수 (각자 로컬)"))
+	for field in ["race_tolerance_mult", "race_move_mult"]:
+		for kind in Races.all_kinds():
+			var table: PackedFloat32Array = Tuning.values.get(field)
+			if kind >= table.size():
+				continue
+			column.add_child(_slider(
+				"%s[%s]" % [field, Races.label_for(kind)],
+				table[kind], 0.0, 3.0,
+				func(value: float) -> void: _set_race_mult(field, kind, value)))
+
 	column.add_child(_heading("튜닝 (각자 로컬)"))
 	var pull := Button.new()
 	pull.text = "호스트 튜닝 받아오기"
@@ -180,6 +194,17 @@ func _check(field: String, value: bool) -> CheckBox:
 		Tuning.values.set(field, on)
 		Tuning.notify_changed())
 	return box
+
+
+# Written back into the array rather than onto a field of its own: the race id
+# is the index, which is what keeps the four numbers from drifting apart.
+func _set_race_mult(field: String, kind: int, value: float) -> void:
+	var table: PackedFloat32Array = Tuning.values.get(field)
+	if kind < 0 or kind >= table.size():
+		return
+	table[kind] = value
+	Tuning.values.set(field, table)
+	Tuning.notify_changed()
 
 
 # One door for both sliders and the reset button.

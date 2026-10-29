@@ -257,7 +257,7 @@ func apply_force_event(event: Dictionary) -> void:
 	if not direction.is_finite():
 		return
 	freeze = false
-	var change := ForceSystem.change_for(event, weight, 1.0, false)
+	var change := ForceSystem.change_for(event, weight)
 	linear_velocity = change
 	angular_velocity = Vector3(randf_range(-4.0, 4.0), 0.0, randf_range(-4.0, 4.0))
 	_hit_times.clear()

@@ -38,6 +38,23 @@ func ratio_mult(ratio: float, k: float) -> float:
 		values.ratio_mult_min, values.ratio_mult_max)
 
 
+# v4's per-race seats. Read through here rather than indexed in place, so a
+# race id that is out of range (an old save, a client naming a race this build
+# does not have) reads as 1.0 instead of crashing the force door.
+func race_tolerance_mult(kind: int) -> float:
+	return _race_mult(values.race_tolerance_mult, kind)
+
+
+func race_move_mult(kind: int) -> float:
+	return _race_mult(values.race_move_mult, kind)
+
+
+func _race_mult(table: PackedFloat32Array, kind: int) -> float:
+	if kind < 0 or kind >= table.size():
+		return 1.0
+	return maxf(table[kind], 0.0)
+
+
 func notify_changed() -> void:
 	tuning_changed.emit()
 

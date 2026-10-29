@@ -109,11 +109,21 @@ extends Resource
 # up by this much, which is what makes one player a step for another.
 @export var shove_ally_launch_angle_deg: float = 50.0
 # 4-chapter. k_push scales the push by the pusher's strength against the
-# target's weight; k_brace is how much of the push the target's own strength
-# holds back. They used to borrow ratio_k_jump, which is the jump's number and
-# had no business here.
+# target's weight. It used to borrow ratio_k_jump, which is the jump's number
+# and had no business here. v4 deleted the term that let the target's own
+# strength hold part of the push back: strength buys the tolerance below now,
+# not a shorter distance.
 @export var k_push: float = 0.35
-@export var k_brace: float = 0.30
+# v4's knockback tolerance. The threshold a body's own strength buys it, in
+# metres per second of horizontal dv: under it the body slides and holds its
+# ground, over it the body is launched. 0.12 is the work order's placeholder --
+# a human (60) tolerates 7.2 m/s -- and whether it is the right one is a
+# feel-check question, not something to tune here.
+@export var tolerance_per_strength: float = 0.12
+# How much upward speed a launch gets at the least, so that being launched is
+# always leaving the ground rather than a fast slide that happens to be called
+# one.
+@export var launch_min_up_speed: float = 2.0
 # How long a body may stand on another body's head before sliding off it.
 @export var head_stomp_time: float = 0.5
 # 4-chapter says a push on the ground becomes the body's velocity. The ground
@@ -137,6 +147,15 @@ extends Resource
 @export var server_speed_tolerance: float = 1.25
 @export var ally_ground_damage: bool = true
 @export var ally_ground_stun: bool = true
+
+# v4's per-race multipliers, indexed by Races.Kind (human, elf, dwarf, orc).
+# Seats, not balance: every race is at 1.0 and the numbers that belong in them
+# are feel-check questions 8 and 9. Arrays rather than four fields each so the
+# index is the race id and nothing has to be kept in step by hand.
+@export var race_tolerance_mult: PackedFloat32Array = PackedFloat32Array([1.0, 1.0, 1.0, 1.0])
+# The elf's move-speed passive, whose shape is undecided; a plain multiplier is
+# the one form that can hold the seat without deciding anything.
+@export var race_move_mult: PackedFloat32Array = PackedFloat32Array([1.0, 1.0, 1.0, 1.0])
 
 @export_group("Controls")
 # 5-chapter smart key, shared by the jump and the dash (and whatever gets a

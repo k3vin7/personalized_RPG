@@ -108,6 +108,7 @@ func run(world: Node3D) -> void:
 	await _second_push_check()
 	await _escape_checks()
 	await _exception_checks()
+	await _tolerance_hold_checks()
 	await _client_carry_jump_check()
 	await _stats_authority_checks()
 	await _race_table()
@@ -615,6 +616,88 @@ func _rock_versus_player_check() -> void:
 		closest, Rock.radius_for(rock.weight) + Player.BODY_RADIUS, hp_before, victim.hp, moved])
 	expect(victim.hp < hp_before, "a_thrown_rock_hurts_a_person")
 	expect(moved > 0.15, "and_knocks_them_back")
+	# H-2: and it went through v4's comparison on the way, like every other
+	# force. A rock in flight carries no one's strength, so this is the one
+	# force whose dv has no multiplier -- and it is still judged.
+	var hit_knock: Dictionary = _judge.last_knock.get(_client_peer(), {})
+	note("the rock hit's verdict: kind=%d h_speed %.2f vs tolerance %.2f -> %s" % [
+		int(hit_knock.get("kind", -1)), float(hit_knock.get("h_speed", 0.0)),
+		float(hit_knock.get("tolerance", 0.0)),
+		"launched" if bool(hit_knock.get("launched", true)) else "slid"])
+	expect(int(hit_knock.get("kind", -1)) == ForceSystem.Kind.KNOCKBACK,
+		"a_rock_hit_goes_through_the_tolerance_comparison")
+	expect(bool(hit_knock.get("judged", false)), "and_was_actually_compared")
+
+
+# ----------------- 결정 2: a slide keeps its hands, a launch empties them (H-2)
+
+# The two halves of v4's verdict, on the same body with the same push, with
+# only the body's own strength changed. Nothing here drops the rock by hand:
+# the launch becomes airborne and the hold table's existing rule takes it, which
+# is what the work order asks to be checked rather than re-implemented.
+func _tolerance_hold_checks() -> void:
+	var rock := _world.get_node("Rock_0") as Rock
+	# The slide carries the holder sideways with the rock in its hand, and the
+	# legs before this one leave rocks lying about wherever they landed. At
+	# 200 ms one of them was in the lane: the held rock struck it, and a held
+	# thing that is hit is dropped -- the old rule, firing for the right reason
+	# on the wrong rock. Put them all back on their spawn spots first, which
+	# are 5 m clear of the lane this check uses.
+	await tick_request(func() -> void:
+		for index in 6:
+			var other := _world.get_node_or_null("Rock_%d" % index) as Rock
+			if other == null or other == rock:
+				continue
+			other.freeze = false
+			other.global_position = other.home
+			other.linear_velocity = Vector3.ZERO
+			other.angular_velocity = Vector3.ZERO)
+	await _wait(0.5)
+	await _park_self(HOME)
+	expect(await _take(rock), "took_a_rock_for_the_tolerance_checks")
+
+	# Strong enough that the shove is inside its tolerance.
+	_judge.harness_set_stats(_local, 150.0)
+	await _wait(0.4)
+	await _shove_self()
+	await _wait(ServerAuthority.HOLD_LOST_GRACE + 0.6)
+	var slid: Dictionary = (_judge.last_knock.get(_peer_id, {}) as Dictionary).duplicate()
+	note("holding, inside the tolerance: h_speed %.2f vs %.2f -> %s, still holding=%s, state %s" % [
+		float(slid.get("h_speed", 0.0)), float(slid.get("tolerance", 0.0)),
+		"launched" if bool(slid.get("launched", true)) else "slid",
+		_local.grab.is_holding(), Player.State.keys()[_local.state]])
+	expect(not bool(slid.get("launched", true)), "the_push_on_the_holder_was_a_slide")
+	expect(_local.grab.is_holding(), "a_holder_that_slid_keeps_what_it_holds")
+	expect(_local.state != Player.State.STUNNED, "and_the_holder_is_not_stunned")
+
+	# Weak enough that the same shove throws it -- but still strong enough to
+	# lift a 5 kg rock, so what empties the hands is the launch and not the
+	# lift limit.
+	_judge.harness_set_stats(_local, 20.0)
+	await _wait(0.4)
+	await _shove_self()
+	await _wait(ServerAuthority.HOLD_LOST_GRACE + 0.8)
+	var hurled: Dictionary = (_judge.last_knock.get(_peer_id, {}) as Dictionary).duplicate()
+	note("holding, over the tolerance: h_speed %.2f vs %.2f -> %s, still holding=%s" % [
+		float(hurled.get("h_speed", 0.0)), float(hurled.get("tolerance", 0.0)),
+		"launched" if bool(hurled.get("launched", true)) else "slid",
+		_local.grab.is_holding()])
+	expect(bool(hurled.get("launched", false)), "the_second_push_on_the_holder_was_a_launch")
+	expect(not _local.grab.is_holding(), "a_holder_that_was_launched_drops_it")
+	_judge.harness_clear_stats(_local)
+	await _wait(1.0)
+
+
+# One shove's worth of force at this body, from the server, through the one
+# door. A human's strength behind it so the number is the one the 4x4 table
+# shows for 인간 -> 인간.
+func _shove_self() -> void:
+	await tick_request(func() -> void:
+		_judge.send_force(_local, ForceSystem.make_event(
+			ForceSystem.Kind.SHOVE,
+			(Vector3(1.0, 0.0, 0.0) + Vector3.UP * Tuning.values.shove_up_bias).normalized(),
+			Tuning.values.shove_power, 60.0, 1, false,
+			Tuning.values.shove_damage, Tuning.values.shove_stun_time)))
 
 
 # ------------------------- a thrown team mate can be pushed again in the air

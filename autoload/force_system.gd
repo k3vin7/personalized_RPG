@@ -18,9 +18,6 @@ enum Kind {
 	DEBUG,
 }
 
-const UPWARD_LAUNCH := 0.5
-
-
 # Stage D: every event carries an id and the time it was made, so a force can
 # be pointed at in a log and in the move check's history rather than described.
 static var _next_id := 0
@@ -108,22 +105,61 @@ func power_for(event: Dictionary, total_weight: float) -> float:
 		strength / maxf(total_weight, 0.1), Tuning.values.k_push)
 
 
-# 4-chapter's brace: what the target's own strength holds back. Standing, a
-# strong body is moved less by the same push; in the air or on a wall there is
-# nothing to brace against and it is the full push.
+# v4 deleted the term that let the target hold part of a push back. Its own
+# strength no longer shortens the distance it is pushed -- only its weight
+# does, and that is already in power_for. What strength decides now is the
+# knockback tolerance below: whether the body holds its ground at all.
 #
-#     brace = grounded ? ratio_mult(target_ratio, k_brace) : 1.0
+# The whole of the push, in the one place every push comes through:
 #
-func brace_for(target_ratio: float, grounded: bool) -> float:
-	if not grounded:
-		return 1.0
-	return maxf(Tuning.ratio_mult(target_ratio, Tuning.values.k_brace), 0.01)
-
-
-# The whole of 4-chapter's push, in the one place every push comes through:
+#     dv = direction x power
 #
-#     dv = direction x power / brace
-#
-func change_for(event: Dictionary, total_weight: float, target_ratio: float, grounded: bool) -> Vector3:
+func change_for(event: Dictionary, total_weight: float) -> Vector3:
 	var direction: Vector3 = event.get("direction", Vector3.ZERO)
-	return direction * (power_for(event, total_weight) / brace_for(target_ratio, grounded))
+	return direction * power_for(event, total_weight)
+
+
+# v4's knockback tolerance: the threshold the target's own strength buys it.
+#
+#     tolerance = target_strength x tolerance_per_strength x race_tolerance_mult
+#
+func tolerance_for(target_strength: float, race_mult: float) -> float:
+	# Blocking is out of scope for stage H: 막는 중이면 여기서 보정한다
+	# (자세 완성도만큼 허용치를 올리고 스태미나를 깎는다).
+	var per: float = maxf(Tuning.values.tolerance_per_strength, 0.0)
+	return maxf(target_strength, 0.0) * per * maxf(race_mult, 0.0)
+
+
+# The comparison, in the same function every force already goes through. The
+# server calls this and stamps the answer into the event; the owner applies the
+# verdict it was handed and never works one out for itself.
+#
+#     h_speed = |dv's horizontal part|
+#     h_speed <= tolerance -> slide (stays on the ground, keeps what it holds)
+#     h_speed >  tolerance -> launch (full dv, lifted to launch_min_up_speed)
+#
+# Only a body standing on the ground can hold its ground. In the air or on a
+# wall the v3 rules stand, so those always read as launched.
+#
+# A force with no horizontal push at all is not knockback and is not judged:
+# "judged" says so, and the owner then applies it whole. Read literally the
+# table would swallow a straight-up throw entirely -- h_speed 0 is inside every
+# tolerance, and a slide throws the upward part away -- which would delete a
+# working feature the revision never asked about. Flagged in the H-2 report.
+func judge_knockback(
+		event: Dictionary,
+		total_weight: float,
+		target_strength: float,
+		race_mult: float,
+		grounded: bool) -> Dictionary:
+	var change := change_for(event, total_weight)
+	var h_speed := Vector2(change.x, change.z).length()
+	var tolerance := tolerance_for(target_strength, race_mult)
+	var direction: Vector3 = event.get("direction", Vector3.ZERO)
+	var judged := Vector2(direction.x, direction.z).length_squared() > 0.0001
+	return {
+		"h_speed": h_speed,
+		"tolerance": tolerance,
+		"judged": judged,
+		"launched": (not judged) or (not grounded) or h_speed > tolerance,
+	}

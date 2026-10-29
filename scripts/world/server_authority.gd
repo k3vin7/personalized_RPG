@@ -149,6 +149,9 @@ var move_warnings := 0
 # built from the same rows.
 const FORCE_HISTORY_MAX := 64
 var force_history: Array[Dictionary] = []
+# H-2: the last knockback verdict per peer, for the harness to read. Server
+# only, like the ruling itself.
+var last_knock := {}
 
 
 func _ready() -> void:
@@ -470,8 +473,8 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 	var peer := actor.get_multiplayer_authority()
 	if actor.sync_dead:
 		return null
-	# Stage D: a shove goes out in the air as well. There is nothing to brace
-	# against up there, which is the target's problem, not the pusher's.
+	# Stage D: a shove goes out in the air as well. A body up there cannot hold
+	# its ground, which is the target's problem, not the pusher's.
 	if float(_shove_cooldown.get(peer, 0.0)) > 0.0:
 		return null
 	_shove_cooldown[peer] = Tuning.values.shove_cooldown
@@ -906,12 +909,21 @@ func send_force(target: Node, event: Dictionary) -> void:
 	})
 	if force_history.size() > FORCE_HISTORY_MAX:
 		force_history.remove_at(0)
+	# v4: the knockback verdict, ruled here and carried in the event. It has to
+	# be decided before the hold table is touched, because what happens to a
+	# hold is the first thing the verdict decides.
+	var launched := true
+	if target is Player:
+		launched = _rule_knockback(target as Player, event)
 	var holder_peer := holder_of(target)
-	if holder_peer != 0:
+	if holder_peer != 0 and launched:
 		_end_hold(holder_peer, "target_pushed")
 	if target is Player:
 		var person_peer := (target as Player).get_multiplayer_authority()
-		if _holds.has(person_peer):
+		# 결정 2: only a body that is launched empties its hands. A body that
+		# slid held its ground, so it keeps what it was carrying -- and it is
+		# this table that decides, not the holder's own machine.
+		if _holds.has(person_peer) and launched:
 			_end_hold(person_peer, "holder_pushed")
 		# B-d: the damage and the stun are decided here and the HP is written
 		# here. What goes out to the owner is the push, and a stun to apply.
@@ -943,9 +955,47 @@ func _rule_hurt(target: Player, event: Dictionary) -> void:
 		server_damage(target, damage, "force")
 	if target.sync_dead:
 		return
+	# 결정 2: a slide is not a stun. The damage above is taken either way --
+	# holding your ground does not mean the shove missed -- but the body that
+	# stayed on its feet keeps acting.
+	if not bool(event.get("knock_launched", true)):
+		return
 	var stun := float(event.get("stun_time", 0.0))
 	if stun > 0.0 and (not ally or Tuning.values.ally_ground_stun):
 		event["stun_apply"] = stun
+
+
+# v4's tolerance comparison. The one place it is decided, on the server, with
+# the answer stamped into the event the owner is about to be handed. Returns
+# whether the body is launched, which is also what the hold table reads.
+#
+# last_knock is the harness's read of it: the verdict as the server made it,
+# per peer, so a check can assert on the ruling rather than on a log line.
+func _rule_knockback(target: Player, event: Dictionary) -> bool:
+	var verdict := ForceSystem.judge_knockback(
+		event,
+		target.stats.total_weight(),
+		target.stats.strength,
+		Tuning.race_tolerance_mult(target.stats.race),
+		target.is_grounded_state())
+	event["knock_h_speed"] = float(verdict["h_speed"])
+	event["knock_tolerance"] = float(verdict["tolerance"])
+	event["knock_launched"] = bool(verdict["launched"])
+	event["knock_judged"] = bool(verdict["judged"])
+	last_knock[target.get_multiplayer_authority()] = {
+		"id": int(event.get("id", 0)),
+		"kind": int(event.get("kind", -1)),
+		"h_speed": float(verdict["h_speed"]),
+		"tolerance": float(verdict["tolerance"]),
+		"launched": bool(verdict["launched"]),
+		"judged": bool(verdict["judged"]),
+	}
+	print("PLAYGROUND_KNOCK target=%s id=%d h_speed=%.2f tolerance=%.2f verdict=%s judged=%s grounded=%s" % [
+		target.name, int(event.get("id", 0)),
+		float(verdict["h_speed"]), float(verdict["tolerance"]),
+		"launched" if bool(verdict["launched"]) else "slid",
+		bool(verdict["judged"]), target.is_grounded_state()])
+	return bool(verdict["launched"])
 
 
 # ------------------------------------------------------------------ vitals
@@ -1195,10 +1245,12 @@ func move_allowance(player: Player) -> Vector2:
 func _remember_force(player: Player, event: Dictionary) -> void:
 	var peer := player.get_multiplayer_authority()
 	var watch: Dictionary = _move_watch.get(peer, {})
-	# The same arithmetic the target will do, brace included, so the allowance
-	# matches what the body is actually about to be given.
-	var change := ForceSystem.change_for(event, player.stats.total_weight(),
-		player.get_ratio(), player.is_grounded_state())
+	# The same arithmetic the target will do, so the allowance matches what the
+	# body is actually about to be given -- including v4's slide, which throws
+	# the vertical away and so needs no vertical allowance at all.
+	var change := ForceSystem.change_for(event, player.stats.total_weight())
+	if not bool(event.get("knock_launched", true)):
+		change.y = 0.0
 	watch["h"] = maxf(float(watch.get("h", 0.0)), Vector2(change.x, change.z).length())
 	watch["v"] = maxf(float(watch.get("v", 0.0)), absf(change.y))
 	watch["hold"] = FORCE_MEMORY

@@ -1001,9 +1001,9 @@ func _cursor_ground_point() -> Variant:
 # walk, lowers the jump and shortens the dash by the same formula that makes a
 # heavy character slower than a light one. The flat 70 percent and the outright
 # ban on jumping, dashing and shoving while holding something are gone with it.
+# H-2: one copy of the formula, on the body. This was the second one.
 func move_speed() -> float:
-	return Tuning.values.base_move_speed * Tuning.ratio_mult(
-		player.stats.ratio(), Tuning.values.ratio_k_speed)
+	return player.get_move_speed()
 
 
 func _click_to_target() -> void:

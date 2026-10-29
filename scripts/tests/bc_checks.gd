@@ -297,10 +297,20 @@ func _exception_checks() -> void:
 	await get_tree().create_timer(1.0).timeout
 
 	# 2. The holder is pushed: the force door lets go before the force lands.
+	# H-2 (결정 2): only a push that launches does this. The old numbers here
+	# were a push of 4.1 m/s against a tolerance of 7.2, which under v4 is a
+	# body holding its ground -- so the push is now one that clears the
+	# tolerance. The other half, a holder that slides and keeps its rock, is
+	# measured in stage E's _tolerance_hold_checks.
 	var pushed := _released("holder_pushed")
+	# Read off this body's own tolerance rather than written down: an earlier
+	# leg leaves the strength slider at 150, and a number picked by hand was a
+	# launch for a plain human and a slide for that one.
+	var over := ForceSystem.tolerance_for(
+		_local.stats.strength, Tuning.race_tolerance_mult(_local.stats.race)) * 2.0
 	expect(await _hold_then(rock, func() -> void:
 		_judge.send_force(_local, ForceSystem.make_event(
-			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.2, 0.0), 6.0, 10.0, 1, false, 0.0, 0.0))), "hold_taken_for_push_case")
+			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.2, 0.0), over, 60.0, 1, false, 0.0, 0.0))), "hold_taken_for_push_case")
 	await get_tree().create_timer(0.3).timeout
 	expect(_judge.hold_count() == 0 and _released("holder_pushed") > pushed, "e5_holder_pushed_released")
 	await get_tree().create_timer(1.0).timeout

@@ -99,8 +99,7 @@ func apply_force_event(event: Dictionary) -> void:
 	# Stage D: in the air the push is added, not written over. A scarecrow was
 	# the one body that still overwrote, so a second shove while it was flying
 	# replaced the first one instead of bending its arc.
-	var change := ForceSystem.change_for(
-		event, WEIGHT, 1.0, is_on_floor())
+	var change := ForceSystem.change_for(event, WEIGHT)
 	if is_on_floor():
 		velocity = change
 	else:

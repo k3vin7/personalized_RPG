@@ -1,7 +1,7 @@
 extends Node
 
-# Stage D, measured: the shove as a rectangle, in the air, with a recoil; the
-# brace; a team mate launched off a push; a head as a platform; and the two
+# Stage D, measured: the shove as a rectangle, in the air, with a recoil; v4's
+# knockback tolerance; a team mate launched off a push; a head as a platform; and the two
 # things the work order asks for beside them -- whether the 5 m gap can be
 # crossed by two players together, and how far a dash jump reaches.
 
@@ -93,7 +93,8 @@ func run(world: Node3D) -> void:
 	await _event_shape_checks()
 	await _rectangle_checks()
 	await _air_and_recoil_checks()
-	await _brace_checks()
+	await _tolerance_checks()
+	await _race_table_checks()
 	await _ally_launch_checks()
 	await _dummy_air_check()
 	await _head_platform_checks()
@@ -234,27 +235,137 @@ func _air_and_recoil_checks() -> void:
 	await _wait(Tuning.values.shove_cooldown + 0.4)
 
 
-# --------------------------------------------------------------- the brace
+# ------------------------------------------- v4's knockback tolerance (H-2)
 
-func _brace_checks() -> void:
+func _tolerance_checks() -> void:
+	# Same weight, two very different strengths. v4 took the target's strength
+	# out of the distance entirely -- it buys a tolerance, not a shorter slide
+	# -- so the two have to land on the same number. The check this replaces
+	# asserted the opposite, which is what v4 changed.
 	var mate := await _place_pair(Vector3(1.0, 0.0, 0.0))
-	# Same push twice: once against an ordinary body, once against a stronger
-	# one. H-1: the mate's strength is set on the server, which owns it now --
-	# it used to be set on the mate's own machine, which is exactly the thing
-	# v4 took away. 60 is a human; 120 is double.
-	_judge.harness_set_stats(mate, 60.0)
+	_judge.harness_set_stats(mate, 60.0, 80.0)
 	await _wait(0.5)
 	var weak := await _shove_east(mate)
+	var weak_knock: Dictionary = _judge.last_knock.get(_client_peer(), {}).duplicate()
 	await _wait(Tuning.values.shove_cooldown + 0.6)
 	mate = await _place_pair(Vector3(1.0, 0.0, 0.0))
-	_judge.harness_set_stats(mate, 120.0)
+	_judge.harness_set_stats(mate, 120.0, 80.0)
 	await _wait(0.5)
 	var strong := await _shove_east(mate)
-	note("brace: strength 60 moved %.2f m, strength 120 moved %.2f m (k_brace %.2f)" % [
-		weak["moved"], strong["moved"], Tuning.values.k_brace])
-	expect(float(strong["moved"]) < float(weak["moved"]) - 0.05, "a_stronger_body_is_moved_less_on_the_ground")
+	var strong_knock: Dictionary = _judge.last_knock.get(_client_peer(), {}).duplicate()
+	note("same weight 80kg: strength 60 moved %.2f m (h_speed %.2f vs tolerance %.2f), strength 120 moved %.2f m (h_speed %.2f vs tolerance %.2f)" % [
+		weak["moved"], float(weak_knock.get("h_speed", 0.0)), float(weak_knock.get("tolerance", 0.0)),
+		strong["moved"], float(strong_knock.get("h_speed", 0.0)), float(strong_knock.get("tolerance", 0.0))])
+	expect(absf(float(weak_knock.get("h_speed", 0.0)) - float(strong_knock.get("h_speed", 0.0))) < 0.01,
+		"the_same_weight_is_given_the_same_dv_whatever_its_strength")
+	expect(absf(float(weak["moved"]) - float(strong["moved"])) < 0.25,
+		"and_moves_the_same_distance")
 	_judge.harness_clear_stats(mate)
 	await _wait(Tuning.values.shove_cooldown + 0.5)
+
+	# A slide: inside the tolerance, so no stun, and the damage is taken all
+	# the same. 결정 2, measured rather than read.
+	mate = await _place_pair(Vector3(1.0, 0.0, 0.0))
+	_judge.harness_set_stats(mate, 150.0, 80.0)
+	await _wait(0.5)
+	var slid := await _shove_east(mate)
+	var slid_knock: Dictionary = _judge.last_knock.get(_client_peer(), {}).duplicate()
+	note("inside the tolerance: h_speed %.2f <= %.2f, verdict=%s, moved %.2f m, hp -%.0f, state %s" % [
+		float(slid_knock.get("h_speed", 0.0)), float(slid_knock.get("tolerance", 0.0)),
+		"launched" if bool(slid_knock.get("launched", true)) else "slid",
+		slid["moved"], slid["hp"], Player.State.keys()[mate.state]])
+	expect(not bool(slid_knock.get("launched", true)), "a_push_inside_the_tolerance_is_a_slide")
+	expect(mate.state != Player.State.STUNNED, "a_body_that_slid_is_not_stunned")
+	expect(mate.state != Player.State.AIRBORNE, "and_stays_on_the_ground")
+	expect(float(slid["hp"]) > 0.0, "and_still_takes_the_damage")
+	_judge.harness_clear_stats(mate)
+	await _wait(Tuning.values.shove_cooldown + 0.5)
+
+	# And a launch: over the tolerance, off the ground, stunned.
+	mate = await _place_pair(Vector3(1.0, 0.0, 0.0))
+	_judge.harness_set_stats(mate, 1.0, 80.0)
+	await _wait(0.5)
+	var hurled := await _shove_east(mate)
+	var hurled_knock: Dictionary = _judge.last_knock.get(_client_peer(), {}).duplicate()
+	note("over the tolerance: h_speed %.2f > %.2f, verdict=%s, moved %.2f m, state %s, y %.2f" % [
+		float(hurled_knock.get("h_speed", 0.0)), float(hurled_knock.get("tolerance", 0.0)),
+		"launched" if bool(hurled_knock.get("launched", true)) else "slid",
+		hurled["moved"], Player.State.keys()[mate.state], mate.global_position.y])
+	expect(bool(hurled_knock.get("launched", false)), "a_push_over_the_tolerance_is_a_launch")
+	expect(float(hurled["moved"]) > float(slid["moved"]), "and_goes_further_than_the_slide")
+	_judge.harness_clear_stats(mate)
+	await _wait(Tuning.values.shove_cooldown + 0.5)
+
+	# The recoil goes through the same comparison. It is the one force a body
+	# asks to be given, so it is the one that could have grown an exception.
+	var recoil: Dictionary = _judge.last_knock.get(1, {})
+	note("the pusher's own recoil: kind=%d h_speed %.2f vs tolerance %.2f -> %s" % [
+		int(recoil.get("kind", -1)), float(recoil.get("h_speed", 0.0)),
+		float(recoil.get("tolerance", 0.0)),
+		"launched" if bool(recoil.get("launched", true)) else "slid"])
+	expect(int(recoil.get("kind", -1)) == ForceSystem.Kind.RECOIL,
+		"the_recoil_went_through_the_tolerance_comparison")
+
+	# A client cannot state its own verdict. ForceSystem only believes peer 1,
+	# so a forged event aimed at the host's body is dropped at the door.
+	mate = await _place_pair(Vector3(1.0, 0.0, 0.0))
+	var stood := _local.global_position
+	var before := int((_judge.last_knock.get(1, {}) as Dictionary).get("id", 0))
+	client_forge_force.rpc_id(_client_peer(), _local.get_path())
+	await _wait(0.8)
+	var after := int((_judge.last_knock.get(1, {}) as Dictionary).get("id", 0))
+	var shifted := Vector2(_local.global_position.x - stood.x, _local.global_position.z - stood.z).length()
+	note("a client's forged force event: host moved %.2f m, last verdict id %d -> %d" % [
+		shifted, int(before), int(after)])
+	expect(shifted < 0.3, "a_forged_force_from_a_client_moves_nobody")
+	expect(int(before) == int(after), "and_no_verdict_was_made_for_it")
+	await _wait(0.4)
+
+
+# The work order's 4x4: every race pushing every race, with the dv, the
+# tolerance and the verdict. Measured rather than worked out, because the dv
+# depends on the pusher's strength over the target's whole weight and that is
+# the sum the table exists to show.
+func _race_table_checks() -> void:
+	var rows := PackedStringArray()
+	var launched_any := false
+	var slid_any := false
+	for pusher in Races.all_kinds():
+		for target in Races.all_kinds():
+			var mate := await _place_pair(Vector3(1.0, 0.0, 0.0))
+			_judge.harness_set_race(_local, pusher)
+			_judge.harness_set_race(mate, target)
+			await _wait(0.5)
+			var hit := await _shove_east(mate)
+			var knock: Dictionary = _judge.last_knock.get(_client_peer(), {})
+			var launched := bool(knock.get("launched", true))
+			launched_any = launched_any or launched
+			slid_any = slid_any or not launched
+			rows.append("%s -> %s: dv %.2f, tolerance %.2f, %s, moved %.2f m" % [
+				Races.label_for(pusher), Races.label_for(target),
+				float(knock.get("h_speed", 0.0)), float(knock.get("tolerance", 0.0)),
+				"튕겨나감" if launched else "미끄러짐", hit["moved"]])
+			await _wait(Tuning.values.shove_cooldown + 0.4)
+	for row in rows:
+		note("table " + row)
+	expect(rows.size() == 16, "the_four_by_four_table_is_complete")
+	expect(launched_any and slid_any, "the_table_has_both_verdicts_in_it")
+	_judge.harness_set_race(_local, Races.DEFAULT)
+	_judge.harness_set_race(_judge.actor_for(_client_peer()), Races.DEFAULT)
+	await _wait(0.6)
+
+
+# Sent from the client on purpose: a hand-made event, with a verdict in it, at
+# a body the client does not own.
+@rpc("authority", "call_remote", "reliable")
+func client_forge_force(path: NodePath) -> void:
+	var event := ForceSystem.make_event(
+		ForceSystem.Kind.SHOVE, Vector3(1.0, 0.0, 0.0), 40.0, 999.0,
+		multiplayer.get_unique_id(), false, 0.0, 0.0)
+	event["knock_launched"] = false
+	event["knock_h_speed"] = 0.0
+	event["knock_tolerance"] = 999.0
+	ForceSystem.receive_force.rpc_id(1, path, event)
 
 
 # ------------------------------------- a jumping team mate is a step, not a target

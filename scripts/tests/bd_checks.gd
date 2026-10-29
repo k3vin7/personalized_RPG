@@ -188,10 +188,15 @@ func _damage_and_stun_checks() -> void:
 
 	# A shove from a stranger: the server writes the HP and tells the owner to
 	# be stunned. The owner writes neither number.
+	#
+	# H-2 (결정 2): the stun only comes with a launch now, so the push here is
+	# one that clears the target's tolerance. The damage is unchanged -- a body
+	# that holds its ground still takes the hit -- which is what the stage E
+	# slide check measures.
 	var hp_before := client.hp
 	await tick_request(func() -> void:
 		_judge.send_force(client, ForceSystem.make_event(
-			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.1, 0.0), 5.0, 10.0, 1, false,
+			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.1, 0.0), 12.0, 60.0, 1, false,
 			Tuning.values.shove_damage, Tuning.values.shove_stun_time)))
 	# Read inside the stun. shove_stun_time is 0.4 s, so half a second later
 	# the body is correctly standing up again and the check measured nothing.
