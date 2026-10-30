@@ -90,6 +90,7 @@ func _normal_play_check() -> void:
 	await _settle_wait(0.6)
 	client_play.rpc_id(_client_peer())
 	var before := _judge.move_warnings
+	var corrections_before := _judge.move_corrections
 	# Our own ordinary play, at the same time as theirs: walk, jump, dash.
 	for leg in range(3):
 		_local.movement.set_target(_local.global_position + Vector3(3.0 if leg % 2 == 0 else -3.0, 0.0, 0.0))
@@ -114,6 +115,7 @@ func _normal_play_check() -> void:
 	note("move warnings during ordinary play: %d (tolerance=%.2f)" % [
 		warnings, Tuning.server.server_speed_tolerance])
 	expect(warnings == 0, "no_move_warnings_in_normal_play")
+	expect(_judge.move_corrections == corrections_before, "no_corrections_in_normal_play")
 
 	# And the check is not asleep: a body teleported without the server being
 	# told is what it is there to notice.

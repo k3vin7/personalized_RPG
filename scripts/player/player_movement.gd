@@ -891,7 +891,16 @@ func request_dash() -> bool:
 	_clear_intent()
 	player.velocity.y = 0.0
 	player.change_state(Player.State.DASH)
+	# N-2: told, not asked. The dash is ours to start; the notice is what lets
+	# the server count one inside the cooldown against us.
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.DASH, {})
 	return true
+
+
+# N-2: a correction from the server ends a dash where the body is put.
+func cancel_dash() -> void:
+	if is_dashing():
+		_end_dash()
 
 
 func is_dashing() -> bool:

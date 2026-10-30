@@ -91,6 +91,7 @@ func run(world: Node3D) -> void:
 		return
 	expect(await _wait_stage("client_ready"), "both_peers_present")
 	await _tuning_checks()
+	await _correction_checks()
 	print("N_RESULT lag=%s peer=%d checks=%d failures=%d" % [_label, _peer_id, _checks, _failures])
 	finish.rpc(_failures)
 	await _wait(1.0)
@@ -185,6 +186,94 @@ func _tuning_checks() -> void:
 		expect(absf(float(_reports["gravity"]) - gravity) < 0.001, "and_the_replica_is_back_too")
 
 
+# ------------------------------------------ N-2: the move check puts a body back
+
+# The cheat on the client: writing its own position every step at three times
+# the walk. The server sees a sprint no strength explains, and after
+# MOVE_CORRECT_SAMPLES of it tells the owner where it last was.
+var _cheat_left := 0.0
+var _cheat_speed := 0.0
+var _cheat_received := 0
+var _dashes_made := 0
+
+
+func _physics_process(delta: float) -> void:
+	if _cheat_left <= 0.0 or _local == null:
+		return
+	_cheat_left -= delta
+	if _local.corrections_received > _cheat_received:
+		# Put back: the cheat stops here, so what is reported is where the
+		# correction left the body, not where the next frame of cheating did.
+		_cheat_left = 0.0
+		return
+	_local.global_position += Vector3(_cheat_speed * delta, 0.0, 0.0)
+
+
+func _correction_checks() -> void:
+	var corrections := _judge.move_corrections
+	# The honest things first: a walk, two dashes a cooldown apart, a jump.
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = HOME
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target())
+	await _wait(0.4)
+	_local.movement.set_target(HOME + Vector3(3.0, 0.0, 0.0))
+	await _wait(1.0)
+	for _leg in range(2):
+		await tick_request(func() -> void:
+			_local.movement.set_aim_override(_local.global_position + Vector3(-4.0, 0.0, 0.0))
+			_local.movement.request_dash())
+		await _wait(Tuning.server.dash_cooldown + 0.3)
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(_local.global_position + Vector3(3.0, 0.0, 0.0))
+		_local.movement.request_jump())
+	await _wait(1.2)
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	expect(_judge.move_corrections == corrections, "honest_walk_dash_and_jump_are_not_corrected")
+
+	# The cheat. The client runs at three times its walk by writing its own
+	# position; the server puts it back and the client stops when it is.
+	client_park.rpc_id(_client_peer(), CLIENT_HOME)
+	await _wait(0.8)
+	var mate := _judge.actor_for(_client_peer())
+	var start := mate.global_position if mate != null else Vector3.ZERO
+	_reports.erase("cheat")
+	client_cheat_run.rpc_id(_client_peer(), 3.0, 2.0)
+	if await _wait_report("cheat", 8.0):
+		var cheat: PackedFloat32Array = _reports["cheat"]
+		var put_back: Vector3 = last_correction_to()
+		var landed := Vector3(cheat[1], cheat[2], cheat[3])
+		note("client sprint x3: corrections received %d (server total +%d), farthest x %.2f from start %.2f, put back to (%.2f, %.2f, %.2f), ended at (%.2f, %.2f, %.2f), gap %.2f m" % [
+			int(cheat[0]), _judge.move_corrections - corrections, cheat[4], start.x,
+			put_back.x, put_back.y, put_back.z, landed.x, landed.y, landed.z,
+			landed.distance_to(put_back)])
+		expect(_judge.move_corrections > corrections, "the_sprint_was_corrected")
+		expect(int(cheat[0]) >= 1, "and_the_client_received_it")
+		expect(landed.distance_to(put_back) < 0.5, "the_body_ended_where_the_server_last_accepted_it")
+		expect(cheat[4] - start.x < 3.0 * Tuning.server.base_move_speed * 0.6,
+			"the_sprint_was_cut_short")
+	corrections = _judge.move_corrections
+
+	# A dash inside the cooldown, three times in a second: the notice is
+	# counted like a sample over the cap, and two of those in a row put the
+	# body back.
+	_reports.erase("dash")
+	client_cheat_dash.rpc_id(_client_peer())
+	if await _wait_report("dash", 8.0):
+		var dash: PackedFloat32Array = _reports["dash"]
+		note("client dashed %d times inside the cooldown: corrections received %d (server total +%d)" % [
+			int(dash[0]), int(dash[1]), _judge.move_corrections - corrections])
+		expect(_judge.move_corrections > corrections, "dashes_inside_the_cooldown_are_corrected")
+	# Back on a mark, with the check told.
+	await tick_request(func() -> void: _judge.server_respawn(mate))
+	await _wait(0.8)
+
+
+func last_correction_to() -> Vector3:
+	return _judge.last_correction.get("to", Vector3.INF) if _judge != null else Vector3.INF
+
+
 # A jump straight up from HOME, its apex above the floor it left.
 func _standing_apex() -> float:
 	await tick_request(func() -> void:
@@ -257,6 +346,45 @@ func client_forge_gravity() -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_report_field(field: String) -> void:
 	report.rpc_id(1, field, Tuning.server.get(field))
+
+
+# Server -> client. Sprint by writing our own position at `times` the walk for
+# up to `seconds`, stopping the moment a correction arrives, then report
+# [corrections received, final x, y, z, farthest x reached].
+@rpc("authority", "call_remote", "reliable")
+func client_cheat_run(times: float, seconds: float) -> void:
+	_cheat_received = _local.corrections_received
+	_cheat_speed = Tuning.server.base_move_speed * times
+	var farthest := _local.global_position.x
+	_cheat_left = seconds
+	var waited := 0.0
+	while _cheat_left > 0.0 and waited < seconds + 1.0:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		farthest = maxf(farthest, _local.global_position.x)
+	# The correction is a snap; let the body settle where it was put.
+	await _wait(0.4)
+	var at := _local.global_position
+	report.rpc_id(1, "cheat", PackedFloat32Array([
+		_local.corrections_received - _cheat_received, at.x, at.y, at.z, farthest]))
+
+
+# Server -> client. Three dashes with the cooldown zeroed between them, a third
+# of a second apart, then report [dashes made, corrections received].
+@rpc("authority", "call_remote", "reliable")
+func client_cheat_dash() -> void:
+	var received := _local.corrections_received
+	_dashes_made = 0
+	for _dash in range(3):
+		await tick_request(func() -> void:
+			_local.movement._dash_cooldown_left = 0.0
+			_local.movement.set_aim_override(_local.global_position + Vector3(0.0, 0.0, 3.0))
+			if _local.movement.request_dash():
+				_dashes_made += 1)
+		await _wait(0.35)
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	await _wait(0.6)
+	report.rpc_id(1, "dash", PackedFloat32Array([_dashes_made, _local.corrections_received - received]))
 
 
 @rpc("authority", "call_remote", "reliable")

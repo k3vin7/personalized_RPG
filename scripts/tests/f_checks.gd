@@ -93,6 +93,7 @@ func run(world: Node3D) -> void:
 		return
 	expect(await _wait_stage("client_ready"), "both_peers_present")
 	var warnings := _judge.move_warnings
+	var corrections := _judge.move_corrections
 	await _marked_face_checks()
 	await _side_face_checks()
 	await _faded_face_check()
@@ -100,6 +101,7 @@ func run(world: Node3D) -> void:
 	await _click_rule_checks()
 	await _reach_table()
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_f")
+	expect(_judge.move_corrections == corrections, "no_corrections_during_stage_f")
 	print("F_RESULT lag=%s peer=%d checks=%d failures=%d" % [_label, _peer_id, _checks, _failures])
 	finish.rpc(_failures)
 	await _wait(1.0)

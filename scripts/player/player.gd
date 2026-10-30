@@ -45,6 +45,8 @@ const SHADOW_FADE_HEIGHT := 4.0
 
 const TELEPORT_STEP := 2.0
 const TELEPORT_BLIND := 0.2
+# N-2: how many times the server has put this body back. Read by the checks.
+var corrections_received := 0
 
 # Stand-in for animation: the state is readable off the body on both screens.
 const STATE_COLORS := {
@@ -445,6 +447,12 @@ func _physics_process(delta: float) -> void:
 			_stun_left -= delta
 			if _stun_left <= 0.0:
 				change_state(State.IDLE)
+		if _teleport_blind_left > 0.0:
+			# N-2: a correction snaps this body like a teleport, and arriving
+			# inside someone is handled the same way: no collision for a moment.
+			_teleport_blind_left -= delta
+			if _teleport_blind_left <= 0.0:
+				collision_layer = PLAYER_LAYER
 		if _fall_tracking and state == State.AIRBORNE:
 			_fall_peak_y = maxf(_fall_peak_y, global_position.y)
 		if is_grounded_state():
@@ -485,6 +493,25 @@ func _physics_process(delta: float) -> void:
 	_update_shadow()
 	if sync_state != state:
 		change_state(sync_state)
+
+
+# N-2: the server could not explain where this body went, and says where it
+# last could. Pose is still ours -- we do the snapping -- but the order being
+# carried out is dropped with it: a run, a dash, a target. Collision is off for
+# a moment so the arrival does not shove anyone, the same as any teleport.
+func apply_correction(at: Vector3) -> void:
+	if not is_local():
+		return
+	corrections_received += 1
+	if movement != null:
+		movement.cancel_dash()
+		movement.cancel_target()
+	global_position = at
+	velocity = Vector3.ZERO
+	collision_layer = 0
+	_teleport_blind_left = TELEPORT_BLIND
+	print("PLAYGROUND_CORRECTED peer=%s to=(%.2f, %.2f, %.2f) count=%d" % [
+		name, at.x, at.y, at.z, corrections_received])
 
 
 # Set by the movement when a launch is this body's own jump, and cleared the

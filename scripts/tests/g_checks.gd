@@ -87,11 +87,13 @@ func run(world: Node3D) -> void:
 		return
 	expect(await _wait_stage("client_ready"), "both_peers_present")
 	var warnings := _judge.move_warnings
+	var corrections := _judge.move_corrections
 	await _fall_table_checks()
 	await _ally_flag_checks()
 	await _ally_void_checks()
 	await _cliff_respawn_checks()
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_g")
+	expect(_judge.move_corrections == corrections, "no_corrections_during_stage_g")
 	print("G_RESULT peer=%d checks=%d failures=%d" % [_peer_id, _checks, _failures])
 	finish.rpc(_failures)
 	await _wait(1.0)

@@ -40,6 +40,11 @@ enum Intent {
 	# cost is built from lives in it, so a slider is a request: the server
 	# clamps, writes its own copy, and the copy is pushed to every replica.
 	SERVER_TUNING,
+	# N-2: a notice, not a request. The dash is the owner's to start (v4: a
+	# client decides its own move, jump and dash) and it starts at once; this
+	# tells the server so a dash inside the cooldown counts against the body
+	# like a speed over the cap does.
+	DASH,
 }
 
 # Anything that can be picked up joins this group and offers
@@ -115,6 +120,20 @@ const FORCE_MEMORY := 1.5
 # One sample is forgiven after a teleport the server knows about (a respawn, or
 # a harness placing a body). Two, because a sample straddles the jump.
 const MOVE_FORGIVE_SAMPLES := 2
+# N-2: this many samples over the cap in a row, and the owner is put back on the
+# last position the check accepted. Two, like the forgiveness: one sample over
+# is what an honest landing or a packet's worth of lag looks like.
+const MOVE_CORRECT_SAMPLES := 2
+# How many samples to let pass after correcting a remote body: the snap back is
+# seen a round trip later, and until then the body is where it was.
+const MOVE_CORRECT_FORGIVE_REMOTE := 6
+# A dash notice this much inside the cooldown is still an honest one: two
+# notices a cooldown apart arrive with the wire's jitter between them.
+const DASH_COOLDOWN_SLACK := 0.15
+# How long after a dash notice the dash's speed stays in the allowance, past
+# the dash's own duration: two samples for the windows it straddles, and some
+# for the notice and the samples arriving out of step.
+const DASH_WINDOW_SLACK := 0.3
 
 # Found by the player scripts, which are spawned under Players and have no
 # scene-tree relationship to this node.
@@ -151,6 +170,12 @@ var fall_mismatches := 0
 # h/v are the biggest force speeds the server has handed this body lately.
 var _move_watch := {}
 var move_warnings := 0
+# N-2: how many times a body was put back, and where the last one went. Read
+# by the checks; the log line carries the rest.
+var move_corrections := 0
+var last_correction := {}
+# When each peer last said it dashed, for the cooldown.
+var _dash_seen := {}
 # Stage D: the last forces the server handed out, newest last. Each carries the
 # event's id and the time it was made, which is what "힘 이력" asks for: a push
 # can be pointed at rather than described, and the move check's allowance is
@@ -494,6 +519,8 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 			result = _rule_race_mult(payload)
 		Intent.SERVER_TUNING:
 			result = _rule_server_tuning(payload)
+		Intent.DASH:
+			result = _rule_dash(actor)
 	if result == null:
 		return _refuse(sender, kind, "refused")
 	granted_intents += 1
@@ -534,7 +561,7 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 			return _direction_of(payload) != Vector3.ZERO
 		Intent.GRAB:
 			return _target_for(payload) != null
-		Intent.DROP, Intent.ESCAPE, Intent.RESPAWN:
+		Intent.DROP, Intent.ESCAPE, Intent.RESPAWN, Intent.DASH:
 			return true
 		Intent.STATS:
 			# Either field may be absent (leave it alone) or null (follow the
@@ -1388,13 +1415,17 @@ func harness_forgive_move() -> void:
 # together would either excuse a sideways sprint or accuse an honest fall.
 func move_allowance(player: Player) -> Vector2:
 	var tolerance: float = Tuning.server.server_speed_tolerance
-	# Stage C-2: the dash is the leap budget spent sideways, so the fastest a
-	# body may legitimately travel is that, worked out from the same function
-	# the body itself uses.
-	var horizontal := maxf(player.get_move_speed(), player.dash_speed())
+	var peer := player.get_multiplayer_authority()
+	# The walk, and the leap budget a running jump may spend sideways. N-2: the
+	# dash used to sit in here all the time, which let anything up to twenty
+	# metres a second through; now the owner says when it dashes, so the
+	# dash's speed is allowed around that notice and nowhere else.
+	var horizontal := maxf(player.get_move_speed(), player.leap_speed_cap())
+	var now := float(Time.get_ticks_msec()) / 1000.0
+	if now - float(_dash_seen.get(peer, -100.0)) <= _dash_window(player):
+		horizontal = maxf(horizontal, player.dash_speed())
 	# Vertical has two honest sources: our own jump, and gravity acting over
 	# the height the server watched this body reach.
-	var peer := player.get_multiplayer_authority()
 	var watch: Dictionary = _fall_watch.get(peer, {})
 	var drop := maxf(0.0, float(watch.get("peak", player.global_position.y)) - player.global_position.y)
 	# A standing jump now spends the whole budget upward, so the fastest a body
@@ -1409,6 +1440,13 @@ func move_allowance(player: Player) -> Vector2:
 	return Vector2(
 		horizontal * tolerance + float(given.get("h", 0.0)),
 		vertical * tolerance + float(given.get("v", 0.0)))
+
+
+# How long a dash can be seen lasting: the longest dash at its one speed, plus
+# the sample windows it straddles and the slack for the notice.
+func _dash_window(player: Player) -> float:
+	return player.leap_max_range() / maxf(player.dash_speed(), 0.01) \
+		+ MOVE_SAMPLE * 2.0 + DASH_WINDOW_SLACK
 
 
 # Remembered when the server hands out a push, because the push is the reason
@@ -1432,7 +1470,8 @@ func _check_move(player: Player, delta: float) -> void:
 	var peer := player.get_multiplayer_authority()
 	var watch: Dictionary = _move_watch.get(peer, {
 		"at": player.global_position, "left": MOVE_SAMPLE, "forgive": 0,
-		"h": 0.0, "v": 0.0, "hold": 0.0})
+		"h": 0.0, "v": 0.0, "hold": 0.0,
+		"accepted": player.global_position, "speed_over": 0})
 	watch["hold"] = maxf(0.0, float(watch.get("hold", 0.0)) - delta)
 	if float(watch["hold"]) <= 0.0:
 		watch["h"] = 0.0
@@ -1449,29 +1488,109 @@ func _check_move(player: Player, delta: float) -> void:
 	var skip := int(watch.get("forgive", 0)) > 0
 	if skip:
 		watch["forgive"] = int(watch["forgive"]) - 1
-	_move_watch[peer] = watch
-	if skip or elapsed <= 0.0:
-		return
+	# N-2: the exceptions below are places the server put the body itself or
+	# knows it is not moving under its own power, so where it is now is
+	# accepted and the run of over-samples starts again from nothing.
 	# A body that is dead, being carried or standing on a moving hand is not
 	# moving under its own power, and the server is the one that put it there.
-	if player.sync_dead or holder_of(player) != 0:
-		return
 	# On a wall the wall owns the body, and taking hold of one is a documented
 	# one-step placement: the body is put square on the face so that the first
 	# frame of climbing already looks right. That snap is not a sprint, and
 	# climbing itself is slower than walking, which the allowance already
 	# covers. (Measured: an attach reads as 43 m/s for one sample.)
-	if player.state == Player.State.CLIMB or player.state == Player.State.MANTLE:
+	var excepted := skip or elapsed <= 0.0 or player.sync_dead or holder_of(player) != 0 \
+		or player.state == Player.State.CLIMB or player.state == Player.State.MANTLE
+	if excepted:
+		watch["accepted"] = player.global_position
+		watch["speed_over"] = 0
+		_move_watch[peer] = watch
 		return
 	var allowance := move_allowance(player)
 	var horizontal := Vector2(moved.x, moved.z).length() / elapsed
 	var vertical := absf(moved.y) / elapsed
 	if horizontal <= allowance.x and vertical <= allowance.y:
+		watch["accepted"] = player.global_position
+		watch["speed_over"] = 0
+		_move_watch[peer] = watch
 		return
 	move_warnings += 1
 	print("PLAYGROUND_MOVE_WARN peer=%s h=%.2f/%.2f v=%.2f/%.2f over=%.2fs state=%s" % [
 		player.name, horizontal, allowance.x, vertical, allowance.y,
 		elapsed, Player.State.keys()[player.state]])
+	# Inside the memory of a force the server itself handed out, the body is
+	# fast because the server made it so: a warning says the allowance was
+	# short, and that is a tuning matter, not a correction.
+	if float(watch["hold"]) > 0.0:
+		watch["accepted"] = player.global_position
+		watch["speed_over"] = 0
+		_move_watch[peer] = watch
+		return
+	_move_watch[peer] = watch
+	_count_over(peer, "speed")
+
+
+# N-2: the dash notice. Never refused -- the dash has already happened on the
+# owner's machine -- but one inside the cooldown is a sample over the cap, and
+# enough of those in a row put the body back like any other sprint.
+func _rule_dash(actor: Player) -> Variant:
+	var peer := actor.get_multiplayer_authority()
+	var now := float(Time.get_ticks_msec()) / 1000.0
+	var last := float(_dash_seen.get(peer, -100.0))
+	_dash_seen[peer] = now
+	if now - last < Tuning.server.dash_cooldown - DASH_COOLDOWN_SLACK:
+		print("PLAYGROUND_DASH_COOLDOWN_OVER peer=%s gap=%.2f cooldown=%.2f" % [
+			actor.name, now - last, Tuning.server.dash_cooldown])
+		_count_over(peer, "dash_cooldown")
+	else:
+		var watch: Dictionary = _move_watch.get(peer, {})
+		watch["dash_cooldown_over"] = 0
+		_move_watch[peer] = watch
+	return true
+
+
+# One sample the check could not explain. Enough in a row and the body goes
+# back to the last position the check accepted. Each reason keeps its own run:
+# a dash inside the cooldown is not undone by the walking speed between dashes
+# being fine, and a sprint is not undone by an honest dash.
+func _count_over(peer: int, why: String) -> void:
+	var watch: Dictionary = _move_watch.get(peer, {})
+	var key := why + "_over"
+	watch[key] = int(watch.get(key, 0)) + 1
+	if int(watch[key]) >= MOVE_CORRECT_SAMPLES:
+		watch[key] = 0
+		_correct_move(peer, watch, why)
+	_move_watch[peer] = watch
+
+
+# The correction itself: the owner is told where the server last accepted it,
+# and the next samples are let through while the snap back travels. Pose is
+# still the owner's -- the owner does the snapping -- this only says where to.
+func _correct_move(peer: int, watch: Dictionary, why: String) -> void:
+	var player := actor_for(peer)
+	if player == null:
+		return
+	var to: Vector3 = watch.get("accepted", player.global_position)
+	var from := player.global_position
+	move_corrections += 1
+	last_correction = {"peer": peer, "to": to, "from": from, "why": why}
+	print("PLAYGROUND_MOVE_CORRECTED peer=%s why=%s from=(%.2f, %.2f, %.2f) to=(%.2f, %.2f, %.2f) total=%d" % [
+		player.name, why, from.x, from.y, from.z, to.x, to.y, to.z, move_corrections])
+	forgive_move(peer, "", MOVE_FORGIVE_SAMPLES if player.is_local() else MOVE_CORRECT_FORGIVE_REMOTE)
+	if player.is_local():
+		player.apply_correction(to)
+	else:
+		correct_position.rpc_id(peer, to)
+
+
+# Server -> owner. Carries the position the check last accepted; the owner
+# snaps there, stops, and drops whatever order it was carrying out.
+@rpc("any_peer", "call_remote", "reliable")
+func correct_position(at: Vector3) -> void:
+	if not result_is_server_sent("correct_position", multiplayer.get_remote_sender_id()):
+		return
+	var actor := actor_for(multiplayer.get_unique_id())
+	if actor != null and actor.is_local():
+		actor.apply_correction(at)
 
 
 # ------------------------------------------------------------ the exceptions

@@ -98,6 +98,7 @@ func run(world: Node3D) -> void:
 		return
 	expect(await _wait_stage("client_ready"), "both_peers_present")
 	var warnings := _judge.move_warnings
+	var corrections := _judge.move_corrections
 	await _lift_limit_checks()
 	await _one_key_checks()
 	await _carry_weight_checks()
@@ -113,6 +114,7 @@ func run(world: Node3D) -> void:
 	await _stats_authority_checks()
 	await _race_table()
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_e")
+	expect(_judge.move_corrections == corrections, "no_corrections_during_stage_e")
 	await _disconnect_exception_check()
 	print("E_RESULT lag=%s peer=%d checks=%d failures=%d" % [_label, _peer_id, _checks, _failures])
 	await _wait(1.0)
@@ -148,6 +150,9 @@ func _lift_limit_checks() -> void:
 		for weight: float in [40.0, 80.0, 120.0]:
 			var rock: Rock = rocks[weight]
 			await tick_request(func() -> void:
+				# N-2: a rock this size put down beside the body shoves it a
+				# metre in a step; the check is told, like any placement.
+				placed()
 				rock.freeze = false
 				rock.global_position = _local.global_position + Vector3(0.9, -0.3, 0.0)
 				rock.linear_velocity = Vector3.ZERO)
@@ -199,6 +204,7 @@ func _lift_limit_checks() -> void:
 # lifted, wait for the landing before reaching for it.
 func _take(rock: Rock) -> bool:
 	await tick_request(func() -> void:
+		placed()
 		rock.freeze = false
 		rock.global_position = _local.global_position + Vector3(0.9, -0.3, 0.0)
 		rock.linear_velocity = Vector3.ZERO
