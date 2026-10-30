@@ -426,7 +426,7 @@ func _reach_table() -> void:
 			rungs.append("%.1f:%s" % [TimeBoundary.TOP_Y, "yes" if ledge else "no"])
 			if ledge:
 				highest = maxf(highest, TimeBoundary.TOP_Y)
-		var budget := cap * cap / maxf(Tuning.values.gravity, 0.01)
+		var budget := cap * cap / maxf(Tuning.server.gravity, 0.01)
 		var reach_at_one := (budget * budget - 1.0) / (2.0 * budget)
 		note("strength %.0f: cap %.2f, standing apex %.2f m, ledge the budget allows from 1 m out %.2f m | rungs %s -> highest actually reached %.1f m" % [
 			strength, cap, budget * 0.5, reach_at_one, " ".join(rungs), highest])

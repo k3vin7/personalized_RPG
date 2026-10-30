@@ -181,7 +181,7 @@ func _jump_checks() -> void:
 	note("cursor jump: 2 m -> height %.2f air %.2fs launch %.2f miss %.2f | 4 m -> height %.2f air %.2fs launch %.2f miss %.2f (cap %.2f, reach %.2f, gravity %.1f)" % [
 		near["height"], near["air"], near["plan_speed"], near["miss"],
 		far["height"], far["air"], far["plan_speed"], far["miss"],
-		cap, reach, Tuning.values.gravity])
+		cap, reach, Tuning.server.gravity])
 	expect(float(near["height"]) < float(far["height"]) - 0.1, "a_nearer_cursor_is_a_lower_jump")
 	expect(float(near["miss"]) < 0.3, "the_two_metre_jump_landed_on_the_cursor")
 	expect(float(far["miss"]) < 0.3, "the_four_metre_jump_landed_on_the_cursor")
@@ -190,9 +190,9 @@ func _jump_checks() -> void:
 	var standing := await _jump_at(HOME, HOME)
 	note("cursor under the feet: height %.2f air %.2fs travel %.2f launch %.2f (sampled %.2f) (cap %.2f -> apex %.2f, inplace_radius %.2f)" % [
 		standing["height"], standing["air"], standing["travel"], standing["plan_speed"], standing["speed"], cap,
-		cap * cap / (2.0 * Tuning.values.gravity), Tuning.values.jump_inplace_radius])
+		cap * cap / (2.0 * Tuning.server.gravity), Tuning.server.jump_inplace_radius])
 	# The whole budget, upward: the apex a launch at the cap reaches.
-	var cap_apex := cap * cap / (2.0 * Tuning.values.gravity)
+	var cap_apex := cap * cap / (2.0 * Tuning.server.gravity)
 	expect(absf(float(standing["height"]) - cap_apex) < 0.2, "the_in_place_jump_spends_the_whole_budget")
 	expect(absf(float(standing["plan_speed"]) - cap) < 0.05, "and_launches_at_the_cap")
 	expect(float(standing["travel"]) < 0.3, "the_in_place_jump_goes_nowhere_sideways")
@@ -282,7 +282,7 @@ func _rung_aim(rung: Node3D, height: float) -> Vector3:
 func _dash_to(home: Vector3, cursor_distance: float) -> Dictionary:
 	# dash_cooldown is a second: without waiting it out the next dash is
 	# refused and the check measures a body standing still.
-	await get_tree().create_timer(Tuning.values.dash_cooldown + 0.2).timeout
+	await get_tree().create_timer(Tuning.server.dash_cooldown + 0.2).timeout
 	await tick_request(func() -> void:
 		placed()
 		_local.global_position = home
@@ -312,7 +312,7 @@ func _dash_checks() -> void:
 	var cap := _local.leap_speed_cap()
 	var speed := _local.dash_speed()
 	var reach := _local.movement.dash_max_distance()
-	expect(absf(speed - cap * Tuning.values.dash_speed_mult) < 0.01, "the_dash_speed_is_the_cap_times_the_multiplier")
+	expect(absf(speed - cap * Tuning.server.dash_speed_mult) < 0.01, "the_dash_speed_is_the_cap_times_the_multiplier")
 	# The dash and the longest jump cover the same ground.
 	expect(absf(reach - _local.leap_max_range()) < 0.01, "the_dash_reaches_as_far_as_the_longest_jump")
 
@@ -320,14 +320,14 @@ func _dash_checks() -> void:
 	var asked_far := await _dash_to(HOME, 20.0)
 	var asked_short := await _dash_to(HOME, 0.4)
 	note("dash, bare human: speed %.2f (= cap %.2f x %.1f) max %.2f m (= leap range) | cursor 2 m -> %.2f m in %.2f s | cursor 0.4 m -> %.2f m" % [
-		speed, cap, Tuning.values.dash_speed_mult, reach,
+		speed, cap, Tuning.server.dash_speed_mult, reach,
 		asked_two["distance"], asked_two["seconds"], asked_short["distance"]])
 	note("dash full: %.2f m in %.2f s = %.1f m/s (stage C was 4.00 m in 0.18 s = 22.2 m/s)" % [
 		asked_far["distance"], asked_far["seconds"],
 		float(asked_far["distance"]) / maxf(float(asked_far["seconds"]), 0.01)])
 	expect(absf(float(asked_two["distance"]) - 2.0) < 0.35, "cursor_two_metres_stops_at_two_metres")
 	expect(absf(float(asked_far["distance"]) - reach) < 0.4, "a_far_cursor_stops_at_the_budget")
-	expect(absf(float(asked_short["distance"]) - Tuning.values.dash_min_distance) < 0.35, "a_near_cursor_still_travels_the_minimum")
+	expect(absf(float(asked_short["distance"]) - Tuning.server.dash_min_distance) < 0.35, "a_near_cursor_still_travels_the_minimum")
 
 	# Strength is in the cap, so it moves the speed and the distance together.
 	# H-1: a human is 60, so double it rather than the old 20 -- the point of
@@ -619,7 +619,7 @@ func _gap_edge_check() -> void:
 	var stopped := _local.global_position
 	note("gap edge: stopped at z=%.2f (lip is -2.00), intent=(%.2f, %.2f) after %.2fs (hop %.2f, ledge margin %.2f)" % [
 		stopped.z, intent.x, intent.z, watched,
-		Tuning.values.jump_min_hop_height, Tuning.values.jump_ledge_margin])
+		Tuning.server.jump_min_hop_height, Tuning.server.jump_ledge_margin])
 	expect(stopped.z > -2.6 and stopped.z < 0.6, "the_click_stopped_at_the_lip")
 	expect(_local.state != Player.State.DEAD, "the_click_did_not_walk_it_off")
 	expect(intent.length() > 0.5 and intent.z < -0.5, "the_blocked_click_left_its_direction_behind")
@@ -743,8 +743,8 @@ func _stamina_check() -> void:
 		_local.movement.request_dash())
 	var after := _local.stamina
 	note("stamina: %.1f -> %.1f per dash (cost=%.1f, regen=%.1f/s)" % [
-		before, after, Tuning.values.stamina_dash_cost, Tuning.values.stamina_regen])
-	expect(before - after >= Tuning.values.stamina_dash_cost - 0.5, "a_dash_costs_stamina")
+		before, after, Tuning.server.stamina_dash_cost, Tuning.server.stamina_regen])
+	expect(before - after >= Tuning.server.stamina_dash_cost - 0.5, "a_dash_costs_stamina")
 	# And with none left it does not go.
 	await tick_request(func() -> void: _local.stamina = 1.0)
 	var refused := true
@@ -768,9 +768,9 @@ func _vitals_checks() -> void:
 	var judge := _judge
 	# Checked against what the server holds, not against what this file thinks
 	# the numbers are: the formula is the claim, the table is the input.
-	var hp_k := ServerAuthority.vitals_coeff("hp_per_endurance")
-	var st_base := ServerAuthority.vitals_coeff("stamina_base")
-	var st_k := ServerAuthority.vitals_coeff("stamina_per_endurance")
+	var hp_k := Tuning.server.hp_per_endurance
+	var st_base := Tuning.server.stamina_base
+	var st_k := Tuning.server.stamina_per_endurance
 	note("vitals coefficients: hp_per_endurance %.3f stamina_base %.1f stamina_per_endurance %.3f" % [
 		hp_k, st_base, st_k])
 	for kind: int in Races.all_kinds():
@@ -807,7 +807,7 @@ func _vitals_checks() -> void:
 	await tick_request(func() -> void: judge.harness_set_race(_local, Races.Kind.DWARF))
 	await _wait(1.0)
 	note("human -> dwarf after 1 s: stamina %.1f / %.1f (regen %.0f/s)" % [
-		_local.stamina, _local.stats.max_stamina, Tuning.values.stamina_regen])
+		_local.stamina, _local.stats.max_stamina, Tuning.server.stamina_regen])
 	expect(absf(_local.stamina - _local.stats.max_stamina) < 0.5, "the_stamina_pool_regrows_to_110")
 	await tick_request(func() -> void: judge.harness_set_race(_local, Races.Kind.HUMAN))
 	await _wait(0.3)
@@ -838,13 +838,13 @@ func _vitals_checks() -> void:
 			expect(absf(seen[0] - mate.stats.max_hp) < 0.01, "the_client_computes_the_same_max_hp")
 			expect(absf(seen[1] - mate.stats.max_stamina) < 0.01, "and_the_same_max_stamina")
 			expect(absf(forged[0] - mate.stats.max_hp) < 0.01, "a_clients_own_coefficient_write_changes_nothing")
-		expect(absf(ServerAuthority.vitals_coeff("hp_per_endurance") - hp_k) < 0.0001,
+		expect(absf(Tuning.server.hp_per_endurance - hp_k) < 0.0001,
 			"a_clients_push_of_the_table_is_refused")
 
 	# The slider is a request. Up: the max grows, the hp does not. Down: the hp
 	# is cut to fit. Both reach the client.
 	await tick_request(func() -> void: ServerAuthority.submit_intent(_local,
-		ServerAuthority.Intent.VITALS_TUNING, {"field": "hp_per_endurance", "value": 2.0}))
+		ServerAuthority.Intent.SERVER_TUNING, {"field": "hp_per_endurance", "value": 2.0}))
 	await _wait(0.5)
 	note("hp_per_endurance 2.0: human max_hp %.1f hp %.1f" % [_local.stats.max_hp, _local.hp])
 	expect(absf(_local.stats.max_hp - 140.0) < 0.01, "a_slider_request_changes_the_servers_table")
@@ -855,14 +855,14 @@ func _vitals_checks() -> void:
 			var seen_after: PackedFloat32Array = after[0]
 			expect(absf(seen_after[0] - 160.0) < 0.01, "the_new_coefficient_reached_the_client")
 	await tick_request(func() -> void: ServerAuthority.submit_intent(_local,
-		ServerAuthority.Intent.VITALS_TUNING, {"field": "hp_per_endurance", "value": 1.0}))
+		ServerAuthority.Intent.SERVER_TUNING, {"field": "hp_per_endurance", "value": 1.0}))
 	await _wait(0.5)
 	note("hp_per_endurance 1.0: human max_hp %.1f hp %.1f" % [_local.stats.max_hp, _local.hp])
 	expect(absf(_local.hp - 70.0) < 0.01, "a_smaller_max_takes_the_hp_down_with_it")
 
 	# Back where the rest of the stage expects things.
 	await tick_request(func() -> void: ServerAuthority.submit_intent(_local,
-		ServerAuthority.Intent.VITALS_TUNING, {"field": "hp_per_endurance", "value": hp_k}))
+		ServerAuthority.Intent.SERVER_TUNING, {"field": "hp_per_endurance", "value": hp_k}))
 	if mate != null:
 		await tick_request(func() -> void: judge.harness_set_race(mate, Races.Kind.HUMAN))
 	await _wait(0.5)
@@ -892,11 +892,10 @@ func _ask_client_vitals() -> Array:
 @rpc("authority", "call_remote", "reliable")
 func client_report_vitals() -> void:
 	var own := PackedFloat32Array([_local.stats.max_hp, _local.stats.max_stamina, _local.hp])
-	var was: float = Tuning.values.hp_per_endurance
-	Tuning.values.hp_per_endurance = 9.0
+	# N-1: the replica refuses the write itself, so nothing to put back.
+	Tuning.server.hp_per_endurance = 9.0
 	var forged := PackedFloat32Array([_local.stats.max_hp, _local.stats.max_stamina, _local.hp])
-	Tuning.values.hp_per_endurance = was
-	_judge.push_vitals_tuning.rpc_id(1, {"hp_per_endurance": 9.0})
+	_judge.push_server_tuning.rpc_id(1, {"hp_per_endurance": 9.0})
 	report_vitals.rpc_id(1, own, forged)
 
 

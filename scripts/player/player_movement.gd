@@ -112,7 +112,7 @@ func cancel_target() -> void:
 # the ground. 4-chapter: the push becomes the velocity, and it has to survive
 # long enough to be a push rather than a frame of noise.
 func note_pushed() -> void:
-	_pushed_left = Tuning.values.force_slide_time
+	_pushed_left = Tuning.server.force_slide_time
 
 
 func press_jump() -> void:
@@ -408,7 +408,7 @@ func _ground_step(delta: float) -> void:
 		# it rubs off against the ground instead, and a fresh click cancels it
 		# because set_target() clears the window.
 		_pushed_left -= delta
-		var rub: float = Tuning.values.force_slide_friction * delta
+		var rub: float = Tuning.server.force_slide_friction * delta
 		player.velocity.x = move_toward(player.velocity.x, 0.0, rub)
 		player.velocity.z = move_toward(player.velocity.z, 0.0, rub)
 	else:
@@ -429,7 +429,7 @@ func _ground_step(delta: float) -> void:
 	if player.is_on_floor():
 		player.velocity.y = -0.5
 	else:
-		player.velocity.y -= Tuning.values.gravity * delta
+		player.velocity.y -= Tuning.server.gravity * delta
 	player.move_and_slide()
 	# Asked before the airborne transition below: a body balanced on another
 	# body's head loses floor contact constantly, and letting that read as
@@ -461,7 +461,7 @@ func _stand_on_head(delta: float) -> bool:
 	if floor_body is Player:
 		# A different head is a new stand, with a full window.
 		if _head_stand_left <= 0.0 or _head_body != floor_body:
-			_head_stand_left = Tuning.values.head_stomp_time
+			_head_stand_left = Tuning.server.head_stomp_time
 			_head_body = floor_body as Node3D
 			print("PLAYGROUND_HEAD_STAND on=%s by=%s for=%.2f" % [
 				floor_body.name, player.name, _head_stand_left])
@@ -488,7 +488,7 @@ func _stand_on_head(delta: float) -> bool:
 	player.floor_snap_length = 0.0
 	player.change_state(Player.State.AIRBORNE)
 	print("PLAYGROUND_HEAD_SLIDE off=%s by=%s window=%.2f" % [
-		stepped_off.name, player.name, Tuning.values.head_stomp_time])
+		stepped_off.name, player.name, Tuning.server.head_stomp_time])
 	return true
 
 
@@ -536,7 +536,7 @@ func _floor_body() -> Node:
 # how long the whole arc lasts. Returned without a heading because the plan
 # below is the thing that knows which way it is facing.
 func _launch_for(apex: float, distance: float, rise: float) -> Vector2:
-	var gravity: float = maxf(Tuning.values.gravity, 0.01)
+	var gravity: float = maxf(Tuning.server.gravity, 0.01)
 	var up_speed := sqrt(2.0 * gravity * maxf(apex, 0.0))
 	var fall := maxf(apex - rise, 0.0)
 	var flight := up_speed / gravity + sqrt(2.0 * fall / gravity)
@@ -544,14 +544,14 @@ func _launch_for(apex: float, distance: float, rise: float) -> Vector2:
 
 
 func jump_plan(aim: Vector3) -> Dictionary:
-	var gravity: float = maxf(Tuning.values.gravity, 0.01)
+	var gravity: float = maxf(Tuning.server.gravity, 0.01)
 	var from := player.global_position
 	var to := aim
 	var flat := Vector3(to.x - from.x, 0.0, to.z - from.z)
 	var distance := flat.length()
 	var cap := player.leap_speed_cap()
 
-	if distance <= Tuning.values.jump_inplace_radius:
+	if distance <= Tuning.server.jump_inplace_radius:
 		# Straight up, and the whole budget goes into it: "all of it up is a
 		# standing jump" from the same chapter. That makes a standing jump the
 		# highest thing a body can do, which it was not while this used
@@ -603,9 +603,9 @@ func jump_plan(aim: Vector3) -> Dictionary:
 
 	var t: float = clampf(distance / maxf(reach, 0.01), 0.0, 1.0)
 	var apex_at_reach := reach * 0.25
-	var apex: float = lerpf(Tuning.values.jump_min_hop_height, apex_at_reach, t)
+	var apex: float = lerpf(Tuning.server.jump_min_hop_height, apex_at_reach, t)
 	# Over the lip rather than into it.
-	apex = maxf(apex, rise + Tuning.values.jump_ledge_margin)
+	apex = maxf(apex, rise + Tuning.server.jump_ledge_margin)
 	# The height the distance asks for is a preference, not a requirement. When
 	# it costs more than the budget -- which a step always eventually does,
 	# because clearing it needs the apex above it -- the cheapest launch that
@@ -682,7 +682,7 @@ func _stunned_step(delta: float) -> void:
 		player.velocity.z = move_toward(player.velocity.z, 0.0, 10.0 * delta)
 		player.velocity.y = -0.5
 	else:
-		player.velocity.y -= Tuning.values.gravity * delta
+		player.velocity.y -= Tuning.server.gravity * delta
 	player.move_and_slide()
 
 
@@ -731,7 +731,7 @@ func _air_step(delta: float) -> void:
 	# No self input on the horizontal: the arc is decided at launch. Only the
 	# body's facing still follows the cursor.
 	_face_cursor(delta)
-	player.velocity.y -= Tuning.values.gravity * delta
+	player.velocity.y -= Tuning.server.gravity * delta
 	player.move_and_slide()
 	if player.is_on_floor():
 		player.floor_snap_length = player.default_snap_length()
@@ -835,7 +835,7 @@ func _clear_climb_request() -> void:
 func _try_attach_climb() -> void:
 	if _climb_wall == null or player.climb == null:
 		return
-	if climb_request_distance() > Tuning.values.climb_attach_distance:
+	if climb_request_distance() > Tuning.server.climb_attach_distance:
 		return
 	var body := _climb_wall
 	var point := _climb_point
@@ -864,7 +864,7 @@ func dash_plan() -> Dictionary:
 		return {"distance": 0.0, "landing": player.global_position, "clamped": false}
 	var wanted := _flat_distance(player.global_position, point as Vector3)
 	var reach := dash_max_distance()
-	var distance: float = clampf(wanted, Tuning.values.dash_min_distance, reach)
+	var distance: float = clampf(wanted, Tuning.server.dash_min_distance, reach)
 	return {
 		"distance": distance,
 		"landing": player.global_position + direction * distance,
@@ -879,14 +879,14 @@ func request_dash() -> bool:
 	var plan := dash_plan()
 	if float(plan["distance"]) <= 0.0:
 		return false
-	if player.stamina < Tuning.values.stamina_dash_cost:
+	if player.stamina < Tuning.server.stamina_dash_cost:
 		print("PLAYGROUND_DASH_NO_STAMINA peer=%s stamina=%.1f" % [player.name, player.stamina])
 		return false
-	player.stamina -= Tuning.values.stamina_dash_cost
+	player.stamina -= Tuning.server.stamina_dash_cost
 	_dash_direction = cursor_direction()
 	_dash_total = float(plan["distance"])
 	_dash_left = _dash_total
-	_dash_cooldown_left = Tuning.values.dash_cooldown
+	_dash_cooldown_left = Tuning.server.dash_cooldown
 	cancel_target()
 	_clear_intent()
 	player.velocity.y = 0.0
@@ -913,7 +913,7 @@ func _dash_step(delta: float) -> void:
 	var frame_speed := step / maxf(delta, 0.0001)
 	player.velocity.x = _dash_direction.x * frame_speed
 	player.velocity.z = _dash_direction.z * frame_speed
-	player.velocity.y -= Tuning.values.gravity * delta
+	player.velocity.y -= Tuning.server.gravity * delta
 	player.move_and_slide()
 	# A wall ends it on the spot, and so does running out of ground.
 	if player.is_on_wall() or _dash_left <= 0.0:

@@ -112,10 +112,10 @@ func _fall_table_checks() -> void:
 # ----------------------------------------------------------- ally_fall_death
 
 func _ally_flag_checks() -> void:
-	var was: bool = Tuning.values.ally_fall_death
+	var was: bool = Tuning.server.ally_fall_death
 
 	# Off: a party member's launch may hurt you all the way down to 1.
-	Tuning.values.ally_fall_death = false
+	Tuning.server.ally_fall_death = false
 	var spared := await _drop(LETHAL_DROP, true)
 	note("ally launch, flag off: drop %.1fm damage=%.1f hp=%.1f dead=%s" % [
 		LETHAL_DROP, spared["damage"], spared["hp"], spared["dead"]])
@@ -124,32 +124,32 @@ func _ally_flag_checks() -> void:
 	expect(float(spared["damage"]) > 0.0, "and_the_landing_damage_is_still_taken")
 
 	# On: the same launch finishes the job.
-	Tuning.values.ally_fall_death = true
+	Tuning.server.ally_fall_death = true
 	var killed := await _drop(LETHAL_DROP, true)
 	note("ally launch, flag on: drop %.1fm damage=%.1f hp=%.1f dead=%s" % [
 		LETHAL_DROP, killed["damage"], killed["hp"], killed["dead"]])
 	expect(bool(killed["dead"]), "the_same_launch_kills_with_the_flag_on")
 
 	# And a fall nobody else caused is never spared, whatever the flag says.
-	Tuning.values.ally_fall_death = false
+	Tuning.server.ally_fall_death = false
 	var alone := await _drop(LETHAL_DROP, false)
 	note("own fall, flag off: drop %.1fm hp=%.1f dead=%s" % [
 		LETHAL_DROP, alone["hp"], alone["dead"]])
 	expect(bool(alone["dead"]), "a_fall_of_your_own_still_kills_with_the_flag_off")
 
-	Tuning.values.ally_fall_death = was
+	Tuning.server.ally_fall_death = was
 	await _revive()
 
 
 # ------------------------------------- out of the world, after an ally launch
 
 func _ally_void_checks() -> void:
-	var was: bool = Tuning.values.ally_fall_death
+	var was: bool = Tuning.server.ally_fall_death
 
 	# The cliff is not landing damage, so the flag has no say in it: a party
 	# member's launch that puts a body out of the world kills it either way.
 	for flag in [false, true]:
-		Tuning.values.ally_fall_death = flag
+		Tuning.server.ally_fall_death = flag
 		await _revive()
 		await _ally_push()
 		await tick_request(func() -> void:
@@ -163,9 +163,9 @@ func _ally_void_checks() -> void:
 			"on" if flag else "off", _hp, _dead])
 		expect(_dead, "an_ally_launch_into_the_void_kills_with_the_flag_%s" % (
 			"on" if flag else "off"))
-		await _wait(Tuning.values.respawn_delay + 1.5)
+		await _wait(Tuning.server.respawn_delay + 1.5)
 
-	Tuning.values.ally_fall_death = was
+	Tuning.server.ally_fall_death = was
 	await _revive()
 
 
@@ -197,13 +197,13 @@ func _cliff_respawn_checks() -> void:
 	expect(died, "a_cliff_fall_is_a_death")
 
 	# And the way back.
-	await _wait(Tuning.values.respawn_delay + 2.0)
+	await _wait(Tuning.server.respawn_delay + 2.0)
 	note("after respawn: dead=%s hp=%.0f y=%.2f moved_from_home=%.2f" % [
 		client.sync_dead, client.hp, client.global_position.y,
 		client.global_position.distance_to(home)])
 	expect(not client.sync_dead, "and_the_body_comes_back")
 	expect(client.hp == client.stats.max_hp, "with_its_health_back")
-	expect(client.global_position.y > Tuning.values.kill_plane_y, "and_back_in_the_world")
+	expect(client.global_position.y > Tuning.server.kill_plane_y, "and_back_in_the_world")
 
 	# Both screens. The client reports where it thinks its own body is; the
 	# host reads the same body from its own copy of the world.

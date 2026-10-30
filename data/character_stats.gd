@@ -61,18 +61,17 @@ var height_cm: float:
 	get:
 		return race_data().height_cm
 
-# H-3: derived, like the abilities above. The coefficients are the server's --
-# ServerAuthority.vitals_coeff reads the server's table on every peer, never
-# this peer's own tuning copy -- so a client that moves its own slider changes
-# nothing about how much it can take.
+# H-3: derived, like the abilities above. The coefficients are in the server's
+# tuning table (Tuning.server), which on a client is a replica only the server's
+# push may write -- so a client that moves its own slider changes nothing about
+# how much it can take.
 var max_hp: float:
 	get:
-		return endurance * ServerAuthority.vitals_coeff("hp_per_endurance")
+		return endurance * Tuning.server.hp_per_endurance
 
 var max_stamina: float:
 	get:
-		return ServerAuthority.vitals_coeff("stamina_base") \
-			+ endurance * ServerAuthority.vitals_coeff("stamina_per_endurance")
+		return Tuning.server.stamina_base + endurance * Tuning.server.stamina_per_endurance
 
 
 func total_weight() -> float:

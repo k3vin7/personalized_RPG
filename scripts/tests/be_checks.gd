@@ -112,7 +112,7 @@ func _normal_play_check() -> void:
 	await _settle_wait(1.6)
 	var warnings := _judge.move_warnings - before
 	note("move warnings during ordinary play: %d (tolerance=%.2f)" % [
-		warnings, Tuning.values.server_speed_tolerance])
+		warnings, Tuning.server.server_speed_tolerance])
 	expect(warnings == 0, "no_move_warnings_in_normal_play")
 
 	# And the check is not asleep: a body teleported without the server being
@@ -133,8 +133,8 @@ func _agreement_checks() -> void:
 	await _place_both(victim)
 	await tick_request(func() -> void:
 		_judge.send_force(victim, ForceSystem.make_event(
-			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.25, 0.0), Tuning.values.shove_power,
-			10.0, 1, false, Tuning.values.shove_damage, 0.0)))
+			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.25, 0.0), Tuning.server.shove_power,
+			10.0, 1, false, Tuning.server.shove_damage, 0.0)))
 	await _settle_wait(2.5)
 	await _compare_views(victim, "shove")
 
@@ -450,7 +450,7 @@ func client_rock(rock_path: NodePath) -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_escape() -> void:
 	expect(_local.state == Player.State.GRABBED, "client_knows_it_is_held")
-	var presses := int(Tuning.values.grabbed_escape_presses)
+	var presses := int(Tuning.server.grabbed_escape_presses)
 	var pressed := 0
 	for index in range(presses):
 		if index == presses - 1:

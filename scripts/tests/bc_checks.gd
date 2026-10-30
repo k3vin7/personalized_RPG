@@ -128,8 +128,8 @@ func _structure_checks() -> void:
 	# The shove's numbers are the judge's now, so they are tuning values.
 	expect(
 		not _local.movement.has_method("apply_shove")
-			and Tuning.values.get("shove_cooldown") == 0.6
-			and Tuning.values.get("shove_range") == 1.5,
+			and Tuning.server.get("shove_cooldown") == 0.6
+			and Tuning.server.get("shove_range") == 1.5,
 		"shove_ruling_and_numbers_left_the_client")
 	await get_tree().physics_frame
 
@@ -269,7 +269,7 @@ func _escape_checks() -> void:
 	await get_tree().create_timer(0.8).timeout
 	expect(_released("escaped") > escaped, "escape_counted_on_server")
 	expect(_judge.holder_of(victim) == 0 and not _local.grab.is_holding(), "escape_cleared_the_row")
-	expect(_escape_seen > 0 and _escape_seen < int(Tuning.values.grabbed_escape_presses), "escape_progress_replicated_to_client")
+	expect(_escape_seen > 0 and _escape_seen < int(Tuning.server.grabbed_escape_presses), "escape_progress_replicated_to_client")
 
 
 # ------------------------------------------------------------- E-5 exceptions
@@ -527,7 +527,7 @@ func client_rock_hold(rock_path: NodePath) -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_escape() -> void:
 	expect(_local.state == Player.State.GRABBED, "client_sees_itself_grabbed")
-	var presses := int(Tuning.values.grabbed_escape_presses)
+	var presses := int(Tuning.server.grabbed_escape_presses)
 	var from := _local.global_position
 	for index in range(presses):
 		await tick_request(_local.grab.escape_press)
@@ -552,7 +552,7 @@ func client_escape() -> void:
 		lowest = minf(lowest, _local.global_position.y)
 	var pushed := Vector2(_local.global_position.x - from.x, _local.global_position.z - from.z).length()
 	note("escape peak_speed=%.2f pushed=%.2f lowest_y=%.2f recoil_tuning=%.2f" % [
-		peak, pushed, lowest, Tuning.values.escape_recoil_power])
+		peak, pushed, lowest, Tuning.server.escape_recoil_power])
 	expect(_local.state != Player.State.GRABBED, "client_freed_itself")
 	# Measured as distance, not as a speed caught in flight. The push is
 	# protected for force_slide_time and then rubs off, so whether a sampler

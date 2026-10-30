@@ -341,11 +341,11 @@ func get_ratio() -> float:
 
 
 func get_jump_height() -> float:
-	return Tuning.values.base_jump_height * Tuning.ratio_mult(get_ratio(), Tuning.values.ratio_k_jump)
+	return Tuning.server.base_jump_height * Tuning.ratio_mult(get_ratio(), Tuning.server.ratio_k_jump)
 
 
 func get_jump_velocity() -> float:
-	return sqrt(2.0 * Tuning.values.gravity * get_jump_height())
+	return sqrt(2.0 * Tuning.server.gravity * get_jump_height())
 
 
 # DOC (4-chapter, stage C-2): one budget for every leap, and three ways to
@@ -363,11 +363,11 @@ func leap_speed_cap() -> float:
 # The farthest a leap can reach: a launch at the cap, at 45 degrees.
 func leap_max_range() -> float:
 	var cap := leap_speed_cap()
-	return cap * cap / maxf(Tuning.values.gravity, 0.01)
+	return cap * cap / maxf(Tuning.server.gravity, 0.01)
 
 
 func dash_speed() -> float:
-	return leap_speed_cap() * Tuning.values.dash_speed_mult
+	return leap_speed_cap() * Tuning.server.dash_speed_mult
 
 
 # The one move-speed formula. It was written twice -- here and in
@@ -375,13 +375,13 @@ func dash_speed() -> float:
 # number that have to agree, each consistent with itself. H-2 needed to add the
 # race multiplier to it, so PlayerMovement now asks this instead of its own.
 func get_move_speed() -> float:
-	var mult := Tuning.ratio_mult(get_ratio(), Tuning.values.ratio_k_speed)
+	var mult := Tuning.ratio_mult(get_ratio(), Tuning.server.ratio_k_speed)
 	# The race multiplier is the server's table, replicated to every peer, so
 	# the speed this body walks at and the speed the server checks it against
 	# come out of the same numbers.
 	var judge := ServerAuthority.instance
 	var race_mult := judge.race_move_mult(stats.race) if judge != null else 1.0
-	return Tuning.values.base_move_speed * mult * race_mult
+	return Tuning.server.base_move_speed * mult * race_mult
 
 
 func default_snap_length() -> float:
@@ -448,7 +448,7 @@ func _physics_process(delta: float) -> void:
 		if _fall_tracking and state == State.AIRBORNE:
 			_fall_peak_y = maxf(_fall_peak_y, global_position.y)
 		if is_grounded_state():
-			stamina = minf(stats.max_stamina, stamina + Tuning.values.stamina_regen * delta)
+			stamina = minf(stats.max_stamina, stamina + Tuning.server.stamina_regen * delta)
 		# A maximum that fell (slider, race) takes the pool down with it.
 		stamina = minf(stamina, stats.max_stamina)
 		sync_stamina = stamina
@@ -684,8 +684,8 @@ func apply_force_event(event: Dictionary) -> void:
 			# the push's own angle gave it, and a flat shove would have read as
 			# a launch while the body never came off the floor -- which is the
 			# one thing the two words have to tell apart.
-			if velocity.y < Tuning.values.launch_min_up_speed:
-				velocity.y = Tuning.values.launch_min_up_speed
+			if velocity.y < Tuning.server.launch_min_up_speed:
+				velocity.y = Tuning.server.launch_min_up_speed
 			change_state(State.AIRBORNE)
 			# B-d: whether this hurt, and whether it stuns, was decided by the
 			# server before the event was sent. stun_apply is that verdict,

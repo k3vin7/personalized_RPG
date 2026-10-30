@@ -82,7 +82,7 @@ func grab() -> bool:
 		return false
 	var offset := aimed.global_position - player.global_position
 	offset.y = 0.0
-	if offset.length() - Player.BODY_RADIUS > Tuning.values.grab_range:
+	if offset.length() - Player.BODY_RADIUS > Tuning.server.grab_range:
 		print("PLAYGROUND_GRAB by=%s target=%s out_of_reach" % [player.name, aimed.name])
 		return false
 	if judge.holder_of(aimed) != 0:
@@ -187,7 +187,7 @@ func drop() -> void:
 func escape_press() -> void:
 	if not is_held():
 		return
-	player.stamina = maxf(0.0, player.stamina - Tuning.values.stamina_escape_press)
+	player.stamina = maxf(0.0, player.stamina - Tuning.server.stamina_escape_press)
 	player.begin_predicted(ServerAuthority.Intent.ESCAPE)
 	ServerAuthority.submit_intent(player, ServerAuthority.Intent.ESCAPE, {})
 
@@ -263,10 +263,10 @@ func _physics_process(delta: float) -> void:
 	if _charging:
 		_charge_left += delta
 		player.stamina = maxf(0.0, player.stamina
-			- Tuning.values.stamina_charge_per_sec * delta)
+			- Tuning.server.stamina_charge_per_sec * delta)
 	elif is_instance_valid(held):
 		player.stamina = maxf(0.0, player.stamina
-			- Tuning.values.stamina_hold_per_sec * delta)
+			- Tuning.server.stamina_hold_per_sec * delta)
 
 	var holder_peer := judge.holder_of(player)
 	var my_target := judge.held_by(player.get_multiplayer_authority())
@@ -329,4 +329,4 @@ func _show_progress(presses: int) -> void:
 	if presses <= 0:
 		player.set_overhead_note("")
 		return
-	player.set_overhead_note("탈출 %d/%d" % [presses, int(Tuning.values.grabbed_escape_presses)])
+	player.set_overhead_note("탈출 %d/%d" % [presses, int(Tuning.server.grabbed_escape_presses)])

@@ -79,6 +79,18 @@ func run(world: Node3D) -> void:
 	Net.leave("B-a 호스트 종료 확인")
 
 
+# The server's answer to a slider, waited for: the replica is written by the
+# push, not by the slider, so on a client it lands a round trip later.
+func _server_value_becomes(field: String, wanted: float, seconds := 3.0) -> bool:
+	var waited := 0.0
+	while waited < seconds:
+		if is_equal_approx(float(Tuning.server.get(field)), wanted):
+			return true
+		await get_tree().create_timer(0.05).timeout
+		waited += 0.05
+	return is_equal_approx(float(Tuning.server.get(field)), wanted)
+
+
 func _local_checks() -> void:
 	var panel := _world.get_node("DebugPanel") as DebugPanel
 	_local.movement.set_aim_override(_local.global_position + Vector3(8.0, 0.0, 0.0))
@@ -87,18 +99,22 @@ func _local_checks() -> void:
 	_local.movement.set_aim_override(_local.global_position)
 	expect(is_zero_approx(panel._preview_launch_velocity().x), "self_aim_preview_vertical")
 	_local.movement.set_aim_override(Vector3.INF)
+	# N-1: these two are server fields, so the slider asks and the value comes
+	# back pushed -- at once on the host, a round trip later on a client.
 	var escape_slider := panel.find_child("grabbed_escape_presses", true, false) as HSlider
 	expect(escape_slider != null and escape_slider.step == 1.0 and escape_slider.value == 5.0, "integer_tuning_slider")
 	if escape_slider != null:
 		escape_slider.value = 6
-		expect(Tuning.values.grabbed_escape_presses == 6, "integer_slider_updates_resource")
+		expect(await _server_value_becomes("grabbed_escape_presses", 6), "integer_slider_updates_resource")
 		escape_slider.value = 5
+		await _server_value_becomes("grabbed_escape_presses", 5)
 	var kill_slider := panel.find_child("kill_plane_y", true, false) as HSlider
 	expect(kill_slider != null and kill_slider.min_value <= -20.0 and kill_slider.value == -20.0, "negative_kill_plane_range")
 	if kill_slider != null:
 		kill_slider.value = -24.0
-		expect(is_equal_approx(Tuning.values.kill_plane_y, -24.0), "negative_slider_updates_resource")
+		expect(await _server_value_becomes("kill_plane_y", -24.0), "negative_slider_updates_resource")
 		kill_slider.value = -20.0
+		await _server_value_becomes("kill_plane_y", -20.0)
 	# B-a's rule -- lethal damage lands on DEAD and nothing overwrites it -- is
 	# unchanged, but B-d moved the ruling: damage is written by the judge when
 	# it sends a force, so the force is sent through the judge rather than

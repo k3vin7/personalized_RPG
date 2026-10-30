@@ -102,7 +102,7 @@ func power_for(event: Dictionary, total_weight: float) -> float:
 		# Environmental force: no one's strength behind it, so no multiplier.
 		return float(event.get("base_power", 0.0))
 	return float(event.get("base_power", 0.0)) * Tuning.ratio_mult(
-		strength / maxf(total_weight, 0.1), Tuning.values.k_push)
+		strength / maxf(total_weight, 0.1), Tuning.server.k_push)
 
 
 # v4 deleted the term that let the target hold part of a push back. Its own
@@ -129,7 +129,7 @@ func change_for(event: Dictionary, total_weight: float) -> Vector3:
 func tolerance_for(target_strength: float, race_mult: float) -> float:
 	# Blocking is out of scope for stage H: 막는 중이면 여기서 보정한다
 	# (자세 완성도만큼 허용치를 올리고 스태미나를 깎는다).
-	var per: float = maxf(Tuning.values.tolerance_per_strength, 0.0)
+	var per: float = maxf(Tuning.server.tolerance_per_strength, 0.0)
 	return maxf(target_strength, 0.0) * per * maxf(race_mult, 0.0)
 
 
@@ -166,7 +166,7 @@ func judge_knockback(
 	var change := change_for(event, total_weight)
 	var h_speed := Vector2(change.x, change.z).length()
 	var tolerance := tolerance_for(target_strength, race_mult)
-	var judged := lift_angle_deg(event) < Tuning.values.knock_lift_angle_deg
+	var judged := lift_angle_deg(event) < Tuning.server.knock_lift_angle_deg
 	return {
 		"h_speed": h_speed,
 		"tolerance": tolerance,

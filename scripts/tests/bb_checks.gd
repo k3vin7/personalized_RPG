@@ -322,7 +322,7 @@ func client_park(point: Vector3) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func client_escape() -> void:
-	var presses := int(Tuning.values.grabbed_escape_presses)
+	var presses := int(Tuning.server.grabbed_escape_presses)
 	expect(_local.state == Player.State.GRABBED, "client_sees_itself_grabbed")
 	for _press in range(presses):
 		await tick_request(_local.grab.escape_press)

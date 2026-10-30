@@ -164,7 +164,7 @@ func _physics_process(delta: float) -> void:
 	if player.state != Player.State.CLIMB:
 		return
 
-	player.stamina = maxf(0.0, player.stamina - Tuning.values.stamina_climb_drain * delta)
+	player.stamina = maxf(0.0, player.stamina - Tuning.server.stamina_climb_drain * delta)
 	if player.stamina <= 0.0:
 		detach(0.5)
 		return
@@ -175,7 +175,7 @@ func _physics_process(delta: float) -> void:
 			_has_target = false
 			player.velocity = Vector3.ZERO
 		else:
-			var step := to_target.normalized() * Tuning.values.climb_speed
+			var step := to_target.normalized() * Tuning.server.climb_speed
 			if not _wall_continues(step * delta):
 				# Ran out of wall to the side; hold position rather than
 				# sliding off the end of it.

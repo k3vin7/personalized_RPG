@@ -36,10 +36,10 @@ enum Intent {
 	# every peer, so the slider is a request and the server's table is the one
 	# that counts -- and the one the server's own move check reads.
 	RACE_MULT,
-	# H-3: the three tuning values HP and stamina are built from. They sit in
-	# PhysicsTuning like every other number, but they enter the server's HP
-	# ruling, so the server's copy is the one everyone computes with.
-	VITALS_TUNING,
+	# N-1: the server's tuning table. Every number a ruling, a trajectory or a
+	# cost is built from lives in it, so a slider is a request: the server
+	# clamps, writes its own copy, and the copy is pushed to every replica.
+	SERVER_TUNING,
 }
 
 # Anything that can be picked up joins this group and offers
@@ -169,17 +169,14 @@ var race_tolerance_mults := PackedFloat32Array([1.0, 1.0, 1.0, 1.0])
 var race_move_mults := PackedFloat32Array([1.0, 1.0, 1.0, 1.0])
 const DEBUG_RACE_MULT_RANGE := Vector2(0.0, 3.0)
 const RACE_MULT_FIELDS := ["tolerance", "move"]
-# H-3: the server's copy of the three vitals coefficients. Seeded from the
-# shipped PhysicsTuning on every peer (same file everywhere), then overwritten
-# on clients by push_vitals_tuning -- so CharacterStats.max_hp comes out the
-# same on every machine, and a client moving its own slider moves nothing.
-const VITALS_TUNING_FIELDS := ["hp_per_endurance", "stamina_base", "stamina_per_endurance"]
-const DEBUG_VITALS_RANGES := {
-	"hp_per_endurance": Vector2(0.1, 10.0),
-	"stamina_base": Vector2(0.0, 400.0),
-	"stamina_per_endurance": Vector2(0.0, 5.0),
-}
-var vitals_tuning := {}
+# N-1: what the server last pushed of its tuning table. Compared every step
+# against the live table, so a value written on the server by any path -- the
+# slider's intent, a harness, a stage check -- reaches every replica within a
+# frame, and the heartbeat repairs a drop.
+var _server_tuning_pushed := {}
+# H-3: a maximum built from these falls with them, so a change takes the
+# current HP down to fit. Nothing else in the table touches HP directly.
+const VITALS_FIELDS := ["hp_per_endurance", "stamina_base", "stamina_per_endurance"]
 
 
 func _ready() -> void:
@@ -187,8 +184,6 @@ func _ready() -> void:
 	# resolves on both ends.
 	set_multiplayer_authority(1)
 	instance = self
-	for field: String in VITALS_TUNING_FIELDS:
-		vitals_tuning[field] = float(Tuning.values.get(field))
 
 
 func _exit_tree() -> void:
@@ -360,7 +355,7 @@ func _push_view() -> void:
 	# The race table rides the same heartbeat: it changes rarely, a late joiner
 	# gets it within one beat, and a dropped change is repaired by the next.
 	_push_race_mults()
-	_push_vitals_tuning()
+	_push_server_tuning()
 
 
 # Server -> every peer. Reliable: a dropped row would leave a client carrying
@@ -418,35 +413,24 @@ func push_race_mults(tolerance: PackedFloat32Array, move: PackedFloat32Array) ->
 	race_move_mults = move
 
 
-# ------------------------------------------------------ the vitals coefficients
-# H-3. Readable on every peer, writable only on the server, like the race table.
-# Static so CharacterStats can ask without holding a node; before the judge is
-# in the tree (a body spawned ahead of it) the shipped tuning answers, which is
-# the same number the table was seeded from.
+# ------------------------------------------------------- the server tuning
+# N-1. Tuning.server is the table; this is how it travels. Readable on every
+# peer, written on the server, and a replica takes only what this sends.
 
-static func vitals_coeff(field: String) -> float:
-	if instance != null and instance.vitals_tuning.has(field):
-		return float(instance.vitals_tuning[field])
-	return float(Tuning.values.get(field))
-
-
-func _push_vitals_tuning() -> void:
+func _push_server_tuning() -> void:
 	if not multiplayer.has_multiplayer_peer():
 		return
-	push_vitals_tuning.rpc(vitals_tuning)
+	_server_tuning_pushed = Tuning.export_server()
+	push_server_tuning.rpc(_server_tuning_pushed)
 
 
 # Server -> every peer. A client that sends this is refused like any other
-# forged result, and a field this build does not know is ignored.
+# forged result; the import drops unknown fields and wrong types itself.
 @rpc("any_peer", "call_remote", "reliable")
-func push_vitals_tuning(values: Dictionary) -> void:
-	if not result_is_server_sent("push_vitals_tuning", multiplayer.get_remote_sender_id()):
+func push_server_tuning(values: Dictionary) -> void:
+	if not result_is_server_sent("push_server_tuning", multiplayer.get_remote_sender_id()):
 		return
-	for field: String in VITALS_TUNING_FIELDS:
-		if values.has(field):
-			var value: Variant = values[field]
-			if (value is float or value is int) and is_finite(float(value)):
-				vitals_tuning[field] = float(value)
+	Tuning.import_server(values)
 
 
 # ---------------------------------------------------------------- the door
@@ -508,8 +492,8 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 			result = _rule_stats(actor, payload)
 		Intent.RACE_MULT:
 			result = _rule_race_mult(payload)
-		Intent.VITALS_TUNING:
-			result = _rule_vitals_tuning(payload)
+		Intent.SERVER_TUNING:
+			result = _rule_server_tuning(payload)
 	if result == null:
 		return _refuse(sender, kind, "refused")
 	granted_intents += 1
@@ -570,10 +554,16 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 			var race_ok := Races.is_known(int(payload.get("race", -1)))
 			var value_ok := (value is float or value is int) and is_finite(float(value))
 			return field_ok and race_ok and value_ok
-		Intent.VITALS_TUNING:
+		Intent.SERVER_TUNING:
+			# A field the table has, and a value of its type. A local field or
+			# an unknown one is refused here, not clamped into something.
+			var field := String(payload.get("field", ""))
+			if not Tuning.is_server_field(field):
+				return false
 			var asked: Variant = payload.get("value")
-			return String(payload.get("field", "")) in VITALS_TUNING_FIELDS \
-				and (asked is float or asked is int) and is_finite(float(asked))
+			if typeof(Tuning.server.get(field)) == TYPE_BOOL:
+				return asked is bool
+			return (asked is float or asked is int) and is_finite(float(asked))
 		Intent.FALL:
 			return payload.has("peak") and payload.has("land") \
 				and is_finite(float(payload.get("peak", INF))) \
@@ -594,15 +584,15 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 	# its ground, which is the target's problem, not the pusher's.
 	if float(_shove_cooldown.get(peer, 0.0)) > 0.0:
 		return null
-	_shove_cooldown[peer] = Tuning.values.shove_cooldown
+	_shove_cooldown[peer] = Tuning.server.shove_cooldown
 
 	# A rectangle in front of the heading, shove_range deep and shove_width
 	# across, rather than the fan it was until stage D. The query is a sphere
 	# big enough to hold that rectangle and the rectangle is applied to what it
 	# returns: orienting a box costs the same and gets the corners wrong when
 	# the heading is not flat.
-	var reach: float = Tuning.values.shove_range
-	var half_width: float = Tuning.values.shove_width * 0.5
+	var reach: float = Tuning.server.shove_range
+	var half_width: float = Tuning.server.shove_width * 0.5
 	var forward := Vector3(direction.x, 0.0, direction.z)
 	if forward.length_squared() < 0.0001:
 		return null
@@ -636,26 +626,26 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 		# 4-chapter: a team mate is another player while the debug toggle says
 		# they are in the same party. The playground is all field, so there is
 		# no party list to read.
-		var is_ally := body is Player and Tuning.values.same_party
+		var is_ally := body is Player and Tuning.server.same_party
 		var push := forward
 		var launched := false
 		if is_ally and recently_airborne(body as Player):
 			# A team mate already in the air is launched, not shoved: this is
 			# what makes one player a step for another.
-			var angle := deg_to_rad(Tuning.values.shove_ally_launch_angle_deg)
+			var angle := deg_to_rad(Tuning.server.shove_ally_launch_angle_deg)
 			push = forward * cos(angle) + Vector3.UP * sin(angle)
 			launched = true
 		else:
-			push = (forward + Vector3.UP * Tuning.values.shove_up_bias).normalized()
+			push = (forward + Vector3.UP * Tuning.server.shove_up_bias).normalized()
 		var event := ForceSystem.make_event(
 			ForceSystem.Kind.SHOVE,
 			push,
-			Tuning.values.shove_power,
+			Tuning.server.shove_power,
 			actor.stats.strength,
 			peer,
 			is_ally,
-			Tuning.values.shove_damage,
-			Tuning.values.shove_stun_time)
+			Tuning.server.shove_damage,
+			Tuning.server.shove_stun_time)
 		if launched:
 			# The body being launched gives itself a jump's worth of lift and
 			# adds the push to it, so where in its arc the push lands stops
@@ -665,18 +655,18 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 		hits += 1
 		if launched:
 			print("PLAYGROUND_SHOVE_LAUNCH by=%s target=%s angle=%.0f" % [
-				actor.name, body.name, Tuning.values.shove_ally_launch_angle_deg])
+				actor.name, body.name, Tuning.server.shove_ally_launch_angle_deg])
 	# What the push costs the pusher. Sent through the same door as everything
 	# else, so it is one force event with an id like any other.
-	if hits > 0 and Tuning.values.shove_recoil > 0.0:
+	if hits > 0 and Tuning.server.shove_recoil > 0.0:
 		# The same up bias every other push gets. Without it the recoil is pure
 		# horizontal, and the ground step writes the horizontal velocity back
 		# to the move order on the very next frame: the pusher was given a
 		# step back it never took.
 		send_force(actor, ForceSystem.make_event(
 			ForceSystem.Kind.RECOIL,
-			(-forward + Vector3.UP * Tuning.values.shove_up_bias).normalized(),
-			Tuning.values.shove_power * Tuning.values.shove_recoil,
+			(-forward + Vector3.UP * Tuning.server.shove_up_bias).normalized(),
+			Tuning.server.shove_power * Tuning.server.shove_recoil,
 			actor.stats.strength,
 			peer,
 			true,
@@ -770,22 +760,28 @@ func _rule_race_mult(payload: Dictionary) -> Variant:
 	return true
 
 
-# H-3: the vitals slider. One coefficient, clamped, mirrored into the server's
-# own tuning copy so its panel and export agree, then pushed to everyone. A
-# maximum that just fell takes the current HP down with it, the same as a race
-# change does.
-func _rule_vitals_tuning(payload: Dictionary) -> Variant:
+# N-1: the tuning slider. One field, clamped to the range its shipped default
+# allows, written into the server's table and pushed. A multiplier the move
+# check reads changes what every body may be seen doing, so the check forgives
+# a beat for all of them; a vitals coefficient takes the current HP down to
+# fit the maximum it just lowered.
+func _rule_server_tuning(payload: Dictionary) -> Variant:
 	var field := String(payload.get("field", ""))
-	if not vitals_tuning.has(field):
-		return null
-	var limits: Vector2 = DEBUG_VITALS_RANGES[field]
-	var value := clampf(float(payload.get("value", 0.0)), limits.x, limits.y)
-	vitals_tuning[field] = value
-	Tuning.values.set(field, value)
+	var current: Variant = Tuning.server.get(field)
+	var asked: Variant = payload.get("value")
+	if typeof(current) == TYPE_BOOL:
+		Tuning.server.set(field, bool(asked))
+	else:
+		var limits := Tuning.limits_for(field)
+		var value := clampf(float(asked), limits.x, limits.y)
+		Tuning.server.set(field, roundi(value) if typeof(current) == TYPE_INT else value)
 	Tuning.notify_changed()
-	_push_vitals_tuning()
-	_clamp_all_hp()
-	print("PLAYGROUND_VITALS_TUNING field=%s value=%.3f" % [field, value])
+	_push_server_tuning()
+	for peer: int in _move_watch.keys():
+		forgive_move(peer, "server_tuning")
+	if field in VITALS_FIELDS:
+		_clamp_all_hp()
+	print("PLAYGROUND_SERVER_TUNING field=%s value=%s" % [field, str(Tuning.server.get(field))])
 	return true
 
 
@@ -880,7 +876,7 @@ func can_grab(actor: Player, target: Node3D) -> bool:
 		if person.state == Player.State.DEAD or person.state == Player.State.GRABBED:
 			return false
 	if actor.global_position.distance_to(target.global_position) > (
-			Tuning.values.grab_range + Player.BODY_RADIUS + INTENT_RANGE_SLACK):
+			Tuning.server.grab_range + Player.BODY_RADIUS + INTENT_RANGE_SLACK):
 		return false
 	if weight_of(target) > lift_limit(actor):
 		return false
@@ -894,9 +890,9 @@ func can_grab(actor: Player, target: Node3D) -> bool:
 
 # 4-chapter: strength x lift_per_strength, halved while one hand is busy.
 func lift_limit(actor: Player) -> float:
-	var limit: float = actor.stats.strength * Tuning.values.lift_per_strength
-	if Tuning.values.one_hand_weapon:
-		limit /= maxf(Tuning.values.grab_one_hand_strength_mult, 0.01)
+	var limit: float = actor.stats.strength * Tuning.server.lift_per_strength
+	if Tuning.server.one_hand_weapon:
+		limit /= maxf(Tuning.server.grab_one_hand_strength_mult, 0.01)
 	return limit if is_finite(limit) else 0.0
 
 
@@ -953,10 +949,10 @@ func _rule_throw(actor: Player, payload: Dictionary) -> Variant:
 	var velocity := Vector3.ZERO
 	if line:
 		# Straight: the heading, at a speed the charge decides.
-		velocity = direction.normalized() * (Tuning.values.throw_line_power_base
+		velocity = direction.normalized() * (Tuning.server.throw_line_power_base
 			* maxf(charge, 0.2)
 			* Tuning.ratio_mult(actor.stats.strength / maxf(weight_of(target), 0.1),
-				Tuning.values.ratio_k_jump))
+				Tuning.server.ratio_k_jump))
 	else:
 		var landing: Variant = payload.get("target")
 		var aim: Vector3 = landing if landing is Vector3 else actor.global_position + direction * 3.0
@@ -976,7 +972,7 @@ func _rule_throw(actor: Player, payload: Dictionary) -> Variant:
 		0.0,
 		peer,
 		true,
-		Tuning.values.shove_damage * charge if line else 0.0,
+		Tuning.server.shove_damage * charge if line else 0.0,
 		0.0))
 	if target is Rock:
 		(target as Rock).note_thrown(peer)
@@ -989,13 +985,13 @@ func _rule_throw(actor: Player, payload: Dictionary) -> Variant:
 # cheapest arc that reaches it -- 45 degrees tilted by half the slope to the
 # target -- so a throw is never higher than it has to be.
 func _arc_to(from: Vector3, aim: Vector3, charge: float, ratio: float) -> Vector3:
-	var gravity: float = maxf(Tuning.values.gravity, 0.01)
+	var gravity: float = maxf(Tuning.server.gravity, 0.01)
 	var flat := Vector3(aim.x - from.x, 0.0, aim.z - from.z)
 	var distance := flat.length()
 	if distance < 0.01:
 		return Vector3.UP * sqrt(2.0 * gravity * 0.5)
-	var reach: float = Tuning.values.throw_arc_max_range_base * maxf(charge, 0.1) \
-		* Tuning.ratio_mult(ratio, Tuning.values.ratio_k_jump)
+	var reach: float = Tuning.server.throw_arc_max_range_base * maxf(charge, 0.1) \
+		* Tuning.ratio_mult(ratio, Tuning.server.ratio_k_jump)
 	if distance > reach:
 		flat = flat.normalized() * reach
 		distance = reach
@@ -1027,10 +1023,10 @@ func _rule_escape(actor: Player) -> Variant:
 	var record: Dictionary = _holds[holder_peer]
 	if float(record["window"]) <= 0.0:
 		record["presses"] = 0
-		record["window"] = Tuning.values.grabbed_escape_window
+		record["window"] = Tuning.server.grabbed_escape_window
 	record["presses"] = int(record["presses"]) + 1
 	_view_dirty = true
-	if int(record["presses"]) < int(Tuning.values.grabbed_escape_presses):
+	if int(record["presses"]) < int(Tuning.server.grabbed_escape_presses):
 		return true
 	var holder := actor_for(holder_peer)
 	var away := Vector3.ZERO
@@ -1059,7 +1055,7 @@ func _rule_escape(actor: Player) -> Variant:
 	send_force(actor, ForceSystem.make_event(
 		ForceSystem.Kind.KNOCKBACK,
 		away.normalized(),
-		Tuning.values.escape_recoil_power,
+		Tuning.server.escape_recoil_power,
 		0.0,
 		1,
 		false,
@@ -1126,7 +1122,7 @@ func _rule_hurt(target: Player, event: Dictionary) -> void:
 		if not ally:
 			server_damage(target, damage, "force")
 		return
-	if not ally or Tuning.values.ally_ground_damage:
+	if not ally or Tuning.server.ally_ground_damage:
 		server_damage(target, damage, "force")
 	if target.sync_dead:
 		return
@@ -1136,7 +1132,7 @@ func _rule_hurt(target: Player, event: Dictionary) -> void:
 	if not bool(event.get("knock_launched", true)):
 		return
 	var stun := float(event.get("stun_time", 0.0))
-	if stun > 0.0 and (not ally or Tuning.values.ally_ground_stun):
+	if stun > 0.0 and (not ally or Tuning.server.ally_ground_stun):
 		event["stun_apply"] = stun
 
 
@@ -1201,7 +1197,7 @@ func server_kill(player: Player, cause: String) -> void:
 	var peer := player.get_multiplayer_authority()
 	server_set_hp(player, 0.0)
 	player.sync_dead = true
-	_respawn_left[peer] = Tuning.values.respawn_delay
+	_respawn_left[peer] = Tuning.server.respawn_delay
 	if _holds.has(peer):
 		_end_hold(peer, "holder_died")
 	var holder_peer := holder_of(player)
@@ -1289,13 +1285,13 @@ func _rule_fall(actor: Player, payload: Dictionary) -> Variant:
 		print("PLAYGROUND_FALL_MISMATCH peer=%s claimed=%.2f observed=%.2f used=%.2f" % [
 			actor.name, claimed, observed, height])
 	actor.last_fall_height = height
-	if not Tuning.values.fall_damage_enabled or height <= Tuning.values.fall_damage_min_height:
+	if not Tuning.server.fall_damage_enabled or height <= Tuning.server.fall_damage_min_height:
 		return true
-	var damage: float = (height - Tuning.values.fall_damage_min_height) * Tuning.values.fall_damage_per_meter
+	var damage: float = (height - Tuning.server.fall_damage_min_height) * Tuning.server.fall_damage_per_meter
 	# Stage G: the damage is taken whoever started the flight. The flag only
 	# decides whether a party member's launch is allowed to finish the job.
 	var spared := false
-	if not Tuning.values.ally_fall_death and ally_started_this_flight(peer) and damage >= actor.hp:
+	if not Tuning.server.ally_fall_death and ally_started_this_flight(peer) and damage >= actor.hp:
 		damage = maxf(actor.hp - 1.0, 0.0)
 		spared = true
 	_clear_flight_source(peer)
@@ -1344,7 +1340,7 @@ func _watch_vitals(delta: float) -> void:
 			continue
 		# Out of the world. Checked here rather than on the owner so that one
 		# place decides a death, from the position the server has.
-		if y < Tuning.values.kill_plane_y:
+		if y < Tuning.server.kill_plane_y:
 			# Stage G: out of the world is always the end, whoever put the body
 			# there. ally_fall_death decides one thing only -- whether a party
 			# member's launch may kill you with the landing damage -- and the
@@ -1391,7 +1387,7 @@ func harness_forgive_move() -> void:
 # What this body's own strength could do, split by axis: a cap that mixed them
 # together would either excuse a sideways sprint or accuse an honest fall.
 func move_allowance(player: Player) -> Vector2:
-	var tolerance: float = Tuning.values.server_speed_tolerance
+	var tolerance: float = Tuning.server.server_speed_tolerance
 	# Stage C-2: the dash is the leap budget spent sideways, so the fastest a
 	# body may legitimately travel is that, worked out from the same function
 	# the body itself uses.
@@ -1403,12 +1399,12 @@ func move_allowance(player: Player) -> Vector2:
 	var drop := maxf(0.0, float(watch.get("peak", player.global_position.y)) - player.global_position.y)
 	# A standing jump now spends the whole budget upward, so the fastest a body
 	# may legitimately be climbing is the cap itself, not its jump velocity.
-	var vertical := maxf(player.leap_speed_cap(), sqrt(2.0 * Tuning.values.gravity * drop))
+	var vertical := maxf(player.leap_speed_cap(), sqrt(2.0 * Tuning.server.gravity * drop))
 	# What the server knows of a remote body's apex is a packet old, so the drop
 	# it computes can be short of the real one and an honest fall then reads as
 	# too fast. One sample's worth of gravity covers that gap. (Measured: a team
 	# mate thrown at 18 m/s produced one warning per stage 7 run without it.)
-	vertical += Tuning.values.gravity * MOVE_SAMPLE * 2.0
+	vertical += Tuning.server.gravity * MOVE_SAMPLE * 2.0
 	var given: Dictionary = _move_watch.get(peer, {})
 	return Vector2(
 		horizontal * tolerance + float(given.get("h", 0.0)),
@@ -1489,6 +1485,10 @@ func _physics_process(delta: float) -> void:
 		_shove_cooldown[peer] = maxf(0.0, float(_shove_cooldown[peer]) - delta)
 	_enforce_holds(delta)
 	_watch_vitals(delta)
+	# N-1: any write to the server's table reaches the replicas within a step,
+	# whoever made it. The heartbeat below repairs a dropped push.
+	if multiplayer.has_multiplayer_peer() and Tuning.export_server() != _server_tuning_pushed:
+		_push_server_tuning()
 	if _view_dirty:
 		_rebuild_view()
 		_push_view()

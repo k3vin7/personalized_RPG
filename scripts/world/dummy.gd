@@ -162,7 +162,7 @@ func _physics_process(delta: float) -> void:
 		return
 
 	if not is_on_floor():
-		velocity.y -= Tuning.values.gravity * delta
+		velocity.y -= Tuning.server.gravity * delta
 	elif velocity.y <= 0.0:
 		# Only pressed into the floor when it is not trying to leave it. This
 		# used to be unconditional, so an upward force was written back to

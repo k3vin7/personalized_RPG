@@ -5,8 +5,10 @@ extends CanvasLayer
 # formulas currently produce, and a preview of the arc the next jump would take.
 #
 # Stat changes are replicated, because other peers compute shoves against this
-# body's weight. Tuning changes stay local so two people can experiment side by
-# side; the button pulls the host's numbers when they want to compare.
+# body's weight. N-1: so are the server's tuning values -- a slider in that
+# section is a request, and the value it shows is whatever the server pushed
+# back. Only LocalTuning (how a press is read, what is drawn) is edited here
+# directly.
 
 # H-1: the 100-point scale. An orc is 100 strength and 140 kg, so the old
 # 1-40 / 3-30 sliders could not reach any of the four races. The bounds the
@@ -127,42 +129,39 @@ func _build_ui() -> void:
 				ServerAuthority.DEBUG_RACE_MULT_RANGE.y,
 				func(value: float) -> void: _ask_race_mult(field, kind, value)))
 
-	# H-3: the three numbers HP and stamina are made of. They live in
-	# PhysicsTuning like the rest, but they are in the server's HP ruling, so
-	# the slider asks and the answer comes back replicated -- the generic loop
-	# below skips them.
-	column.add_child(_heading("HP·스태미나 계수 (서버 승인)"))
-	for field: String in ServerAuthority.VITALS_TUNING_FIELDS:
-		var limits: Vector2 = ServerAuthority.DEBUG_VITALS_RANGES[field]
-		column.add_child(_slider(
-			field,
-			ServerAuthority.vitals_coeff(field),
-			limits.x,
-			limits.y,
-			func(value: float) -> void: _ask_vitals_tuning(field, value)))
+	# N-1: the server's table. Every number a ruling, a trajectory or a cost is
+	# built from, so a control here states a value and the server decides --
+	# the range it may ask for is the range the server will accept.
+	column.add_child(_heading("서버 튜닝 (서버 승인)"))
+	for name_text in Tuning.field_names(Tuning.server):
+		var value: Variant = Tuning.server.get(name_text)
+		if typeof(value) == TYPE_BOOL:
+			column.add_child(_check(name_text, value,
+				func(on: bool) -> void: _ask_server_tuning(name_text, on)))
+		else:
+			var limits := Tuning.limits_for(name_text)
+			column.add_child(_slider(
+				name_text,
+				float(value),
+				limits.x,
+				limits.y,
+				func(new_value: float) -> void: _ask_server_tuning(name_text, new_value),
+				typeof(value) == TYPE_INT))
 
-	column.add_child(_heading("튜닝 (각자 로컬)"))
-	var pull := Button.new()
-	pull.text = "호스트 튜닝 받아오기"
-	pull.pressed.connect(_request_host_tuning)
-	column.add_child(pull)
-	for property in Tuning.values.get_property_list():
-		if not (int(property["usage"]) & PROPERTY_USAGE_EDITOR):
-			continue
-		var name_text := String(property["name"])
-		if name_text.begins_with("resource_") or name_text == "script":
-			continue
-		if name_text in ServerAuthority.VITALS_TUNING_FIELDS:
-			continue
+	# What stays on this machine: how a press is read, what is drawn.
+	column.add_child(_heading("로컬 튜닝 (각자)"))
+	for name_text in Tuning.field_names(Tuning.values):
 		var value: Variant = Tuning.values.get(name_text)
 		if typeof(value) == TYPE_BOOL:
-			column.add_child(_check(name_text, value))
-		elif typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT:
+			column.add_child(_check(name_text, value, func(on: bool) -> void:
+				Tuning.values.set(name_text, on)
+				Tuning.notify_changed()))
+		else:
 			var integer := typeof(value) == TYPE_INT
 			var limits := numeric_limits(name_text, float(value))
 			column.add_child(_slider(
 				name_text,
-				value,
+				float(value),
 				limits.x,
 				limits.y,
 				func(new_value: float) -> void:
@@ -172,9 +171,9 @@ func _build_ui() -> void:
 
 
 func numeric_limits(field: String, value: float) -> Vector2:
-	if field == "kill_plane_y" or value < 0.0:
+	if value < 0.0:
 		return Vector2(minf(value * 4.0, -1.0), 0.0)
-	return Vector2(1.0 if field == "grabbed_escape_presses" else 0.0, maxf(value * 4.0, 1.0))
+	return Vector2(0.0, maxf(value * 4.0, 1.0))
 
 
 func _heading(text: String) -> Label:
@@ -207,13 +206,12 @@ func _slider(field: String, value: float, minimum: float, maximum: float, on_cha
 	return row
 
 
-func _check(field: String, value: bool) -> CheckBox:
+func _check(field: String, value: bool, on_change: Callable) -> CheckBox:
 	var box := CheckBox.new()
+	box.name = field
 	box.text = field
 	box.button_pressed = value
-	box.toggled.connect(func(on: bool) -> void:
-		Tuning.values.set(field, on)
-		Tuning.notify_changed())
+	box.toggled.connect(func(on: bool) -> void: on_change.call(on))
 	return box
 
 
@@ -247,7 +245,7 @@ func _refresh_readout() -> void:
 		"지구력 %.0f  민첩 %.0f  지능 %.0f" % [
 			player.stats.endurance, player.stats.agility, player.stats.intellect],
 		"ratio: %.3f (기준 %.2f)   점프 높이: %.2f m   초기 속도: %.2f" % [
-			player.get_ratio(), Tuning.values.ratio_ref,
+			player.get_ratio(), Tuning.server.ratio_ref,
 			player.get_jump_height(), player.get_jump_velocity()],
 		"이동 속도: %.2f m/s" % player.get_move_speed(),
 		"이동 의도: %.2f초 남음" % (movement.intent_seconds_left() if movement != null else 0.0),
@@ -265,17 +263,17 @@ func _race_vitals_line() -> String:
 		var endurance := Races.data_for(kind).endurance
 		parts.append("%s %.0f/%.0f" % [
 			Races.label_for(kind),
-			endurance * ServerAuthority.vitals_coeff("hp_per_endurance"),
-			ServerAuthority.vitals_coeff("stamina_base")
-				+ endurance * ServerAuthority.vitals_coeff("stamina_per_endurance")])
+			endurance * Tuning.server.hp_per_endurance,
+			Tuning.server.stamina_base + endurance * Tuning.server.stamina_per_endurance])
 	return "  ".join(parts)
 
 
-# H-3: one coefficient, asked for. The server clamps and pushes the table back.
-func _ask_vitals_tuning(field: String, value: float) -> void:
+# N-1: one field of the server's table, asked for. The server clamps, writes
+# its copy and pushes it back; the control shows what it asked until then.
+func _ask_server_tuning(field: String, value: Variant) -> void:
 	if not is_instance_valid(player):
 		return
-	ServerAuthority.submit_intent(player, ServerAuthority.Intent.VITALS_TUNING, {
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.SERVER_TUNING, {
 		"field": field, "value": value})
 
 
@@ -301,7 +299,7 @@ func _refresh_arc() -> void:
 	# so the line is where the body will actually go rather than an idealised
 	# parabola that quietly disagrees with it.
 	var step := 1.0 / float(Engine.physics_ticks_per_second)
-	var gravity: float = Tuning.values.gravity
+	var gravity: float = Tuning.server.gravity
 	var position := player.global_position
 	var velocity := _preview_launch_velocity()
 	var mesh := ImmediateMesh.new()
@@ -322,7 +320,3 @@ func _refresh_arc() -> void:
 func _preview_launch_velocity() -> Vector3:
 	return player.movement.jump_launch_velocity() if player.movement != null else Vector3.ZERO
 
-
-func _request_host_tuning() -> void:
-	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
-		Net.request_tuning.rpc_id(1)

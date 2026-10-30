@@ -140,7 +140,7 @@ func _lift_limit_checks() -> void:
 		await _wait(0.3)
 		await tick_request(func() -> void: _number = _judge.lift_limit(_local))
 		var limit := _number
-		var expected: float = data.strength * Tuning.values.lift_per_strength
+		var expected: float = data.strength * Tuning.server.lift_per_strength
 		expect(absf(limit - expected) < 0.01,
 			"%s_lift_limit_is_strength_times_the_multiplier" % data.label)
 		# And the limit is what actually decides a grab, rock by rock.
@@ -160,7 +160,7 @@ func _lift_limit_checks() -> void:
 			data.label, data.strength, data.body_weight, limit,
 			" ".join(verdicts)])
 	note("lift limit by race (x%.1f): %s" % [
-		Tuning.values.lift_per_strength, " | ".join(rows)])
+		Tuning.server.lift_per_strength, " | ".join(rows)])
 
 	# A human lifts a bare elf and not a bare human: v4's intended shape, and
 	# the one that makes training something to want.
@@ -175,17 +175,17 @@ func _lift_limit_checks() -> void:
 	expect(human_limit < human, "but_not_a_bare_human")
 
 	# One hand on a weapon halves it.
-	Tuning.values.one_hand_weapon = true
+	Tuning.server.one_hand_weapon = true
 	await tick_request(func() -> void: _number = _judge.lift_limit(_local))
 	var one_hand := _number
-	Tuning.values.one_hand_weapon = false
+	Tuning.server.one_hand_weapon = false
 	await tick_request(func() -> void: _number = _judge.lift_limit(_local))
 	var two_hands := _number
 	note("lift limit: both hands %.1f kg, one hand %.1f kg (mult %.1f)" % [
-		two_hands, one_hand, Tuning.values.grab_one_hand_strength_mult])
+		two_hands, one_hand, Tuning.server.grab_one_hand_strength_mult])
 	expect(absf(one_hand - two_hands * 0.5) < 0.01, "one_hand_halves_the_limit")
 	expect(one_hand < elf, "and_then_a_bare_elf_is_too_much")
-	Tuning.values.one_hand_weapon = false
+	Tuning.server.one_hand_weapon = false
 
 
 # --------------------------------------------- the one key: tap, arc, line
@@ -695,9 +695,9 @@ func _shove_self() -> void:
 	await tick_request(func() -> void:
 		_judge.send_force(_local, ForceSystem.make_event(
 			ForceSystem.Kind.SHOVE,
-			(Vector3(1.0, 0.0, 0.0) + Vector3.UP * Tuning.values.shove_up_bias).normalized(),
-			Tuning.values.shove_power, 60.0, 1, false,
-			Tuning.values.shove_damage, Tuning.values.shove_stun_time)))
+			(Vector3(1.0, 0.0, 0.0) + Vector3.UP * Tuning.server.shove_up_bias).normalized(),
+			Tuning.server.shove_power, 60.0, 1, false,
+			Tuning.server.shove_damage, Tuning.server.shove_stun_time)))
 
 
 # ------------------------- a thrown team mate can be pushed again in the air
@@ -835,18 +835,18 @@ func _race_table() -> void:
 			data.label, data.strength, data.body_weight, data.endurance,
 			data.agility, data.intellect, data.height_cm,
 			_local.get_ratio(),
-			Tuning.ratio_mult(_local.get_ratio(), Tuning.values.ratio_k_jump),
-			Tuning.ratio_mult(_local.get_ratio(), Tuning.values.ratio_k_speed),
-			_local.get_move_speed(), cap * cap / (2.0 * Tuning.values.gravity),
+			Tuning.ratio_mult(_local.get_ratio(), Tuning.server.ratio_k_jump),
+			Tuning.ratio_mult(_local.get_ratio(), Tuning.server.ratio_k_speed),
+			_local.get_move_speed(), cap * cap / (2.0 * Tuning.server.gravity),
 			_local.leap_max_range(), _local.dash_speed(),
 			_judge.lift_limit(_local), _local.stats.max_hp])
 	# The one number v4 names outright: a bare human is the reference, so its
 	# multiplier is exactly 1.
 	await tick_request(func() -> void: _judge.harness_set_race(_local, Races.Kind.HUMAN))
 	await _wait(0.4)
-	var human_mult := Tuning.ratio_mult(_local.get_ratio(), Tuning.values.ratio_k_jump)
+	var human_mult := Tuning.ratio_mult(_local.get_ratio(), Tuning.server.ratio_k_jump)
 	note("bare human ratio %.4f -> mult %.4f (ratio_ref %.2f)" % [
-		_local.get_ratio(), human_mult, Tuning.values.ratio_ref])
+		_local.get_ratio(), human_mult, Tuning.server.ratio_ref])
 	expect(absf(human_mult - 1.0) < 0.0001, "a_bare_human_is_exactly_one")
 
 
@@ -856,7 +856,7 @@ func _race_table() -> void:
 # wait, this waits for the two of them to actually be in reach and says how far
 # apart they ended up if they never are.
 func _await_pair_within_reach(other: Player, point: Vector3) -> float:
-	var reach: float = Tuning.values.grab_range + Player.BODY_RADIUS
+	var reach: float = Tuning.server.grab_range + Player.BODY_RADIUS
 	var gap := INF
 	var waited := 0.0
 	while waited < 8.0 + _lag * 20.0:
@@ -899,7 +899,7 @@ func _second_push_check() -> void:
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
 	if _judge.holder_of(mate) != 1:
 		note("the team mate was not picked up: %.2f m apart (reach %.2f), limit %.0f kg against %.0f kg" % [
-			gap, Tuning.values.grab_range + Player.BODY_RADIUS,
+			gap, Tuning.server.grab_range + Player.BODY_RADIUS,
 			_judge.lift_limit(_local), _judge.weight_of(mate)])
 		expect(false, "picked_the_team_mate_up_to_throw")
 		return
@@ -922,8 +922,8 @@ func _second_push_check() -> void:
 	# Pushed again while they are still flying: the second push bends the arc.
 	await tick_request(func() -> void:
 		_judge.send_force(mate, ForceSystem.make_event(
-			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.2, 0.0), Tuning.values.shove_power,
-			10.0, 1, true, Tuning.values.shove_damage, 0.0)))
+			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.2, 0.0), Tuning.server.shove_power,
+			10.0, 1, true, Tuning.server.shove_damage, 0.0)))
 	await _wait(2.0)
 	var landed := mate.global_position
 	var first := Vector2(mid.x - from.x, mid.z - from.z).length()
@@ -1278,7 +1278,7 @@ func client_park(point: Vector3) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func client_escape() -> void:
-	var presses := int(Tuning.values.grabbed_escape_presses)
+	var presses := int(Tuning.server.grabbed_escape_presses)
 	var from := _local.global_position
 	var stamina_before := _local.stamina
 	for index in range(presses):
@@ -1297,10 +1297,10 @@ func client_escape() -> void:
 	var pushed := Vector2(_local.global_position.x - from.x, _local.global_position.z - from.z).length()
 	note("escape: peak speed %.2f, moved %.2f m, stamina %.0f -> %.0f on the presses (%.0f each, regen %.0f/s)" % [
 		peak, pushed, stamina_before, stamina_after,
-		Tuning.values.stamina_escape_press, Tuning.values.stamina_regen])
+		Tuning.server.stamina_escape_press, Tuning.server.stamina_regen])
 	expect(_local.state != Player.State.GRABBED, "the_client_got_free")
 	expect(peak > 1.0, "the_escape_recoil_actually_moved_it")
-	expect(stamina_before - stamina_after >= Tuning.values.stamina_escape_press, "and_the_presses_cost_stamina")
+	expect(stamina_before - stamina_after >= Tuning.server.stamina_escape_press, "and_the_presses_cost_stamina")
 	stage_done.rpc_id(1, "escaped")
 
 

@@ -130,7 +130,7 @@ func _apply_gravity() -> void:
 	var project_gravity := float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8))
 	if project_gravity <= 0.0:
 		return
-	gravity_scale = Tuning.values.gravity / project_gravity
+	gravity_scale = Tuning.server.gravity / project_gravity
 
 
 static func radius_for(rock_weight: float) -> float:
@@ -154,7 +154,7 @@ func _physics_process(delta: float) -> void:
 				rotation = rotation.lerp(_sync_rotation, 1.0 - exp(-18.0 * delta))
 		return
 
-	if global_position.y < Tuning.values.kill_plane_y:
+	if global_position.y < Tuning.server.kill_plane_y:
 		# Fallen out of the world. There are only three rocks, so losing one is
 		# losing a third of the stage: it comes back to its mark instead.
 		freeze = false

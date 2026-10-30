@@ -122,9 +122,9 @@ func _fall_damage_checks() -> void:
 	expect(shallow["damage"] == 0.0, "fall_3_5m_costs_nothing_as_before")
 
 	# Turned off by the debug flag, the same drop costs nothing.
-	Tuning.values.fall_damage_enabled = false
+	Tuning.server.fall_damage_enabled = false
 	var disabled := await _drop(5.0)
-	Tuning.values.fall_damage_enabled = true
+	Tuning.server.fall_damage_enabled = true
 	expect(disabled["damage"] == 0.0, "fall_damage_flag_still_works")
 
 	# A client's own drop, ruled by the server from the client's report.
@@ -197,19 +197,19 @@ func _damage_and_stun_checks() -> void:
 	await tick_request(func() -> void:
 		_judge.send_force(client, ForceSystem.make_event(
 			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.1, 0.0), 12.0, 60.0, 1, false,
-			Tuning.values.shove_damage, Tuning.values.shove_stun_time)))
+			Tuning.server.shove_damage, Tuning.server.shove_stun_time)))
 	# Read inside the stun. shove_stun_time is 0.4 s, so half a second later
 	# the body is correctly standing up again and the check measured nothing.
 	await get_tree().create_timer(0.2).timeout
 	note("stranger shove client hp=%.0f-%.0f state=%s" % [
 		hp_before, client.hp, Player.State.keys()[client.state]])
-	expect(is_equal_approx(client.hp, hp_before - Tuning.values.shove_damage), "server_wrote_the_damage")
+	expect(is_equal_approx(client.hp, hp_before - Tuning.server.shove_damage), "server_wrote_the_damage")
 	expect(client.state == Player.State.STUNNED, "owner_applied_the_stun_it_was_told")
-	await get_tree().create_timer(Tuning.values.shove_stun_time + 0.5).timeout
+	await get_tree().create_timer(Tuning.server.shove_stun_time + 0.5).timeout
 	expect(client.state != Player.State.STUNNED, "stun_wore_off_on_its_own")
 
 	# A team mate's push on a body already in the air: no damage, no stun.
-	await get_tree().create_timer(Tuning.values.shove_stun_time + 0.6).timeout
+	await get_tree().create_timer(Tuning.server.shove_stun_time + 0.6).timeout
 	await tick_request(func() -> void: _judge.server_respawn(client))
 	await get_tree().create_timer(0.6).timeout
 	hp_before = client.hp
@@ -220,7 +220,7 @@ func _damage_and_stun_checks() -> void:
 	await tick_request(func() -> void:
 		_judge.send_force(client, ForceSystem.make_event(
 			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.2, 0.0), 5.0, 10.0, 1, true,
-			Tuning.values.shove_damage, Tuning.values.shove_stun_time)))
+			Tuning.server.shove_damage, Tuning.server.shove_stun_time)))
 	await get_tree().create_timer(0.4).timeout
 	note("ally push in the air hp=%.0f-%.0f state=%s" % [
 		hp_before, client.hp, Player.State.keys()[client.state]])
@@ -252,7 +252,7 @@ func _death_checks() -> void:
 
 	# And comes back on the server's clock, without the owner asking.
 	var waited := 0.0
-	while waited < Tuning.values.respawn_delay + 3.0 and client.sync_dead:
+	while waited < Tuning.server.respawn_delay + 3.0 and client.sync_dead:
 		await get_tree().create_timer(0.1).timeout
 		waited += 0.1
 	note("respawn arrived after %.1fs hp=%.0f state=%s" % [
@@ -265,10 +265,10 @@ func _death_checks() -> void:
 	await tick_request(func() -> void:
 		_judge.server_respawn(_local)
 		placed()
-		_local.global_position = Vector3(0.0, Tuning.values.kill_plane_y - 2.0, 8.0))
+		_local.global_position = Vector3(0.0, Tuning.server.kill_plane_y - 2.0, 8.0))
 	await get_tree().create_timer(0.5).timeout
 	expect(_local.sync_dead and _local.state == Player.State.DEAD, "kill_plane_ruled_by_server")
-	await get_tree().create_timer(Tuning.values.respawn_delay + 1.2).timeout
+	await get_tree().create_timer(Tuning.server.respawn_delay + 1.2).timeout
 	expect(not _local.sync_dead and _local.state != Player.State.DEAD, "kill_plane_death_came_back")
 
 

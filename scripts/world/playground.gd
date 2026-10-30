@@ -170,6 +170,12 @@ func _run_smoke() -> void:
 		get_tree().root.add_child(checks)
 		checks.run(self)
 		return
+	if Net.auto_only == "N":
+		var nc := preload("res://scripts/tests/n_checks.gd").new()
+		nc.name = "NChecks"
+		get_tree().root.add_child(nc)
+		nc.run(self)
+		return
 	if Net.auto_only == "G":
 		var gc := preload("res://scripts/tests/g_checks.gd").new()
 		gc.name = "GChecks"
@@ -428,7 +434,7 @@ func _run_stage5_checks(local: Player) -> void:
 		hits, _flat(dummy.global_position - before_position), before_hp, dummy.hp])
 
 	print("PLAYGROUND_STAGE5_COOLDOWN immediate=%d" % local.movement.shove())
-	await get_tree().create_timer(Tuning.values.shove_stun_time + 0.8).timeout
+	await get_tree().create_timer(Tuning.server.shove_stun_time + 0.8).timeout
 
 	# Stronger arms throw it further: that is the formula doing its job.
 	await _settle(local, Vector3(spot.x, 1.0, spot.z))
@@ -451,8 +457,8 @@ func _run_stage5_checks(local: Player) -> void:
 	var hp_before := local.hp
 	var ally_push := ForceSystem.make_event(
 		ForceSystem.Kind.SHOVE, Vector3(1.0, 0.25, 0.0).normalized(),
-		Tuning.values.shove_power, 10.0, 1, true,
-		Tuning.values.shove_damage, Tuning.values.shove_stun_time)
+		Tuning.server.shove_power, 10.0, 1, true,
+		Tuning.server.shove_damage, Tuning.server.shove_stun_time)
 	ServerAuthority.instance.send_force(local, ally_push)
 	await get_tree().physics_frame
 	print("PLAYGROUND_STAGE5_GROUND state=%s hp=%.0f-%.0f speed=%.2f" % [
@@ -587,7 +593,7 @@ func _attach_to(local: Player, contact: Vector3, normal: Vector3, stand: Vector3
 		if local.climb.is_climbing():
 			return true
 	print("PLAYGROUND_STAGE4_NOATTACH distance=%.2f limit=%.2f" % [
-		local.movement.climb_request_distance(), Tuning.values.climb_attach_distance])
+		local.movement.climb_request_distance(), Tuning.server.climb_attach_distance])
 	return false
 
 
@@ -639,7 +645,7 @@ func _run_stage3_checks(local: Player) -> void:
 
 	# Cooldown: still refused a moment later, allowed once it has run out.
 	var during_cooldown := local.movement.request_dash()
-	await get_tree().create_timer(Tuning.values.dash_cooldown + 0.2).timeout
+	await get_tree().create_timer(Tuning.server.dash_cooldown + 0.2).timeout
 	var after_cooldown := local.movement.request_dash()
 	await get_tree().create_timer(0.6).timeout
 	print("PLAYGROUND_STAGE3_COOLDOWN during=%s after=%s" % [during_cooldown, after_cooldown])
@@ -685,9 +691,9 @@ func _run_stage6_checks(local: Player) -> void:
 
 	# The debug flag turns it off, which is the condition the work order asks
 	# for: the same drop that hurt a moment ago now costs nothing.
-	Tuning.values.fall_damage_enabled = false
+	Tuning.server.fall_damage_enabled = false
 	var disabled := await _drop_from(local, 5.0)
-	Tuning.values.fall_damage_enabled = true
+	Tuning.server.fall_damage_enabled = true
 	print("PLAYGROUND_STAGE6_DISABLED measured=%.2f damage=%.1f" % [
 		disabled["fall"], disabled["before"] - disabled["after"]])
 
@@ -744,10 +750,10 @@ func _run_respawn_checks(local: Player) -> void:
 	# Falling past the kill plane kills and brings the body back on its own.
 	await _settle(local, Vector3(0.0, 1.0, 8.0))
 	_harness_placed(local)
-	local.global_position = Vector3(0.0, Tuning.values.kill_plane_y - 2.0, 8.0)
+	local.global_position = Vector3(0.0, Tuning.server.kill_plane_y - 2.0, 8.0)
 	await get_tree().create_timer(0.3).timeout
 	var died := local.state == Player.State.DEAD
-	await get_tree().create_timer(Tuning.values.respawn_delay + 0.8).timeout
+	await get_tree().create_timer(Tuning.server.respawn_delay + 0.8).timeout
 	print("PLAYGROUND_FALL died=%s back_home=%.2f state=%s" % [
 		died, _distance_to_a_spawn(local), Player.State.keys()[local.state]])
 
@@ -1054,7 +1060,6 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 		print("PLAYGROUND_STAGE8_THROW no_remote_peer")
 		return
 
-	var angle := deg_to_rad(Tuning.values.throw_up_angle_deg)
 	# Clearing the lip means the body's centre, not its feet.
 	var wanted := TimeBoundary.TOP_Y + Player.BODY_HALF_HEIGHT
 	var mate_weight := Races.data_for(Races.DEFAULT).body_weight
@@ -1065,10 +1070,15 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 	# the multiplier, so it is also the best throw the game can produce.
 	for strength in [60.0, 100.0, 150.0]:
 		ServerAuthority.instance.harness_set_stats(local, strength)
-		var mult: float = Tuning.ratio_mult(strength / mate_weight, Tuning.values.ratio_k_jump)
-		var speed: float = Tuning.values.throw_power * mult
-		var rise := speed * sin(angle)
-		var apex_at := speed * cos(angle) * (rise / Tuning.values.gravity)
+		var mult: float = Tuning.ratio_mult(strength / mate_weight, Tuning.server.ratio_k_jump)
+		# N-1: throw_power and the fixed angle are gone. The throw aims 20 m
+		# out, which the arc solver clamps to its reach and sends at 45
+		# degrees, so the apex is a quarter of the reach up and half of it
+		# along -- the same numbers _arc_to uses.
+		var reach: float = Tuning.server.throw_arc_max_range_base * mult
+		var speed: float = sqrt(Tuning.server.gravity * reach)
+		var rise: float = speed * sin(PI * 0.25)
+		var apex_at: float = reach * 0.5
 		await get_tree().create_timer(0.5).timeout
 		var lane := Vector3(TimeBoundary.SEAM.x, 1.0, face_z + apex_at)
 		if not await _grab_remote(local, remote, lane):
@@ -1077,7 +1087,7 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 		await get_tree().create_timer(0.4).timeout
 		# Read from the hand that is about to let go, so the predicted apex is
 		# a world height and can be put beside the lip it has to clear.
-		var apex: float = local.hand_position().y + rise * rise / (2.0 * Tuning.values.gravity)
+		var apex: float = local.hand_position().y + rise * rise / (2.0 * Tuning.server.gravity)
 		local.movement.set_aim_override(local.global_position + Vector3(0.0, 0.0, -20.0))
 		local.grab.throw()
 		await get_tree().create_timer(3.0).timeout
@@ -1105,7 +1115,7 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 # in isolation. So they get measured instead, in one table, every run.
 func _run_audit(local: Player) -> void:
 	print("PLAYGROUND_AUDIT_GRAVITY tuned=%.2f project=%.2f" % [
-		Tuning.values.gravity,
+		Tuning.server.gravity,
 		float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8))])
 	for node in get_tree().get_nodes_in_group(Rock.GROUP):
 		var rock := node as Rock
@@ -1281,8 +1291,6 @@ func _run_stage7_checks(local: Player) -> void:
 		# Thrown flat for this one check: at the documented 35 degrees a rock
 		# aimed from three metres passes clean over a 1.8 m dummy, which would
 		# measure the arc rather than the hit.
-		var angle_was: float = Tuning.values.throw_up_angle_deg
-		Tuning.values.throw_up_angle_deg = 0.0
 		var dummy_hp := dummy.hp
 		var dummy_at := dummy.global_position
 		# A line at it: stage E solves an arc to the cursor instead of throwing
@@ -1309,7 +1317,6 @@ func _run_stage7_checks(local: Player) -> void:
 			sampled += get_physics_process_delta_time()
 			closest = minf(closest, rock_0.global_position.distance_to(dummy.global_position))
 			pushed = maxf(pushed, _flat(dummy.global_position - dummy_at))
-		Tuning.values.throw_up_angle_deg = angle_was
 		print("PLAYGROUND_STAGE7_ROCKPATH closest=%.2f rock_y=%.2f rock_at=(%.1f, %.1f)" % [
 			closest, rock_0.global_position.y, rock_0.global_position.x, rock_0.global_position.z])
 		print("PLAYGROUND_STAGE7_ROCKHIT hp=%.0f-%.0f moved=%.2f" % [dummy_hp, dummy.hp, pushed])
@@ -1334,14 +1341,14 @@ func _run_stage7_checks(local: Player) -> void:
 
 		# 7-6: a holder who is stunned drops what it was carrying.
 		ServerAuthority.instance.send_force(local, ForceSystem.make_event(
-			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.1, 0.0), Tuning.values.shove_power,
-			10.0, 1, false, 1.0, Tuning.values.shove_stun_time))
+			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.1, 0.0), Tuning.server.shove_power,
+			10.0, 1, false, 1.0, Tuning.server.shove_stun_time))
 		# B-c: the hold ends when the table says so, which is after
 		# ServerAuthority.HOLD_GRACE rather than on the next frame.
 		await get_tree().create_timer(ServerAuthority.HOLD_GRACE + 0.3).timeout
 		print("PLAYGROUND_STAGE7_STUNDROP state=%s holder=%d holding=%s" % [
 			Player.State.keys()[local.state], rock_1.holder_peer, local.grab.is_holding()])
-		await get_tree().create_timer(Tuning.values.shove_stun_time + 0.8).timeout
+		await get_tree().create_timer(Tuning.server.shove_stun_time + 0.8).timeout
 
 		# 7-6: and so does a holder who leaves the ground.
 		await _settle(local, Vector3(0.0, 1.0, 11.0))
@@ -1447,8 +1454,8 @@ func _run_stage7_team(local: Player) -> void:
 		var mid_air := remote.state == Player.State.AIRBORNE
 		var before := remote.global_position
 		ServerAuthority.instance.send_force(remote, ForceSystem.make_event(
-			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.3, 0.0), Tuning.values.shove_power,
-			local.stats.strength, 1, true, Tuning.values.shove_damage, 0.0))
+			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.3, 0.0), Tuning.server.shove_power,
+			local.stats.strength, 1, true, Tuning.server.shove_damage, 0.0))
 		await get_tree().create_timer(1.5).timeout
 		print("PLAYGROUND_STAGE7_SECONDPUSH airborne=%s extra=%.2f" % [
 			mid_air, _flat(remote.global_position - before)])
@@ -1458,7 +1465,7 @@ func _run_stage7_team(local: Player) -> void:
 	# 7-6: a held body that is pushed comes free and takes the push.
 	if await _grab_remote(local, remote):
 		ServerAuthority.instance.send_force(remote, ForceSystem.make_event(
-			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.3, 0.0), Tuning.values.shove_power,
+			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.3, 0.0), Tuning.server.shove_power,
 			local.stats.strength, 1, true, 0.0, 0.0))
 		await get_tree().create_timer(0.6).timeout
 		print("PLAYGROUND_STAGE7_FORCEFREE remote_state=%s still_holding=%s" % [
@@ -1513,13 +1520,9 @@ func _run_rock_vs_player(local: Player, remote: Player) -> void:
 		return
 	# A hit means the two surfaces met: sphere radius plus the capsule's 0.4.
 	var touching := Rock.radius_for(rock.weight) + Player.BODY_RADIUS
-	# Flat at 3 m is in the list on purpose: it is the one that answers "can a
-	# thrown rock hit a person at all", separately from "does the documented
-	# 35 degree lob reach one", which at 3 to 6 m it does not.
-	for leg in [[3.0, 0.0], [3.0, 35.0], [6.0, 35.0], [9.0, 35.0], [12.0, 35.0]]:
-		var distance: float = leg[0]
-		var angle_was: float = Tuning.values.throw_up_angle_deg
-		Tuning.values.throw_up_angle_deg = leg[1]
+	# A line throw at each distance. The angle legs are gone with the fixed
+	# angle (N-1): a line never read it, so they measured the same throw twice.
+	for distance: float in [3.0, 6.0, 9.0, 12.0]:
 		if local.state == Player.State.DEAD:
 			local.respawn()
 		await _settle(local, THROW_LANE)
@@ -1547,10 +1550,9 @@ func _run_rock_vs_player(local: Player, remote: Player) -> void:
 				closest = gap
 				passing_height = rock.global_position.y - remote.global_position.y
 		local.movement.set_aim_override(Vector3.INF)
-		print("PLAYGROUND_ROCK_VS_PLAYER distance=%.0f angle=%.0f closest=%.2f touching_at=%.2f passing_height=%.2f hp=%.0f-%.0f moved=%.2f" % [
-			distance, Tuning.values.throw_up_angle_deg, closest, touching, passing_height,
+		print("PLAYGROUND_ROCK_VS_PLAYER distance=%.0f line closest=%.2f touching_at=%.2f passing_height=%.2f hp=%.0f-%.0f moved=%.2f" % [
+			distance, closest, touching, passing_height,
 			hp_before, remote.hp, _flat(remote.global_position - stood)])
-		Tuning.values.throw_up_angle_deg = angle_was
 		# The harness putting a prop back on its mark, not game logic: the next
 		# leg has to start from the same place, and a rock left lying beside the
 		# team mate would be grabbed instead of them.
