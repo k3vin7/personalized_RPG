@@ -85,8 +85,7 @@ func setup(owner_player: Player) -> void:
 	_agent.name = "NavigationAgent3D"
 	# Lifts returned points to the body origin so our own XZ consumption lines
 	# up with where the body actually is.
-	_agent.path_height_offset = Player.BODY_HALF_HEIGHT
-	_agent.radius = Player.BODY_RADIUS
+	refresh_body_size()
 	_agent.avoidance_enabled = false
 	player.add_child(_agent)
 
@@ -507,8 +506,10 @@ func _stand_on_head(delta: float) -> bool:
 		# in about a fifth of a second, so without this the stomp lasted a
 		# fraction of head_stomp_time and the number meant nothing. Our own
 		# position, which is ours to write, put on top of the head.
+		# M-4: their head is their half height up; we stand our own above it.
+		var head_half := (_head_body as Player).half_height() if _head_body is Player else Player.BODY_HALF_HEIGHT
 		player.global_position = _head_body.global_position \
-			+ Vector3.UP * (Player.BODY_HALF_HEIGHT * 2.0)
+			+ Vector3.UP * (head_half + player.half_height())
 		player.velocity = Vector3.ZERO
 		if player.state == Player.State.AIRBORNE:
 			player.change_state(Player.State.IDLE)
@@ -537,7 +538,7 @@ func _floor_body() -> Node:
 			return collision.get_collider()
 	var from := player.global_position
 	var query := PhysicsRayQueryParameters3D.create(
-		from, from + Vector3.DOWN * (Player.BODY_HALF_HEIGHT + 0.3), Player.PLAYER_LAYER)
+		from, from + Vector3.DOWN * (player.half_height() + 0.3), Player.PLAYER_LAYER)
 	query.collide_with_areas = false
 	query.exclude = [player.get_rid()]
 	var hit := player.get_world_3d().direct_space_state.intersect_ray(query)
@@ -830,7 +831,7 @@ func climb_request_distance() -> float:
 	if _climb_wall == null:
 		return -1.0
 	var plane := Plane(_climb_normal, _climb_point)
-	return absf(plane.distance_to(player.global_position)) - Player.BODY_RADIUS
+	return absf(plane.distance_to(player.global_position)) - player.radius()
 
 
 # Probes outwards for a wall rather than reading the last step's contact list.
@@ -840,7 +841,7 @@ func try_air_catch() -> bool:
 	if player.state != Player.State.AIRBORNE or player.climb == null:
 		return false
 	var space := player.get_world_3d().direct_space_state
-	var reach := Player.BODY_RADIUS + CATCH_REACH
+	var reach := player.radius() + CATCH_REACH
 	for index in range(CATCH_PROBES):
 		var angle := TAU * float(index) / float(CATCH_PROBES)
 		var direction := Vector3(sin(angle), 0.0, cos(angle))
@@ -929,6 +930,17 @@ func request_dash() -> bool:
 	return true
 
 
+# M-4: the agent follows the body's size. The navigation mesh itself stays the
+# one 1.8 m bake (결정 3); where a tall race does not fit is reported, not fixed.
+func refresh_body_size() -> void:
+	if _agent == null:
+		return
+	_agent.path_height_offset = player.half_height()
+	_agent.radius = player.radius()
+	if _indicator != null:
+		_indicator.foot_drop = player.half_height()
+
+
 # N-2: a correction from the server ends a dash where the body is put.
 func cancel_dash() -> void:
 	if is_dashing():
@@ -1002,7 +1014,7 @@ func cursor_jump_target() -> Vector3:
 	if hit.is_empty():
 		var point: Variant = _cursor_ground_point()
 		return point as Vector3 if point != null else player.global_position
-	return (hit["position"] as Vector3) + Vector3.UP * Player.BODY_HALF_HEIGHT
+	return (hit["position"] as Vector3) + Vector3.UP * player.half_height()
 
 
 # The spot on our own standing plane the cursor is over. Used to pick between

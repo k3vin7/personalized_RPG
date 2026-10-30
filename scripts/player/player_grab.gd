@@ -77,12 +77,12 @@ func grab() -> bool:
 		if score < aimed_score:
 			aimed_score = score
 			aimed = body
-	if aimed == null or aimed_score > Tuning.values.grab_cursor_radius + Player.BODY_RADIUS:
+	if aimed == null or aimed_score > Tuning.values.grab_cursor_radius + player.radius():
 		print("PLAYGROUND_GRAB by=%s nothing_under_the_cursor" % player.name)
 		return false
 	var offset := aimed.global_position - player.global_position
 	offset.y = 0.0
-	if offset.length() - Player.BODY_RADIUS > Tuning.server.grab_range:
+	if offset.length() - player.radius() > Tuning.server.grab_range:
 		print("PLAYGROUND_GRAB by=%s target=%s out_of_reach" % [player.name, aimed.name])
 		return false
 	if judge.holder_of(aimed) != 0:

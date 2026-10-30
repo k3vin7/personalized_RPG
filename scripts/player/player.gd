@@ -31,6 +31,10 @@ const CLIMBABLE_LAYER := Layers.CLIMBABLE
 const PLAYER_LAYER := Layers.PLAYER
 const THROWABLE_LAYER := Layers.THROWABLE
 
+# M-4: the human's body, at 180 cm. Every other race's capsule is this scaled
+# by its height (RaceData.height_cm / the human's), so these two are the
+# reference and nothing reads them for a particular body any more: radius()
+# and half_height() below do, and resize the capsule when the race changes.
 const BODY_RADIUS := 0.4
 const BODY_HALF_HEIGHT := 0.9
 # DOC: a held rock or team mate sits 0.8 m above the head, where it is visible
@@ -126,6 +130,11 @@ var skills: PlayerSkills
 var _skill_lean_deg := 0.0
 var _strike_box: MeshInstance3D
 var _strike_left := 0.0
+# M-4: the race the capsule is currently sized for, and the pieces resized.
+var _body_race := -1
+var _body_shape: CapsuleShape3D
+var _body_mesh: CapsuleMesh
+var _facing: MeshInstance3D
 var stamina := 100.0
 # H-3: the owner's stamina, replicated on the pose synchronizer for display on
 # other screens. Spending it is still the owner's (the server does not check
@@ -446,6 +455,48 @@ func is_grounded_state() -> bool:
 		or state == State.CASTING or state == State.RECOVERING
 
 
+# M-4: how big this body is, off its race's height against the human's. 1.0 for
+# a human; an orc at 220 cm is 1.22, a dwarf at 150 is 0.83.
+func body_scale() -> float:
+	if stats == null:
+		return 1.0
+	return stats.height_cm / maxf(Races.data_for(Races.DEFAULT).height_cm, 1.0)
+
+
+func half_height() -> float:
+	return BODY_HALF_HEIGHT * body_scale()
+
+
+func radius() -> float:
+	return BODY_RADIUS * body_scale()
+
+
+# Sizes the capsule, the mesh, the shadow, the label and the agent to the race.
+# Run on every peer when the race changes -- the server wrote it, the Vitals
+# synchronizer carried it -- so the body the server judges with and the body
+# each screen shows are the same size.
+func _apply_body_size() -> void:
+	if stats == null or _body_shape == null:
+		return
+	_body_race = stats.race
+	var r := radius()
+	var h := half_height()
+	_body_shape.radius = r
+	_body_shape.height = h * 2.0
+	_body_mesh.radius = r
+	_body_mesh.height = h * 2.0
+	if _facing != null:
+		_facing.position = Vector3(0.0, 0.2 * body_scale(), -(r + 0.18))
+	if _shadow != null:
+		(_shadow.mesh as QuadMesh).size = Vector2(r * 2.4, r * 2.4)
+	if _label != null:
+		_label.position = Vector3(0.0, h + 0.55, 0.0)
+	if movement != null:
+		movement.refresh_body_size()
+	print("PLAYGROUND_BODY_SIZE peer=%s race=%s radius=%.2f half_height=%.2f" % [
+		name, Races.label_for(stats.race), r, h])
+
+
 # M-1: in a cast's windup or recovery. Nothing else may be ordered meanwhile.
 func is_casting() -> bool:
 	return state == State.CASTING or state == State.RECOVERING
@@ -489,6 +540,8 @@ func _sync_stats() -> void:
 
 func _physics_process(delta: float) -> void:
 	_sync_stats()
+	if stats != null and stats.race != _body_race:
+		_apply_body_size()
 	_except_holder()
 	if is_local():
 		# The server owns the flag; this is the body catching up with it, which
@@ -686,7 +739,7 @@ func _update_shadow() -> void:
 	# Just clear of the surface, or it fights with the floor it is drawn on.
 	_shadow.global_position = ground + Vector3.UP * 0.02
 	_shadow.global_rotation = Vector3(-PI * 0.5, 0.0, 0.0)
-	var height := maxf(0.0, from.y - BODY_HALF_HEIGHT - ground.y)
+	var height := maxf(0.0, from.y - half_height() - ground.y)
 	var closeness: float = 1.0 - clampf(height / SHADOW_FADE_HEIGHT, 0.0, 1.0)
 	var size: float = lerpf(SHADOW_MIN_SCALE, 1.0, closeness)
 	_shadow.scale = Vector3(size, size, 1.0)
@@ -920,7 +973,7 @@ func snap_facing(direction: Vector3) -> void:
 
 
 func hand_position() -> Vector3:
-	return global_position + Vector3.UP * (BODY_HALF_HEIGHT + HAND_HEIGHT)
+	return global_position + Vector3.UP * (half_height() + HAND_HEIGHT * body_scale())
 
 
 func set_overhead_note(text: String) -> void:
@@ -955,10 +1008,12 @@ func face_direction(direction: Vector3, delta: float, turn_speed: float = 16.0) 
 
 func _build_body() -> void:
 	var collision := CollisionShape3D.new()
+	collision.name = "BodyShape"
 	var shape := CapsuleShape3D.new()
 	shape.radius = BODY_RADIUS
 	shape.height = BODY_HALF_HEIGHT * 2.0
 	collision.shape = shape
+	_body_shape = shape
 	add_child(collision)
 
 	_visual = Node3D.new()
@@ -970,6 +1025,7 @@ func _build_body() -> void:
 	capsule.radius = BODY_RADIUS
 	capsule.height = BODY_HALF_HEIGHT * 2.0
 	body.mesh = capsule
+	_body_mesh = capsule
 	_material = StandardMaterial3D.new()
 	_material.roughness = 0.7
 	body.material_override = _material
@@ -987,6 +1043,7 @@ func _build_body() -> void:
 	facing_material.albedo_color = Color.WHITE
 	facing.material_override = facing_material
 	_visual.add_child(facing)
+	_facing = facing
 
 	# A blob on the ground under the body. top_level, so the parent transform
 	# does not carry it up with the body: it stays on the floor, and the gap
@@ -1076,7 +1133,7 @@ func _apply_predicted_pose() -> void:
 	# knocked down lies flat, and eases back up through the getup.
 	var lying := _lying()
 	_visual.rotation.x = deg_to_rad(-(12.0 if leaning else 0.0) - _skill_lean_deg - 85.0 * lying)
-	_visual.position.y = (-0.08 if leaning else 0.0) - (BODY_HALF_HEIGHT - BODY_RADIUS) * lying
+	_visual.position.y = (-0.08 if leaning else 0.0) - (half_height() - radius()) * lying
 
 
 # M-1: the procedural show, one phase at a time. "windup" leans the capsule
@@ -1099,7 +1156,7 @@ func show_skill_phase(def: SkillDef, phase: String) -> void:
 			if _strike_box != null:
 				var box := _strike_box.mesh as BoxMesh
 				box.size = Vector3(0.25, 0.25, def.strike_extent)
-				_strike_box.position = Vector3(0.0, def.strike_height, -(BODY_RADIUS + def.strike_extent * 0.5))
+				_strike_box.position = Vector3(0.0, def.strike_height * body_scale(), -(radius() + def.strike_extent * 0.5))
 				(_strike_box.material_override as StandardMaterial3D).albedo_color = def.colour
 				_strike_box.visible = true
 				_strike_left = PlayerSkills.STRIKE_SHOW

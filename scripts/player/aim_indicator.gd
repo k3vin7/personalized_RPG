@@ -15,6 +15,9 @@ const LANDING_COLOUR := Color(0.6, 1.0, 0.65, 0.85)
 # Out of reach: the ring is the budget's edge, not the cursor.
 const CLAMPED_COLOUR := Color(1.0, 0.72, 0.25, 0.9)
 
+# M-4: how far below the body's origin its feet are. Set by the movement from
+# the body's own half height, so a dwarf's ring sits on the floor too.
+var foot_drop := Player.BODY_HALF_HEIGHT
 var _reach: MeshInstance3D
 var _landing: MeshInstance3D
 # The dash shows where it is going as an arrow from here to there, because a
@@ -92,10 +95,10 @@ func show_aim(from: Vector3, reach: float, landing: Vector3, clamped: bool) -> v
 	_arrow.visible = false
 	_clamped = clamped
 	# A ring sitting exactly on the floor z-fights with it.
-	_reach.global_position = Vector3(from.x, from.y - Player.BODY_HALF_HEIGHT + 0.03, from.z)
+	_reach.global_position = Vector3(from.x, from.y - foot_drop + 0.03, from.z)
 	_reach.scale = Vector3(maxf(reach, 0.1), 1.0, maxf(reach, 0.1))
 	_reach.visible = true
-	_landing.global_position = Vector3(landing.x, landing.y - Player.BODY_HALF_HEIGHT + 0.04, landing.z)
+	_landing.global_position = Vector3(landing.x, landing.y - foot_drop + 0.04, landing.z)
 	_landing.scale = Vector3(0.45, 1.0, 0.45)
 	(_landing.material_override as StandardMaterial3D).albedo_color = \
 		CLAMPED_COLOUR if clamped else LANDING_COLOUR
@@ -137,7 +140,7 @@ func show_arrow(from: Vector3, to: Vector3, clamped: bool) -> void:
 	mesh.surface_end()
 	(_arrow.material_override as StandardMaterial3D).albedo_color = \
 		CLAMPED_COLOUR if clamped else LANDING_COLOUR
-	_arrow.global_position = Vector3(from.x, from.y - Player.BODY_HALF_HEIGHT + 0.04, from.z)
+	_arrow.global_position = Vector3(from.x, from.y - foot_drop + 0.04, from.z)
 	_arrow.visible = true
 
 

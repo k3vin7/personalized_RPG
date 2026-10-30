@@ -218,7 +218,7 @@ func _check_ends() -> void:
 		player.change_state(Player.State.IDLE)
 		return
 	# Top: no wall left above the head, and ground just past the edge.
-	var head := player.global_position + Vector3.UP * (Player.BODY_HALF_HEIGHT + 0.15)
+	var head := player.global_position + Vector3.UP * (player.half_height() + 0.15)
 	var inward := head - wall_normal * (HANG_DISTANCE + EDGE_PROBE)
 	var space := player.get_world_3d().direct_space_state
 	var ahead := PhysicsRayQueryParameters3D.create(head, inward, Playground.CLIMBABLE_LAYER)
@@ -231,7 +231,7 @@ func _check_ends() -> void:
 	# Stood exactly where the probe found ground. Pushing further in sounds
 	# safer but these walls are 0.6 m thick, so half a metre of inset comes out
 	# the other side and drops the body in mid air.
-	_mantle_to = (floor_hit["position"] as Vector3) + Vector3.UP * Player.BODY_HALF_HEIGHT
+	_mantle_to = (floor_hit["position"] as Vector3) + Vector3.UP * player.half_height()
 	_mantle_left = MANTLE_TIME
 	player.velocity = Vector3.ZERO
 	player.change_state(Player.State.MANTLE)

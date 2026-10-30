@@ -1044,7 +1044,7 @@ func _run_stage8_checks(local: Player) -> void:
 		peak = maxf(peak, local.global_position.y)
 	local.movement.set_aim_override(Vector3.INF)
 	print("PLAYGROUND_STAGE8_JUMPGATE peak_y=%.2f top_y=%.2f over=%s rested_y=%.2f" % [
-		peak, TimeBoundary.TOP_Y, peak > TimeBoundary.TOP_Y + Player.BODY_HALF_HEIGHT,
+		peak, TimeBoundary.TOP_Y, peak > TimeBoundary.TOP_Y + local.half_height(),
 		local.global_position.y])
 
 	# 8-3: climbing it puts you on the sand.
@@ -1056,7 +1056,7 @@ func _run_stage8_checks(local: Player) -> void:
 		print("PLAYGROUND_STAGE8_CLIMB y=%.2f z=%.2f state=%s stamina=%.0f on_top=%s" % [
 			local.global_position.y, local.global_position.z,
 			Player.State.keys()[local.state], local.stamina,
-			local.global_position.y > TimeBoundary.TOP_Y + Player.BODY_HALF_HEIGHT - 0.2])
+			local.global_position.y > TimeBoundary.TOP_Y + local.half_height() - 0.2])
 	else:
 		print("PLAYGROUND_STAGE8_CLIMB attach_failed")
 	await _settle(local, Vector3(seam_x, 1.0, face_z + 4.0))
@@ -1082,7 +1082,7 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 		return
 
 	# Clearing the lip means the body's centre, not its feet.
-	var wanted := TimeBoundary.TOP_Y + Player.BODY_HALF_HEIGHT
+	var wanted := TimeBoundary.TOP_Y + remote.half_height()
 	var mate_weight := Races.data_for(Races.DEFAULT).body_weight
 	_harness_set_remote_weight(remote, mate_weight)
 	# v4 scale. 60 is a bare human and fails -- at the lift now, not the
@@ -1206,7 +1206,7 @@ func _run_audit(local: Player) -> void:
 	# Two capsules of radius 0.4 cannot be closer than 0.8 apart if they are
 	# solid to each other.
 	print("PLAYGROUND_AUDIT_WALKINTO closest=%.2f solid_at=%.2f passed_through=%s dummy_moved=%.2f" % [
-		closest, Player.BODY_RADIUS * 2.0, closest < Player.BODY_RADIUS * 2.0 - 0.05,
+		closest, local.radius() * 2.0, closest < local.radius() * 2.0 - 0.05,
 		_flat(dummy.global_position - dummy.home)])
 	local.movement.cancel_target()
 
@@ -1550,7 +1550,7 @@ func _run_rock_vs_player(local: Player, remote: Player) -> void:
 	if rock == null:
 		return
 	# A hit means the two surfaces met: sphere radius plus the capsule's 0.4.
-	var touching := Rock.radius_for(rock.weight) + Player.BODY_RADIUS
+	var touching := Rock.radius_for(rock.weight) + remote.radius()
 	# A line throw at each distance. The angle legs are gone with the fixed
 	# angle (N-1): a line never read it, so they measured the same throw twice.
 	for distance: float in [3.0, 6.0, 9.0, 12.0]:

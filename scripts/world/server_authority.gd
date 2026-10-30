@@ -206,7 +206,19 @@ var last_refusal := ""
 # How far a body's centre may be from the strike's height and still be hit: a
 # body's own half height, and the reach of a leg or an arm beyond it. A body
 # that has jumped clear is out of it; one just off the ground is not.
-const STRIKE_BAND := Player.BODY_HALF_HEIGHT + 0.9
+const STRIKE_REACH_BEYOND := 0.9
+
+
+# M-4: a strike's height band, off the body it is judged against: its own half
+# height and the reach of a limb beyond it. Non-player bodies take the human's.
+func strike_band(body: Node3D) -> float:
+	return (body as Player).half_height() + STRIKE_REACH_BEYOND if body is Player \
+		else Player.BODY_HALF_HEIGHT + STRIKE_REACH_BEYOND
+
+
+# M-4: the radius of whatever a rectangle is being applied to.
+func body_radius(body: Node3D) -> float:
+	return (body as Player).radius() if body is Player else Player.BODY_RADIUS
 # N-3: when the held people's positions were last pushed. They ride the hand on
 # the rock's interval, from here, like a rock.
 var _held_push_left := 0.0
@@ -359,12 +371,12 @@ func _was_standing_on(holder: Player, target: Node3D) -> bool:
 	if holder == null or target == null:
 		return false
 	var below := holder.global_position.y - target.global_position.y
-	if below < Player.BODY_HALF_HEIGHT * 0.5:
+	if below < holder.half_height() * 0.5:
 		return false
 	var flat := Vector2(
 		holder.global_position.x - target.global_position.x,
 		holder.global_position.z - target.global_position.z).length()
-	return flat <= Player.BODY_RADIUS + 0.5
+	return flat <= holder.radius() + 0.5
 
 
 # The only way a hold ends. Returns what was being held.
@@ -702,9 +714,17 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 		# Behind, past the end, or off to the side: not in the rectangle. The
 		# body's own radius counts, or a shove would pass either side of
 		# someone standing right in front of it.
-		if along <= -Player.BODY_RADIUS or along > reach + Player.BODY_RADIUS:
+		# M-4: the rectangle is the pusher's; what it has to reach is the target's
+		# own radius, and its height is the pusher's -- a dwarf's shove is lower.
+		var target_radius := body_radius(body)
+		if along <= -target_radius or along > reach + target_radius:
 			continue
-		if across > half_width + Player.BODY_RADIUS:
+		if across > half_width + target_radius:
+			continue
+		# A team mate in the air is reached for -- that is the co-op launch, a
+		# body at the top of its jump pushed on across a gap -- so the band is
+		# for what stands on the ground.
+		if not (body is Player and recently_airborne(body as Player)) 				and absf(body.global_position.y - actor.global_position.y) > shove_band(actor):
 			continue
 		# 4-chapter: a team mate is another player while the debug toggle says
 		# they are in the same party. The playground is all field, so there is
@@ -959,7 +979,7 @@ func can_grab(actor: Player, target: Node3D) -> bool:
 		if person.state == Player.State.DEAD or person.state == Player.State.GRABBED:
 			return false
 	if actor.global_position.distance_to(target.global_position) > (
-			Tuning.server.grab_range + Player.BODY_RADIUS + INTENT_RANGE_SLACK):
+			Tuning.server.grab_range + actor.radius() + INTENT_RANGE_SLACK):
 		return false
 	if weight_of(target) > lift_limit(actor):
 		return false
@@ -977,6 +997,12 @@ func lift_limit(actor: Player) -> float:
 	if Tuning.server.one_hand_weapon:
 		limit /= maxf(Tuning.server.grab_one_hand_strength_mult, 0.01)
 	return limit if is_finite(limit) else 0.0
+
+
+# M-4: how high a shove reaches, off the pusher's body: its half height and a
+# limb beyond. The check "a dwarf's rectangle is lower" reads this.
+func shove_band(actor: Player) -> float:
+	return actor.half_height() + STRIKE_REACH_BEYOND
 
 
 # The seat for the attack grab. The real version compares the attack's force
@@ -1110,8 +1136,8 @@ func _rule_drop(actor: Player) -> Variant:
 # is free the rock falls from the hand as before.
 func _put_down_rock(holder: Player, rock: Rock) -> void:
 	var radius := Rock.radius_for(rock.weight)
-	var reach := Player.BODY_RADIUS + radius + 0.1
-	var ground_y := holder.global_position.y - Player.BODY_HALF_HEIGHT + radius
+	var reach := holder.radius() + radius + 0.1
+	var ground_y := holder.global_position.y - holder.half_height() + radius
 	var forward := -holder.global_transform.basis.z
 	forward.y = 0.0
 	if forward.length_squared() < 0.0001:
@@ -1804,7 +1830,7 @@ func _rule_strike(actor: Player, def: SkillDef, direction: Vector3) -> Variant:
 	# legs (the SkillDef's strike_height, off the body's centre); a target whose
 	# body does not cross that height is not hit. A body on a knee-high step is
 	# still punched; one a ledge up is not kicked.
-	var strike_y := actor.global_position.y + def.strike_height
+	var strike_y := actor.global_position.y + def.strike_height * actor.body_scale()
 	var hits := 0
 	var downed := 0
 	for collision in actor.get_world_3d().direct_space_state.intersect_shape(params, 8):
@@ -1815,11 +1841,12 @@ func _rule_strike(actor: Player, def: SkillDef, direction: Vector3) -> Variant:
 		offset.y = 0.0
 		var along := offset.dot(forward)
 		var across := absf(offset.dot(side))
-		if along <= -Player.BODY_RADIUS or along > reach + Player.BODY_RADIUS:
+		var target_radius := body_radius(body)
+		if along <= -target_radius or along > reach + target_radius:
 			continue
-		if across > half_width + Player.BODY_RADIUS:
+		if across > half_width + target_radius:
 			continue
-		if absf(body.global_position.y - strike_y) > STRIKE_BAND:
+		if absf(body.global_position.y - strike_y) > strike_band(body):
 			continue
 		if body is Rock and holder_of(body) != 0:
 			continue
@@ -2039,10 +2066,12 @@ func _release_person(holder: Player, person: Player, away_hint := Vector3.ZERO) 
 		if away.length_squared() < 0.0001:
 			away = Vector3.FORWARD
 		away = away.normalized()
+		# M-4: clear of both bodies, whatever their sizes.
+		var apart := (holder.radius() + person.radius()) * 1.1
 		at = Vector3(
-			holder.global_position.x + away.x * Player.BODY_RADIUS * 2.2,
-			holder.global_position.y,
-			holder.global_position.z + away.z * Player.BODY_RADIUS * 2.2)
+			holder.global_position.x + away.x * apart,
+			holder.global_position.y - holder.half_height() + person.half_height(),
+			holder.global_position.z + away.z * apart)
 	var peer := person.get_multiplayer_authority()
 	forgive_move(peer, "", MOVE_FORGIVE_SAMPLES if person.is_local() else MOVE_CORRECT_FORGIVE_REMOTE)
 	print("PLAYGROUND_RELEASE_AT peer=%s at=(%.2f, %.2f, %.2f)" % [person.name, at.x, at.y, at.z])

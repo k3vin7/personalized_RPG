@@ -114,6 +114,7 @@ func run(world: Node3D) -> void:
 	await _knockdown_sequence_check()
 	await _race_checks()
 	await _weapon_checks()
+	await _body_size_checks()
 	Tuning.values.smart_key_enabled = smart
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_m")
 	expect(_judge.move_corrections == corrections, "no_corrections_during_stage_m")
@@ -666,6 +667,53 @@ func _weapon_checks() -> void:
 	_reports.erase("weapon")
 	client_weapon.rpc_id(_client_peer(), WeaponKinds.Kind.NONE, false)
 	await _wait_report("weapon")
+
+
+# ------------------------------------------------- M-4: the body follows the height
+
+func _body_size_checks() -> void:
+	var mate := _judge.actor_for(_client_peer())
+	var human := Races.data_for(Races.DEFAULT).height_cm
+	# Four races, four capsules, in proportion to the height.
+	var rows := PackedStringArray()
+	for kind: int in Races.all_kinds():
+		var data := Races.data_for(kind)
+		await tick_request(func() -> void: _judge.harness_set_race(_local, kind))
+		await _wait(0.3)
+		var shape := (_local.get_node("BodyShape") as CollisionShape3D).shape as CapsuleShape3D
+		var want_half := Player.BODY_HALF_HEIGHT * data.height_cm / human
+		rows.append("%s %.0fcm: half %.3f (want %.3f) radius %.3f shape h %.2f r %.2f hand %.2f" % [
+			data.label, data.height_cm, _local.half_height(), want_half, _local.radius(),
+			shape.height, shape.radius, _local.hand_position().y - _local.global_position.y])
+		expect(absf(_local.half_height() - want_half) < 0.001 and absf(shape.height - want_half * 2.0) < 0.001,
+			"%s_capsule_is_in_proportion_to_its_height" % String(Races.Kind.keys()[kind]).to_lower())
+	note("capsules: %s" % " | ".join(rows))
+	# A dwarf's shove reaches lower than a human's.
+	await tick_request(func() -> void: _judge.harness_set_race(_local, Races.Kind.DWARF))
+	await _wait(0.3)
+	var dwarf_band := _judge.shove_band(_local)
+	await tick_request(func() -> void: _judge.harness_set_race(_local, Races.Kind.HUMAN))
+	await _wait(0.3)
+	var human_band := _judge.shove_band(_local)
+	note("shove band: dwarf %.3f, human %.3f" % [dwarf_band, human_band])
+	expect(dwarf_band < human_band - 0.1, "a_dwarfs_shove_rectangle_is_lower")
+	if mate == null:
+		return
+	# An orc stands on a human's head: dropped onto it, it is held there at
+	# the human's half height plus its own.
+	await _park(HOME)
+	await tick_request(func() -> void: _judge.harness_set_race(mate, Races.Kind.ORC))
+	await _wait(0.6)
+	var orc_half := mate.half_height()
+	client_park.rpc_id(_client_peer(), HOME + Vector3(0.0, Player.BODY_HALF_HEIGHT + orc_half + 0.4, 0.0))
+	await _wait(1.0)
+	var above := mate.global_position.y - _local.global_position.y
+	note("orc on a human's head: orc half %.3f, standing %.3f above the human's origin (want %.3f), state %s" % [
+		orc_half, above, Player.BODY_HALF_HEIGHT + orc_half, Player.State.keys()[mate.state]])
+	expect(absf(above - (Player.BODY_HALF_HEIGHT + orc_half)) < 0.2, "an_orc_can_stand_on_a_humans_head")
+	await tick_request(func() -> void: _judge.harness_set_race(mate, Races.Kind.HUMAN))
+	client_park.rpc_id(_client_peer(), CLIENT_HOME)
+	await _wait(0.8)
 
 
 func _wait_report(key: String, seconds := 10.0) -> bool:
