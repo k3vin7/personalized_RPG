@@ -18,12 +18,9 @@ const WEIGHT := 12.0
 # 20 state packets a second. A dummy built in code has no synchronizer of its
 # own, so the host pushes its state: without this a client saw a dummy that
 # never moved however hard it was shoved.
-const STATE_INTERVAL := 0.05
 # Further than this in one state packet and the position is snapped with
 # collision off for a moment, rather than lerped through whatever is in the
 # way. Same numbers the rock uses, for the same reason.
-const TELEPORT_STEP := 2.0
-const TELEPORT_BLIND := 0.2
 
 var home := Vector3.ZERO
 var hp := MAX_HP
@@ -141,21 +138,21 @@ func _physics_process(delta: float) -> void:
 			sync_position = global_position
 			_state_left -= delta
 			if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
-				_state_left = STATE_INTERVAL
+				_state_left = SyncRules.STATE_INTERVAL
 				push_state.rpc(global_position, hp)
 			return
 	if not is_multiplayer_authority():
 		# Shown, not simulated.
 		if not _has_state:
 			return
-		if global_position.distance_to(sync_position) > TELEPORT_STEP:
+		if global_position.distance_to(sync_position) > SyncRules.TELEPORT_STEP:
 			# Carried across the plaza, or thrown: lerping that would drag the
 			# capsule through everyone on the way at teleport speed.
 			global_position = sync_position
-			_blind_left = TELEPORT_BLIND
+			_blind_left = SyncRules.TELEPORT_BLIND
 			collision_layer = 0
 		else:
-			global_position = global_position.lerp(sync_position, 1.0 - exp(-18.0 * delta))
+			global_position = global_position.lerp(sync_position, SyncRules.ease(delta))
 		if not is_equal_approx(hp, sync_hp):
 			hp = sync_hp
 			_refresh()
@@ -189,7 +186,7 @@ func _physics_process(delta: float) -> void:
 	sync_hp = hp
 	_state_left -= delta
 	if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
-		_state_left = STATE_INTERVAL
+		_state_left = SyncRules.STATE_INTERVAL
 		push_state.rpc(global_position, hp)
 
 

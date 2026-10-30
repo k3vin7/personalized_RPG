@@ -93,6 +93,33 @@ godot --headless --path . -- --auto-host --auto-smoke --auto-only=audit --auto-q
 ```
 `PLAYGROUND_AUDIT_PASSTHROUGH`가 한 줄이라도 나오면 그 둘은 서로 통과한다.
 `AUDIT_GRAVITY`의 effective가 tuned과 다르면 그 바디는 다른 세계에 있다.
+→ 동기화 상수(`TELEPORT_STEP`, `TELEPORT_BLIND`, lerp 계수, `STATE_INTERVAL`)는
+`scripts/world/sync_rules.gd`(`SyncRules`) 한 곳. 발사각 식은 `Ballistics.cheapest_launch`.
+
+### 9. 순간이동은 그 위에 얹힌 리지드바디를 순간이동 속도로 날린다
+Jolt는 키네마틱 바디(사람)의 속도를 위치 변화에서 읽는다. 머리 위에 돌이 얹힌
+채 `global_position`을 쓰면 돌이 **220 m/s**로 날아가 세계 밖으로 나간다.
+→ 몸을 순간이동시키는 모든 곳(리스폰, 보정, 원격 스냅)은 `collision_layer = 0`을
+`SyncRules.TELEPORT_BLIND` 동안 건다. 내려놓기는 손 높이에서 떨어뜨리지 않고
+보유자 옆 바닥 빈 자리에 둔다(`_put_down_rock`).
+→ 터진 적: B-a 클라 3건이 스테이지 E 이후 내내 이걸로 실패했는데, 리스폰 순서
+문제로 보였다.
+
+### 10. 리지드바디 스폰 y는 반지름이다
+반지름 1.7m 돌을 y=1에 두면 바닥에 박힌 채 튕겨 나와 굴러다닌다.
+→ `Rock.radius_for(weight) + 0.05`.
+
+### 11. 클라의 리스폰은 비동기다 (N-4)
+클라에서 `respawn()`은 요청이고 서버가 마크를 골라 `apply_respawn(at)`으로
+보낸다. 하네스가 `respawn()` 직후 같은 틱에 위치를 쓰면 **한 왕복 뒤 서버 응답이
+그 위치를 덮는다**. `Player.respawns_applied`가 늘어난 뒤 배치한다
+(`_respawn_and_land()` 패턴). 호스트는 동기라 그대로 된다.
+
+### 12. 서버 튜닝은 `Tuning.server`, 로컬은 `Tuning.values` (N-1)
+판정·궤적·비용에 들어가는 값은 전부 `Tuning.server`(PhysicsTuning). 클라
+복제본은 setter가 쓰기를 거부하므로 테스트에서 클라 쪽에 `Tuning.server.x = …`를
+써도 아무 일도 없다(그게 의도). 바꾸려면 호스트에서 쓰거나
+`Intent.SERVER_TUNING`을 보낸다. 입력·표시 값 7개만 `Tuning.values`(LocalTuning).
 
 ## 검증 절차 (단계마다 동일)
 

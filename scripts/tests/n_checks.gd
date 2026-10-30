@@ -94,6 +94,7 @@ func run(world: Node3D) -> void:
 	await _correction_checks()
 	await _held_checks()
 	await _respawn_checks()
+	await _throw_cliff_check()
 	print("N_RESULT lag=%s peer=%d checks=%d failures=%d" % [_label, _peer_id, _checks, _failures])
 	finish.rpc(_failures)
 	await _wait(1.0)
@@ -408,6 +409,102 @@ func _respawn_checks() -> void:
 		expect(_mark_gap(me) < 0.5, "and_on_a_mark")
 
 
+# ------------------------- the pass criterion: carried off the cliff, and back
+
+# Three metres in from the plaza's +x edge (x = 20), facing it.
+const CLIFF_STAND := Vector3(17.0, 0.9, 11.0)
+
+
+# A carries B and throws them over the cliff; B falls out of the world, dies,
+# and comes back. At every point where both screens can hold still -- carried,
+# dead, respawned -- they have to agree on where B is. In flight the owner
+# simulates and the other screen is a packet behind; that gap is measured and
+# reported, not asserted, because the rule is that the flight is B's own.
+func _throw_cliff_check() -> void:
+	var mate := _judge.actor_for(_client_peer())
+	if mate == null:
+		return
+	# A human cannot lift a human (72 kg against 80), so the thrower is handed
+	# the strength -- the same as stage 8 does.
+	await _park_pair(CLIFF_STAND, CLIFF_STAND + Vector3(1.0, 0.0, 0.0))
+	await tick_request(func() -> void: _judge.harness_set_stats(_local, 100.0))
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(mate.global_position)
+		_local.movement.interact())
+	await _wait(0.8)
+	expect(_judge.holder_of(mate) == 1, "cliff: the host took hold of the client")
+	var held_here := mate.global_position
+	_reports.erase("position")
+	client_report_position.rpc_id(_client_peer())
+	if await _wait_report("position"):
+		var held_there: Vector3 = _reports["position"]
+		note("cliff, carried: host sees (%.2f, %.2f, %.2f), client is at (%.2f, %.2f, %.2f), gap %.3f" % [
+			held_here.x, held_here.y, held_here.z, held_there.x, held_there.y, held_there.z,
+			held_here.distance_to(held_there)])
+		expect(held_here.distance_to(held_there) < 0.5, "cliff: carried, both screens agree")
+
+	# The throw, east, at a point past the edge: the arc solver clamps it to
+	# the reach (about 12 m at this strength), which lands the body beyond
+	# x = 20. Asked as the intent itself, with the landing point in it, because
+	# the cursor has no ground to name out over the void.
+	var corrections := _judge.move_corrections
+	_reports.erase("trace")
+	client_trace.rpc_id(_client_peer(), 1.2)
+	await tick_request(func() -> void:
+		ServerAuthority.submit_intent(_local, ServerAuthority.Intent.THROW, {
+			"direction": Vector3(1.0, 0.0, 0.0),
+			"target": _local.global_position + Vector3(12.0, 0.0, 0.0),
+			"charge": 1.0,
+			"line": false,
+		}))
+	# In flight: the client's own position against the host's copy, asked for
+	# every fifth of a second until the body is dead or down.
+	var worst_flight := 0.0
+	var samples := 0
+	var died := false
+	var waited := 0.0
+	while waited < 6.0 and not died:
+		_reports.erase("position")
+		client_report_position.rpc_id(_client_peer())
+		var asked := 0.0
+		while not _reports.has("position") and asked < 1.0:
+			await get_tree().create_timer(0.05).timeout
+			asked += 0.05
+			waited += 0.05
+		if _reports.has("position"):
+			var there: Vector3 = _reports["position"]
+			worst_flight = maxf(worst_flight, there.distance_to(mate.global_position))
+			samples += 1
+		if mate.sync_dead:
+			died = true
+		await get_tree().create_timer(0.15).timeout
+		waited += 0.15
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	if await _wait_report("trace", 4.0):
+		note("cliff, client trace (t:state:pos:vel:floor:held): %s" % String(_reports["trace"]))
+	note("cliff, in flight: %d samples, worst gap between the client's own position and the host's copy %.2f m (the owner flies, the other screen is a packet behind; not asserted)" % [
+		samples, worst_flight])
+	note("cliff: client dead=%s hp=%.0f y=%.2f x=%.2f" % [
+		mate.sync_dead, mate.hp, mate.global_position.y, mate.global_position.x])
+	expect(died, "cliff: the thrown client went out of the world and died")
+	expect(_judge.move_corrections == corrections, "cliff: the flight was not corrected")
+
+	# Back. The server picks the mark; both screens have the body on it.
+	await _wait(Tuning.server.respawn_delay + 1.5)
+	expect(not mate.sync_dead, "cliff: the client came back")
+	var back_here := mate.global_position
+	_reports.erase("position")
+	client_report_position.rpc_id(_client_peer())
+	if await _wait_report("position"):
+		var back_there: Vector3 = _reports["position"]
+		note("cliff, respawned: host sees (%.2f, %.2f, %.2f), client is at (%.2f, %.2f, %.2f), gap %.3f, nearest mark %.2f" % [
+			back_here.x, back_here.y, back_here.z, back_there.x, back_there.y, back_there.z,
+			back_here.distance_to(back_there), _mark_gap(back_there)])
+		expect(back_here.distance_to(back_there) < 0.5, "cliff: respawned, both screens agree")
+		expect(_mark_gap(back_there) < 0.5, "cliff: and on a mark")
+	await tick_request(func() -> void: _judge.harness_clear_stats(_local))
+
+
 # Flat distance from a point to the nearest spawn mark.
 func _mark_gap(at: Vector3) -> float:
 	var best := INF
@@ -561,6 +658,25 @@ func client_grab(target_path: NodePath) -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_drop() -> void:
 	await tick_request(func() -> void: _local.grab.drop())
+
+
+# Server -> client: our own body every 0.05 s for `seconds`, as one string.
+@rpc("authority", "call_remote", "reliable")
+func client_trace(seconds: float) -> void:
+	var rows := PackedStringArray()
+	var t := 0.0
+	var frame := 0
+	while t < seconds:
+		await get_tree().physics_frame
+		t += get_physics_process_delta_time()
+		frame += 1
+		if frame % 6 == 0:
+			rows.append("%.2f:%s:(%.1f,%.1f,%.1f):v(%.1f,%.1f,%.1f):%s:%s" % [
+				t, Player.State.keys()[_local.state],
+				_local.global_position.x, _local.global_position.y, _local.global_position.z,
+				_local.velocity.x, _local.velocity.y, _local.velocity.z,
+				_local.is_on_floor(), _local._has_held_position])
+	report.rpc_id(1, "trace", " | ".join(rows))
 
 
 @rpc("authority", "call_remote", "reliable")

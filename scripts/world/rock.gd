@@ -19,7 +19,6 @@ const HIT_DAMAGE := 4.0
 # A thrown rock leaves the thrower's own body alone for a moment: it starts
 # above their head and would otherwise clip them on the way out.
 const THROWER_GRACE := 0.3
-const STATE_INTERVAL := 0.05
 # CLAUDE.md lesson 4, with a rock instead of a capsule: a position that is
 # assigned sweeps the body along the whole path, and whatever is standing in it
 # is thrown out at teleport speed. A carried rock is assigned a new position
@@ -29,8 +28,6 @@ const STATE_INTERVAL := 0.05
 #    raised the hand, which swept it up again: endless, about 200 m/s.
 #  - any other long move blinds the rock for a moment, so a carried rock cannot
 #    launch a bystander it is dragged through.
-const TELEPORT_STEP := 2.0
-const TELEPORT_BLIND := 0.2
 
 var weight := 10.0
 var home := Vector3.ZERO
@@ -143,15 +140,15 @@ func _physics_process(delta: float) -> void:
 		_except_holder()
 		if _has_state:
 			# Shown, not simulated.
-			if _snap_state or global_position.distance_to(_sync_position) > TELEPORT_STEP:
+			if _snap_state or global_position.distance_to(_sync_position) > SyncRules.TELEPORT_STEP:
 				if not _snap_state:
 					_blind_for_teleport()
 				global_position = _sync_position
 				rotation = _sync_rotation
 				_snap_state = false
 			else:
-				global_position = global_position.lerp(_sync_position, 1.0 - exp(-18.0 * delta))
-				rotation = rotation.lerp(_sync_rotation, 1.0 - exp(-18.0 * delta))
+				global_position = global_position.lerp(_sync_position, SyncRules.ease(delta))
+				rotation = rotation.lerp(_sync_rotation, SyncRules.ease(delta))
 		return
 
 	if global_position.y < Tuning.server.kill_plane_y:
@@ -174,7 +171,7 @@ func _physics_process(delta: float) -> void:
 		var holder := _peer_player(holder_peer)
 		if holder != null:
 			var hand := holder.hand_position()
-			if global_position.distance_to(hand) > TELEPORT_STEP:
+			if global_position.distance_to(hand) > SyncRules.TELEPORT_STEP:
 				_blind_for_teleport()
 			global_position = hand
 			linear_velocity = Vector3.ZERO
@@ -182,7 +179,7 @@ func _physics_process(delta: float) -> void:
 
 	_state_left -= delta
 	if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
-		_state_left = STATE_INTERVAL
+		_state_left = SyncRules.STATE_INTERVAL
 		# Position only. The holder used to ride along here as well, which meant
 		# two sources for one fact; it now comes from the hold table alone.
 		push_state.rpc(global_position, rotation)
@@ -235,7 +232,7 @@ func _except_holder() -> void:
 # Collision off for a moment after a long jump, so the sweep cannot carry
 # anyone with it.
 func _blind_for_teleport() -> void:
-	_blind_left = TELEPORT_BLIND
+	_blind_left = SyncRules.TELEPORT_BLIND
 	collision_layer = 0
 
 
@@ -297,13 +294,20 @@ func _on_body_entered(body: Node) -> void:
 	# Through the judge, not straight at the force system: B-d made the damage
 	# a ruling, and send_force() is where it is made. Sent directly, a rock hit
 	# knocked a person about and cost them nothing.
+	# N-5: the source is whoever threw it, while the throw is still fresh, and
+	# nobody after that. It used to be the server (1) for every hit, which read
+	# as "the host hit itself" whenever a rock hit the host and left the fall
+	# that followed with no launch to attribute. Ally is judged the way a shove
+	# judges it: a player's throw, with the party toggle on.
+	var source := _thrower_peer if _thrower_grace > 0.0 else 0
+	var ally := source != 0 and body is Player and Tuning.server.same_party
 	ServerAuthority.instance.send_force(body, ForceSystem.make_event(
 		ForceSystem.Kind.KNOCKBACK,
 		direction,
 		speed * HIT_POWER_PER_SPEED,
 		0.0,
-		1,
-		false,
+		source,
+		ally,
 		HIT_DAMAGE,
 		0.0))
 	print("PLAYGROUND_ROCK_HIT rock=%s target=%s speed=%.2f" % [name, body.name, speed])

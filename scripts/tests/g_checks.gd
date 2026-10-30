@@ -92,6 +92,7 @@ func run(world: Node3D) -> void:
 	await _ally_flag_checks()
 	await _ally_void_checks()
 	await _cliff_respawn_checks()
+	await _rock_source_check()
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_g")
 	expect(_judge.move_corrections == corrections, "no_corrections_during_stage_g")
 	print("G_RESULT peer=%d checks=%d failures=%d" % [_peer_id, _checks, _failures])
@@ -222,6 +223,44 @@ func _cliff_respawn_checks() -> void:
 		note("respawned body: host sees %s, client sees %s, gap %.3f m" % [
 			client.global_position, there, gap])
 		expect(gap < 0.5, "both_screens_agree_on_where_the_respawned_body_is")
+
+
+# ----------------------------------------- N-5: a rock's hit is the thrower's
+
+# A rock the client threw hits the host. Before N-5 the hit's source was the
+# server (1), which for the host read as "hit by myself" and left no flight
+# source, so a fall it led to could not be a party member's.
+func _rock_source_check() -> void:
+	await _revive()
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = DROP_SPOT
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target())
+	await _wait(0.5)
+	var rock := _world.get_node("Rock_0") as Rock
+	var peer := _client_peer()
+	await tick_request(func() -> void:
+		rock.freeze = false
+		rock.note_thrown(peer)
+		rock.global_position = _local.global_position + Vector3(-2.5, 0.6, 0.0)
+		rock.angular_velocity = Vector3.ZERO
+		rock.linear_velocity = Vector3(12.0, 0.0, 0.0))
+	var waited := 0.0
+	while waited < 1.5 and not _judge._flight_source.has(1):
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+	var record: Dictionary = _judge._flight_source.get(1, {})
+	note("rock thrown by the client hit the host: flight source %s (by=%d ally=%s), hp %.0f" % [
+		_judge._flight_source.has(1), int(record.get("by", 0)), record.get("ally", false), _local.hp])
+	expect(_judge._flight_source.has(1), "a_rock_the_client_threw_is_the_hosts_flight_source")
+	expect(int(record.get("by", 0)) == peer, "and_it_is_credited_to_the_thrower")
+	await tick_request(func() -> void:
+		rock.global_position = rock.home
+		rock.linear_velocity = Vector3.ZERO
+		rock.angular_velocity = Vector3.ZERO)
+	await _wait(0.5)
+	await _revive()
 
 
 # --------------------------------------------------------------------- helpers

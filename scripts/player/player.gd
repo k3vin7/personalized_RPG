@@ -43,8 +43,6 @@ const SHADOW_REACH := 40.0
 const SHADOW_MIN_SCALE := 0.45
 const SHADOW_FADE_HEIGHT := 4.0
 
-const TELEPORT_STEP := 2.0
-const TELEPORT_BLIND := 0.2
 # N-2: how many times the server has put this body back. Read by the checks.
 var corrections_received := 0
 # N-4: how many respawns this body has applied. The checks wait on it: a
@@ -497,7 +495,7 @@ func _physics_process(delta: float) -> void:
 			shown = _held_position
 	else:
 		_has_held_position = false
-	if global_position.distance_to(shown) > TELEPORT_STEP:
+	if global_position.distance_to(shown) > SyncRules.TELEPORT_STEP:
 		# Put down at the far end rather than slid there. Easing across a
 		# teleport drags this capsule through whatever is standing in between,
 		# and the body it passes through is shoved out of the way at teleport
@@ -506,12 +504,12 @@ func _physics_process(delta: float) -> void:
 		# arrival does not shove anyone either.
 		global_position = shown
 		collision_layer = 0
-		_teleport_blind_left = TELEPORT_BLIND
+		_teleport_blind_left = SyncRules.TELEPORT_BLIND
 	else:
 		# Remote bodies are shown, not simulated: a short lerp hides the gap
 		# between state packets without letting them drift.
-		global_position = global_position.lerp(shown, 1.0 - exp(-18.0 * delta))
-	rotation.y = lerp_angle(rotation.y, sync_yaw, 1.0 - exp(-20.0 * delta))
+		global_position = global_position.lerp(shown, SyncRules.ease(delta))
+	rotation.y = lerp_angle(rotation.y, sync_yaw, SyncRules.ease_yaw(delta))
 	_update_shadow()
 	if sync_state != state:
 		change_state(sync_state)
@@ -531,7 +529,7 @@ func apply_correction(at: Vector3) -> void:
 	global_position = at
 	velocity = Vector3.ZERO
 	collision_layer = 0
-	_teleport_blind_left = TELEPORT_BLIND
+	_teleport_blind_left = SyncRules.TELEPORT_BLIND
 	print("PLAYGROUND_CORRECTED peer=%s to=(%.2f, %.2f, %.2f) count=%d" % [
 		name, at.x, at.y, at.z, corrections_received])
 
@@ -568,10 +566,10 @@ func clear_held_position() -> void:
 func follow_held_position(delta: float) -> void:
 	if not _has_held_position:
 		return
-	if global_position.distance_to(_held_position) > TELEPORT_STEP:
+	if global_position.distance_to(_held_position) > SyncRules.TELEPORT_STEP:
 		global_position = _held_position
 	else:
-		global_position = global_position.lerp(_held_position, 1.0 - exp(-18.0 * delta))
+		global_position = global_position.lerp(_held_position, SyncRules.ease(delta))
 
 
 # N-3: put down by the server, beside whoever held us. From here the pose is
@@ -665,7 +663,7 @@ func apply_respawn(at: Vector3) -> void:
 	# the teleport's speed -- 220 m/s, measured -- when the body moved without
 	# this. The same blind every other snap in the game uses.
 	collision_layer = 0
-	_teleport_blind_left = TELEPORT_BLIND
+	_teleport_blind_left = SyncRules.TELEPORT_BLIND
 	velocity = Vector3.ZERO
 	stamina = stats.max_stamina
 	respawns_applied += 1

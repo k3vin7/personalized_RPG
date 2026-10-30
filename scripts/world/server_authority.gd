@@ -165,6 +165,13 @@ var _fall_watch := {}
 var _flight_source := {}
 # peer -> seconds until the body comes back
 var _respawn_left := {}
+# N-5: how long after a respawn the kill plane leaves a body alone. The
+# server's copy of a remote body is still where it died until the owner has
+# applied the mark and that has come back -- a round trip -- and the kill plane
+# read that stale depth as a second death (traced: RESPAWN_AT, then DIED
+# cause=kill_plane at the old spot, in the same step).
+const RESPAWN_KILL_GRACE := 1.0
+var _kill_grace := {}
 var fall_mismatches := 0
 # peer -> {at: Vector3, left: float, forgive: int, h: float, v: float, hold: float}
 # h/v are the biggest force speeds the server has handed this body lately.
@@ -335,7 +342,7 @@ func _was_standing_on(holder: Player, target: Node3D) -> bool:
 
 
 # The only way a hold ends. Returns what was being held.
-func _end_hold(holder_peer: int, reason: String) -> Node3D:
+func _end_hold(holder_peer: int, reason: String, away_hint := Vector3.ZERO) -> Node3D:
 	if not _holds.has(holder_peer):
 		return null
 	var record: Dictionary = _holds[holder_peer]
@@ -348,7 +355,7 @@ func _end_hold(holder_peer: int, reason: String) -> Node3D:
 	# them, before the row's disappearance or the force that follows reaches
 	# their machine. Both are reliable and ordered behind this.
 	if target is Player:
-		_release_person(actor_for(holder_peer), target as Player)
+		_release_person(actor_for(holder_peer), target as Player, away_hint)
 	release_reasons[reason] = int(release_reasons.get(reason, 0)) + 1
 	print("PLAYGROUND_HOLD_ENDED holder=%d target=%s reason=%s" % [
 		holder_peer, target.name if target != null else "gone", reason])
@@ -977,7 +984,11 @@ func _rule_throw(actor: Player, payload: Dictionary) -> Variant:
 		return null
 	var charge: float = clampf(float(payload.get("charge", 1.0)), 0.0, 1.0)
 	var line := bool(payload.get("line", false))
-	var target := _end_hold(peer, "thrown")
+	# N-5: a thrown person is set down on the side they are about to fly to.
+	# Behind the thrower -- the put-down side -- they left straight into the
+	# thrower's own capsule and lost the whole horizontal on the first step;
+	# the client thrown at the cliff travelled 0.3 m (traced).
+	var target := _end_hold(peer, "thrown", Vector3(direction.x, 0.0, direction.z))
 	if target == null:
 		return null
 
@@ -1032,11 +1043,10 @@ func _arc_to(from: Vector3, aim: Vector3, charge: float, ratio: float) -> Vector
 		distance = reach
 		aim = Vector3(from.x + flat.x, aim.y, from.z + flat.z)
 	var rise := aim.y - from.y
-	var span := sqrt(distance * distance + rise * rise)
-	var optimum := PI * 0.25 + 0.5 * atan2(rise, maxf(distance, 0.001))
-	var speed := sqrt(gravity * (rise + span))
+	# N-5: the one copy of this arithmetic, shared with the jump plan.
+	var pair := Ballistics.cheapest_launch(distance, rise, gravity)
 	var heading := flat.normalized()
-	return heading * (speed * cos(optimum)) + Vector3.UP * (speed * sin(optimum))
+	return heading * pair.x + Vector3.UP * pair.y
 
 
 func _rule_drop(actor: Player) -> Variant:
@@ -1300,6 +1310,7 @@ func server_respawn(player: Player) -> void:
 	player.sync_dead = false
 	_respawn_left.erase(peer)
 	_fall_watch.erase(peer)
+	_kill_grace[peer] = RESPAWN_KILL_GRACE if not player.is_local() else 0.0
 	var at := free_spawn_point(player)
 	# The server asked for this teleport, so it does not warn about it. Long
 	# enough to outlive a round trip: a client's body does not move until the
@@ -1439,7 +1450,8 @@ func _watch_vitals(delta: float) -> void:
 			continue
 		# Out of the world. Checked here rather than on the owner so that one
 		# place decides a death, from the position the server has.
-		if y < Tuning.server.kill_plane_y:
+		_kill_grace[peer] = maxf(0.0, float(_kill_grace.get(peer, 0.0)) - delta)
+		if y < Tuning.server.kill_plane_y and float(_kill_grace[peer]) <= 0.0:
 			# Stage G: out of the world is always the end, whoever put the body
 			# there. ally_fall_death decides one thing only -- whether a party
 			# member's launch may kill you with the landing damage -- and the
@@ -1544,7 +1556,11 @@ func _check_move(player: Player, delta: float) -> void:
 		"at": player.global_position, "left": MOVE_SAMPLE, "forgive": 0,
 		"h": 0.0, "v": 0.0, "hold": 0.0,
 		"accepted": player.global_position, "speed_over": 0})
-	watch["hold"] = maxf(0.0, float(watch.get("hold", 0.0)) - delta)
+	# N-5: the memory of a force outlives the flight it caused. It used to run
+	# out after 1.5 s while a thrown body was still falling off the cliff, and
+	# the replication jitter on a long fall then read as a sprint.
+	if player.state != Player.State.AIRBORNE:
+		watch["hold"] = maxf(0.0, float(watch.get("hold", 0.0)) - delta)
 	if float(watch["hold"]) <= 0.0:
 		watch["h"] = 0.0
 		watch["v"] = 0.0
@@ -1746,7 +1762,7 @@ func _place_held_people(delta: float) -> void:
 	_held_push_left -= delta
 	var push := _held_push_left <= 0.0
 	if push:
-		_held_push_left = Rock.STATE_INTERVAL
+		_held_push_left = SyncRules.STATE_INTERVAL
 	for holder_peer: int in _holds.keys():
 		var record: Dictionary = _holds[holder_peer]
 		var person := get_node_or_null(record["target"] as NodePath) as Player
@@ -1774,10 +1790,14 @@ func push_held_position(path: NodePath, at: Vector3) -> void:
 # holder, not dropped from hand height above their head. The owner is told
 # where, and takes its pose back from there. The next move samples are
 # forgiven: a metre in a step is the put-down, not a sprint.
-func _release_person(holder: Player, person: Player) -> void:
+func _release_person(holder: Player, person: Player, away_hint := Vector3.ZERO) -> void:
 	var at := person.global_position
 	if holder != null:
-		var away := person.global_position - holder.global_position
+		# The side the caller names (a throw's heading), else away from the
+		# holder, else behind them.
+		var away := away_hint
+		if away.length_squared() < 0.0001:
+			away = person.global_position - holder.global_position
 		away.y = 0.0
 		if away.length_squared() < 0.0001:
 			# Pinned to the holder's own x and z, so there is no "away" to use:

@@ -1136,9 +1136,10 @@ func _run_audit(local: Player) -> void:
 	# B-c removed two of these by moving the hold to one table: there is one
 	# grace now, and one weight for a scarecrow, so there is nothing left for
 	# the two files to disagree about.
-	print("PLAYGROUND_AUDIT_SHARED hold_grace judge=%.2f | state_interval rock=%.2f dummy=%.2f | dummy_weight=%.1f" % [
+	# N-5: the state interval, teleport step and blind are SyncRules' alone.
+	print("PLAYGROUND_AUDIT_SHARED hold_grace judge=%.2f | state_interval=%.2f teleport_step=%.2f teleport_blind=%.2f (SyncRules, one place) | dummy_weight=%.1f" % [
 		ServerAuthority.HOLD_GRACE,
-		Rock.STATE_INTERVAL, Dummy.STATE_INTERVAL,
+		SyncRules.STATE_INTERVAL, SyncRules.TELEPORT_STEP, SyncRules.TELEPORT_BLIND,
 		ServerAuthority.DUMMY_WEIGHT])
 
 	# Everything that can be stood on, pushed or thrown, with what it collides

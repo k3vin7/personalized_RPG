@@ -620,9 +620,8 @@ func jump_plan(aim: Vector3) -> Dictionary:
 	# landing a metre short of the ring.
 	var pair := _launch_for(apex, distance, rise)
 	if pair.length() > cap:
-		var optimum := PI * 0.25 + 0.5 * atan2(rise, maxf(distance, 0.001))
-		var cheapest := sqrt(gravity * (rise + span))
-		pair = Vector2(cheapest * cos(optimum), cheapest * sin(optimum))
+		# N-5: the one copy of this arithmetic, shared with the throw solve.
+		pair = Ballistics.cheapest_launch(distance, rise, gravity)
 		apex = pair.y * pair.y / (2.0 * gravity)
 	var launch := flat.normalized() * pair.x
 	launch.y = pair.y
