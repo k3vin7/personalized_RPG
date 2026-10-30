@@ -1094,8 +1094,17 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 		# Read from the hand that is about to let go, so the predicted apex is
 		# a world height and can be put beside the lip it has to clear.
 		var apex: float = local.hand_position().y + rise * rise / (2.0 * Tuning.server.gravity)
+		# N-5: asked as the intent with the landing point in it. grab.throw()
+		# names the cursor's ground point, and out over the sand there is none
+		# to name, so it threw straight up and the mate came down where it
+		# stood (landed_z unchanged across every strength, measured).
 		local.movement.set_aim_override(local.global_position + Vector3(0.0, 0.0, -20.0))
-		local.grab.throw()
+		ServerAuthority.submit_intent(local, ServerAuthority.Intent.THROW, {
+			"direction": Vector3(0.0, 0.0, -1.0),
+			"target": local.global_position + Vector3(0.0, 0.0, -reach),
+			"charge": 1.0,
+			"line": false,
+		})
 		await get_tree().create_timer(3.0).timeout
 		local.movement.set_aim_override(Vector3.INF)
 		print("PLAYGROUND_STAGE8_THROW strength=%.0f mate=%.0fkg mult=%.2f speed=%.1f stand_off=%.2f predicted_apex=%.2f needed=%.2f landed_y=%.2f landed_z=%.2f on_top=%s" % [

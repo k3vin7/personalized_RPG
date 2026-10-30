@@ -319,11 +319,14 @@ func client_drop(height: float) -> void:
 	while waited < 4.0 and not _local.is_grounded_state():
 		await get_tree().physics_frame
 		waited += get_physics_process_delta_time()
-	for _frame in range(6):
-		await get_tree().physics_frame
 	# The owner no longer knows what the drop cost: it reported and the server
-	# answered by replicating the HP back.
-	note("own fall height=%.3f hp=%.1f" % [_local.last_fall_height, _local.hp])
+	# answered by replicating the HP back -- a round trip later, so at 200 ms
+	# six frames was not enough and this read the old number (N regression run).
+	var answered := 0.0
+	while answered < 2.0 and _local.hp >= _local.stats.max_hp:
+		await get_tree().physics_frame
+		answered += get_physics_process_delta_time()
+	note("own fall height=%.3f hp=%.1f (answer took %.2f s)" % [_local.last_fall_height, _local.hp, answered])
 	expect(_local.hp < _local.stats.max_hp, "client_sees_the_servers_hp_after_its_fall")
 	stage_done.rpc_id(1, "dropped")
 
