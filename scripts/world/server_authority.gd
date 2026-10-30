@@ -174,6 +174,9 @@ var move_warnings := 0
 # by the checks; the log line carries the rest.
 var move_corrections := 0
 var last_correction := {}
+# N-3: when the held people's positions were last pushed. They ride the hand on
+# the rock's interval, from here, like a rock.
+var _held_push_left := 0.0
 # When each peer last said it dashed, for the cooldown.
 var _dash_seen := {}
 # Stage D: the last forces the server handed out, newest last. Each carries the
@@ -341,6 +344,11 @@ func _end_hold(holder_peer: int, reason: String) -> Node3D:
 	_view_dirty = true
 	if target != null and target.has_method("set_hold_display"):
 		target.set_hold_display(0)
+	# N-3: a person is put down by the server, beside whoever was holding
+	# them, before the row's disappearance or the force that follows reaches
+	# their machine. Both are reliable and ordered behind this.
+	if target is Player:
+		_release_person(actor_for(holder_peer), target as Player)
 	release_reasons[reason] = int(release_reasons.get(reason, 0)) + 1
 	print("PLAYGROUND_HOLD_ENDED holder=%d target=%s reason=%s" % [
 		holder_peer, target.name if target != null else "gone", reason])
@@ -1603,6 +1611,7 @@ func _physics_process(delta: float) -> void:
 	for peer: int in _shove_cooldown.keys():
 		_shove_cooldown[peer] = maxf(0.0, float(_shove_cooldown[peer]) - delta)
 	_enforce_holds(delta)
+	_place_held_people(delta)
 	_watch_vitals(delta)
 	# N-1: any write to the server's table reaches the replicas within a step,
 	# whoever made it. The heartbeat below repairs a dropped push.
@@ -1661,6 +1670,82 @@ func _enforce_holds(delta: float) -> void:
 		# A body that died in someone's hands is not still in them.
 		if target is Player and (target as Player).state == Player.State.DEAD:
 			_end_hold(holder_peer, "target_dead")
+
+
+# N-3: a held person rides the holder's hand on the server's say-so, the way a
+# rock and a scarecrow already did. Placed on the server every step, pushed to
+# every peer on the rock's interval; the owner applies what arrives and writes
+# no position of its own while held. One source for where a carried body is,
+# so at 200 ms the two screens agree instead of each following its own copy of
+# the holder.
+func _place_held_people(delta: float) -> void:
+	_held_push_left -= delta
+	var push := _held_push_left <= 0.0
+	if push:
+		_held_push_left = Rock.STATE_INTERVAL
+	for holder_peer: int in _holds.keys():
+		var record: Dictionary = _holds[holder_peer]
+		var person := get_node_or_null(record["target"] as NodePath) as Player
+		var holder := actor_for(holder_peer)
+		if person == null or holder == null:
+			continue
+		var at := holder.hand_position()
+		person.set_held_position(at)
+		if push and multiplayer.has_multiplayer_peer():
+			push_held_position.rpc(person.get_path(), at)
+
+
+# Server -> every peer, unreliable like a rock's state: a dropped one is
+# replaced by the next within 0.05 s.
+@rpc("any_peer", "call_remote", "unreliable_ordered")
+func push_held_position(path: NodePath, at: Vector3) -> void:
+	if not result_is_server_sent("push_held_position", multiplayer.get_remote_sender_id()):
+		return
+	var person := get_node_or_null(path) as Player
+	if person != null:
+		person.set_held_position(at)
+
+
+# Stage E's put-down, moved here from the held body's own machine: beside the
+# holder, not dropped from hand height above their head. The owner is told
+# where, and takes its pose back from there. The next move samples are
+# forgiven: a metre in a step is the put-down, not a sprint.
+func _release_person(holder: Player, person: Player) -> void:
+	var at := person.global_position
+	if holder != null:
+		var away := person.global_position - holder.global_position
+		away.y = 0.0
+		if away.length_squared() < 0.0001:
+			# Pinned to the holder's own x and z, so there is no "away" to use:
+			# out behind them, the same side the escape recoil pushes.
+			away = -holder.global_transform.basis.z
+			away.y = 0.0
+		if away.length_squared() < 0.0001:
+			away = Vector3.FORWARD
+		away = away.normalized()
+		at = Vector3(
+			holder.global_position.x + away.x * Player.BODY_RADIUS * 2.2,
+			holder.global_position.y,
+			holder.global_position.z + away.z * Player.BODY_RADIUS * 2.2)
+	var peer := person.get_multiplayer_authority()
+	forgive_move(peer, "", MOVE_FORGIVE_SAMPLES if person.is_local() else MOVE_CORRECT_FORGIVE_REMOTE)
+	print("PLAYGROUND_RELEASE_AT peer=%s at=(%.2f, %.2f, %.2f)" % [person.name, at.x, at.y, at.z])
+	if person.is_local():
+		person.apply_release(at)
+	else:
+		person.clear_held_position()
+		release_at.rpc_id(peer, at)
+
+
+# Server -> owner. Reliable, and sent before the row goes, so by the time the
+# owner sees itself free it already knows where it was put.
+@rpc("any_peer", "call_remote", "reliable")
+func release_at(at: Vector3) -> void:
+	if not result_is_server_sent("release_at", multiplayer.get_remote_sender_id()):
+		return
+	var actor := actor_for(multiplayer.get_unique_id())
+	if actor != null and actor.is_local():
+		actor.apply_release(at)
 
 
 # The half of the verdict that carries no ambiguity: none of these three can

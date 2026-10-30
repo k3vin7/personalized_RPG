@@ -92,6 +92,7 @@ func run(world: Node3D) -> void:
 	expect(await _wait_stage("client_ready"), "both_peers_present")
 	await _tuning_checks()
 	await _correction_checks()
+	await _held_checks()
 	print("N_RESULT lag=%s peer=%d checks=%d failures=%d" % [_label, _peer_id, _checks, _failures])
 	finish.rpc(_failures)
 	await _wait(1.0)
@@ -274,6 +275,118 @@ func last_correction_to() -> Vector3:
 	return _judge.last_correction.get("to", Vector3.INF) if _judge != null else Vector3.INF
 
 
+# ------------------------------------- N-3: a carried person is where the server says
+
+const HELD_SAMPLE := 1.0
+
+
+func _held_checks() -> void:
+	var mate := _judge.actor_for(_client_peer())
+	if mate == null:
+		expect(false, "a_client_body_to_carry")
+		return
+	# Host carries client. Both standing: the gap between the carried body and
+	# the hand, on each screen, over a second. A human cannot lift a human (72 kg
+	# against 80), so whoever carries is handed the strength, as stage 8 does.
+	await _park_pair(HOME, HOME + Vector3(1.0, 0.0, 0.0))
+	await tick_request(func() -> void:
+		_judge.harness_set_stats(_local, 100.0)
+		_judge.harness_set_stats(mate, 100.0))
+	await _wait(0.4)
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(mate.global_position)
+		_local.movement.interact())
+	await _wait(0.8)
+	expect(_judge.holder_of(mate) == 1, "the_host_took_hold_of_the_client")
+	var host_gap := await _sample_gap(mate, _local, HELD_SAMPLE)
+	_reports.erase("held_gap")
+	client_report_held_gap.rpc_id(_client_peer(), _local.get_path(), HELD_SAMPLE)
+	var client_gap := INF
+	if await _wait_report("held_gap"):
+		client_gap = float(_reports["held_gap"])
+	note("host carries client, standing: gap to hand host screen %.3f m, client screen %.3f m" % [host_gap, client_gap])
+	expect(host_gap < 0.5, "carried_client_rides_the_hand_on_the_hosts_screen")
+	expect(client_gap < 0.5, "and_on_its_own_screen")
+	# Walking with the load: measured and noted, not asserted -- the hand the
+	# server places from is a packet behind the holder's own.
+	_local.movement.set_target(HOME + Vector3(-4.0, 0.0, 0.0))
+	var walking_host := await _sample_gap(mate, _local, 1.0)
+	_reports.erase("held_gap")
+	client_report_held_gap.rpc_id(_client_peer(), _local.get_path(), 0.6)
+	var walking_client := INF
+	if await _wait_report("held_gap"):
+		walking_client = float(_reports["held_gap"])
+	note("host carries client, walking: gap host screen %.3f m, client screen %.3f m" % [walking_host, walking_client])
+	await _wait(0.6)
+	# Put down: both screens have the body in the same place.
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(Vector3.INF)
+		_local.grab.drop())
+	await _wait(0.8)
+	expect(_judge.holder_of(mate) == 0, "the_host_let_go")
+	var seen_here := mate.global_position
+	_reports.erase("position")
+	client_report_position.rpc_id(_client_peer())
+	if await _wait_report("position"):
+		var there: Vector3 = _reports["position"]
+		note("put down: host sees client at (%.2f, %.2f, %.2f), client is at (%.2f, %.2f, %.2f), gap %.3f, from the host %.2f m" % [
+			seen_here.x, seen_here.y, seen_here.z, there.x, there.y, there.z,
+			seen_here.distance_to(there), Vector2(there.x - _local.global_position.x, there.z - _local.global_position.z).length()])
+		expect(seen_here.distance_to(there) < 0.3, "put_down_in_the_same_place_on_both_screens")
+
+	# Client carries host: the holder is the remote one now.
+	await _park_pair(HOME, HOME + Vector3(1.0, 0.0, 0.0))
+	client_grab.rpc_id(_client_peer(), _local.get_path())
+	await _wait(1.0)
+	expect(_judge.holder_of(_local) == _client_peer(), "the_client_took_hold_of_the_host")
+	var carried_gap := await _sample_gap(_local, mate, HELD_SAMPLE)
+	_reports.erase("held_gap")
+	client_report_holding_gap.rpc_id(_client_peer(), _local.get_path(), HELD_SAMPLE)
+	var holder_gap := INF
+	if await _wait_report("held_gap"):
+		holder_gap = float(_reports["held_gap"])
+	note("client carries host, standing: gap to hand host screen %.3f m, client screen %.3f m" % [carried_gap, holder_gap])
+	expect(carried_gap < 0.5, "carried_host_rides_the_clients_hand_on_the_hosts_screen")
+	expect(holder_gap < 0.5, "and_on_the_clients_screen")
+	client_drop.rpc_id(_client_peer())
+	await _wait(0.8)
+	expect(_judge.holder_of(_local) == 0, "the_client_let_go")
+	var me := _local.global_position
+	_reports.erase("seen")
+	client_report_seen.rpc_id(_client_peer(), _local.get_path())
+	if await _wait_report("seen"):
+		var seen: Vector3 = _reports["seen"]
+		note("put down by the client: host is at (%.2f, %.2f, %.2f), client sees it at (%.2f, %.2f, %.2f), gap %.3f" % [
+			me.x, me.y, me.z, seen.x, seen.y, seen.z, me.distance_to(seen)])
+		expect(me.distance_to(seen) < 0.3, "put_down_by_the_client_in_the_same_place_on_both_screens")
+	await tick_request(func() -> void:
+		_judge.harness_clear_stats(_local)
+		_judge.harness_clear_stats(mate))
+
+
+# The largest gap between a carried body and its holder's hand over `seconds`,
+# as this machine sees both.
+func _sample_gap(carried: Player, holder: Player, seconds: float) -> float:
+	var worst := 0.0
+	var sampled := 0.0
+	while sampled < seconds:
+		await get_tree().physics_frame
+		sampled += get_physics_process_delta_time()
+		worst = maxf(worst, carried.global_position.distance_to(holder.hand_position()))
+	return worst
+
+
+func _park_pair(host_at: Vector3, client_at: Vector3) -> void:
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = host_at
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target()
+		_local.movement.set_aim_override(Vector3.INF))
+	client_park.rpc_id(_client_peer(), client_at)
+	await _wait(0.8)
+
+
 # A jump straight up from HOME, its apex above the floor it left.
 func _standing_apex() -> float:
 	await tick_request(func() -> void:
@@ -346,6 +459,56 @@ func client_forge_gravity() -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_report_field(field: String) -> void:
 	report.rpc_id(1, field, Tuning.server.get(field))
+
+
+# Server -> client: while being carried by `holder_path`, the largest gap
+# between our own body and that holder's hand as we see it.
+@rpc("authority", "call_remote", "reliable")
+func client_report_held_gap(holder_path: NodePath, seconds: float) -> void:
+	var holder := get_node_or_null(holder_path) as Player
+	var gap := INF
+	if holder != null:
+		gap = await _sample_gap(_local, holder, seconds)
+	report.rpc_id(1, "held_gap", gap)
+
+
+# Server -> client: while carrying `carried_path`, the largest gap between that
+# body as we see it and our own hand.
+@rpc("authority", "call_remote", "reliable")
+func client_report_holding_gap(carried_path: NodePath, seconds: float) -> void:
+	var carried := get_node_or_null(carried_path) as Player
+	var gap := INF
+	if carried != null:
+		gap = await _sample_gap(carried, _local, seconds)
+	report.rpc_id(1, "held_gap", gap)
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_report_position() -> void:
+	report.rpc_id(1, "position", _local.global_position)
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_report_seen(path: NodePath) -> void:
+	var body := get_node_or_null(path) as Node3D
+	report.rpc_id(1, "seen", body.global_position if body != null else Vector3.INF)
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_grab(target_path: NodePath) -> void:
+	var target := get_node_or_null(target_path) as Node3D
+	if target == null:
+		return
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(target.global_position)
+		_local.movement.interact())
+	await _wait(0.3)
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_drop() -> void:
+	await tick_request(func() -> void: _local.grab.drop())
 
 
 # Server -> client. Sprint by writing our own position at `times` the walk for

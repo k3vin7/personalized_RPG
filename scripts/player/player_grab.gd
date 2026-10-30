@@ -209,26 +209,10 @@ func on_force_received() -> void:
 
 
 func _leave_held() -> void:
-	# Stage E: put down beside whoever was holding us, not dropped from hand
-	# height above their head. A body freed over the holder landed back on that
-	# head, and the ground step then wiped the recoil it had just been given --
-	# which is why the escape push measured nothing at all.
-	if is_instance_valid(holder):
-		var away := player.global_position - holder.global_position
-		away.y = 0.0
-		if away.length_squared() < 0.0001:
-			# Pinned to the holder's own x and z, so there is no "away" to use:
-			# out behind them, the same side the server's recoil pushes.
-			away = -holder.global_transform.basis.z
-			away.y = 0.0
-		if away.length_squared() < 0.0001:
-			away = Vector3.FORWARD
-		if away.length_squared() > 0.0001:
-			away = away.normalized()
-			player.global_position = Vector3(
-				holder.global_position.x + away.x * Player.BODY_RADIUS * 2.2,
-				holder.global_position.y,
-				holder.global_position.z + away.z * Player.BODY_RADIUS * 2.2)
+	# N-3: where we are put down is the server's (ServerAuthority._release_person
+	# -> Player.apply_release), sent before the row went and before any force
+	# that follows. Nothing here writes a position; this only ends the state.
+	player.clear_held_position()
 	clear_holder()
 	player.clear_predicted()
 	if player.state == Player.State.GRABBED:
@@ -278,8 +262,9 @@ func _physics_process(delta: float) -> void:
 		return
 
 	if holder_peer != 0:
-		# Being carried. Our own position is still ours to write, which is why
-		# it is written here and not by the server.
+		# Being carried. N-3: the server puts us in the hand, like a rock, and
+		# what arrives is applied -- a carried body writes no position of its
+		# own, so the two screens agree about where it is.
 		holder = judge.actor_for(holder_peer)
 		held = null
 		player.clear_predicted()
@@ -290,9 +275,8 @@ func _physics_process(delta: float) -> void:
 				player.movement.cancel_target()
 			player.change_state(Player.State.GRABBED)
 			print("PLAYGROUND_GRABBED peer=%s by=%d" % [player.name, holder_peer])
-		if is_instance_valid(holder):
-			player.global_position = holder.hand_position()
-			player.velocity = Vector3.ZERO
+		player.follow_held_position(delta)
+		player.velocity = Vector3.ZERO
 		_show_progress(judge.escape_presses(player))
 		return
 

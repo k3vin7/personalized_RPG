@@ -47,6 +47,16 @@ const TELEPORT_STEP := 2.0
 const TELEPORT_BLIND := 0.2
 # N-2: how many times the server has put this body back. Read by the checks.
 var corrections_received := 0
+# N-3: where the server last put this body while it was being carried. Every
+# peer applies it, the owner included -- a carried body writes no position of
+# its own -- the way a rock in a hand is shown where the server says it is.
+var _held_position := Vector3.INF
+var _has_held_position := false
+# N-3: the holder this body does not collide with while carried. A capsule put
+# in a hand overlaps the head under it, and the solver answered by shoving the
+# holder along -- measured as a holder drifting twenty metres while standing
+# still. Rocks and scarecrows have had this exception since stage E.
+var _excepted_holder: Node3D = null
 
 # Stand-in for animation: the state is readable off the body on both screens.
 const STATE_COLORS := {
@@ -422,6 +432,7 @@ func _sync_stats() -> void:
 
 func _physics_process(delta: float) -> void:
 	_sync_stats()
+	_except_holder()
 	if is_local():
 		# The server owns the flag; this is the body catching up with it, which
 		# covers a death ruled while the result message was still in flight.
@@ -475,20 +486,28 @@ func _physics_process(delta: float) -> void:
 		_teleport_blind_left -= delta
 		if _teleport_blind_left <= 0.0:
 			collision_layer = PLAYER_LAYER
-	if global_position.distance_to(sync_position) > TELEPORT_STEP:
+	# N-3: a carried body is where the server put it, not where its owner says.
+	var judge := ServerAuthority.instance
+	var shown := sync_position
+	if judge != null and judge.holder_of(self) != 0:
+		if _has_held_position:
+			shown = _held_position
+	else:
+		_has_held_position = false
+	if global_position.distance_to(shown) > TELEPORT_STEP:
 		# Put down at the far end rather than slid there. Easing across a
 		# teleport drags this capsule through whatever is standing in between,
 		# and the body it passes through is shoved out of the way at teleport
 		# speed: in testing a respawn across the map threw the other player
 		# seven metres and off the plaza. Collision is off for a moment so the
 		# arrival does not shove anyone either.
-		global_position = sync_position
+		global_position = shown
 		collision_layer = 0
 		_teleport_blind_left = TELEPORT_BLIND
 	else:
 		# Remote bodies are shown, not simulated: a short lerp hides the gap
 		# between state packets without letting them drift.
-		global_position = global_position.lerp(sync_position, 1.0 - exp(-18.0 * delta))
+		global_position = global_position.lerp(shown, 1.0 - exp(-18.0 * delta))
 	rotation.y = lerp_angle(rotation.y, sync_yaw, 1.0 - exp(-20.0 * delta))
 	_update_shadow()
 	if sync_state != state:
@@ -512,6 +531,55 @@ func apply_correction(at: Vector3) -> void:
 	_teleport_blind_left = TELEPORT_BLIND
 	print("PLAYGROUND_CORRECTED peer=%s to=(%.2f, %.2f, %.2f) count=%d" % [
 		name, at.x, at.y, at.z, corrections_received])
+
+
+# On every peer, every step: a body cannot be pushed by, or push, what is
+# carrying it. The same exception a rock and a scarecrow keep.
+func _except_holder() -> void:
+	var judge := ServerAuthority.instance
+	var holder_peer := judge.holder_of(self) if judge != null else 0
+	var holder: Node3D = judge.actor_for(holder_peer) if holder_peer != 0 else null
+	if holder == _excepted_holder:
+		return
+	if is_instance_valid(_excepted_holder):
+		remove_collision_exception_with(_excepted_holder)
+	_excepted_holder = null
+	if holder != null:
+		add_collision_exception_with(holder)
+		_excepted_holder = holder
+
+
+# N-3: the server's word on where this carried body is. Written on the server
+# every step and on every other peer by push_held_position.
+func set_held_position(at: Vector3) -> void:
+	_held_position = at
+	_has_held_position = true
+
+
+func clear_held_position() -> void:
+	_has_held_position = false
+
+
+# The owner's half while carried: apply what the server sent, write nothing of
+# our own. Until the first position arrives the body stays where it was taken.
+func follow_held_position(delta: float) -> void:
+	if not _has_held_position:
+		return
+	if global_position.distance_to(_held_position) > TELEPORT_STEP:
+		global_position = _held_position
+	else:
+		global_position = global_position.lerp(_held_position, 1.0 - exp(-18.0 * delta))
+
+
+# N-3: put down by the server, beside whoever held us. From here the pose is
+# ours again.
+func apply_release(at: Vector3) -> void:
+	if not is_local():
+		return
+	clear_held_position()
+	global_position = at
+	velocity = Vector3.ZERO
+	print("PLAYGROUND_RELEASED peer=%s at=(%.2f, %.2f, %.2f)" % [name, at.x, at.y, at.z])
 
 
 # Set by the movement when a launch is this body's own jump, and cleared the
