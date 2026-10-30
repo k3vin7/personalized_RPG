@@ -20,6 +20,8 @@ var _failures := 0
 var _stage_done := ""
 var _lag := 0.0
 var _reported := {}
+# A value worked out inside a lambda comes back on a field.
+var _took := false
 var _label := "0"
 var _flag := false
 var _number := 0.0
@@ -1313,11 +1315,17 @@ func client_escape() -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_take_rock(rock_path: NodePath) -> void:
 	var rock := get_node(rock_path) as Rock
+	_took = false
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(rock.global_position)
-		_local.movement.interact())
+		_took = _local.movement.interact())
 	await _wait(0.8)
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	note("take rock: interact()=%s holding=%s state=%s pending=%s at=(%.1f, %.1f, %.1f) rock=(%.1f, %.1f, %.1f) gap=%.2f holder=%d weapon=%s" % [
+		_took, _local.grab.is_holding(), Player.State.keys()[_local.state],
+		is_instance_valid(_local.grab._pending_target), _local.global_position.x, _local.global_position.y, _local.global_position.z,
+		rock.global_position.x, rock.global_position.y, rock.global_position.z,
+		_local.global_position.distance_to(rock.global_position), rock.holder_peer, WeaponKinds.LABELS.get(_local.weapon, "?")])
 	expect(_local.grab.is_holding(), "the_client_took_the_rock")
 	stage_done.rpc_id(1, "holding")
 

@@ -53,6 +53,14 @@ func interact(player: Player) -> bool:
 	return false
 
 
+# Where a body stands to take `kind`: the zone's floor point, in world space.
+func zone_position(kind: int) -> Vector3:
+	for area in _zones:
+		if int(area.get_meta("kind", -1)) == kind:
+			return area.global_position - Vector3(0.0, 1.2, 0.0)
+	return global_position
+
+
 func _build_pedestal(kind: int, offset: Vector3) -> void:
 	var stand := MeshInstance3D.new()
 	var box := BoxMesh.new()

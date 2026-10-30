@@ -115,6 +115,7 @@ func run(world: Node3D) -> void:
 	await _race_checks()
 	await _weapon_checks()
 	await _body_size_checks()
+	await _phase_replication_check()
 	Tuning.values.smart_key_enabled = smart
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_m")
 	expect(_judge.move_corrections == corrections, "no_corrections_during_stage_m")
@@ -628,7 +629,7 @@ func _weapon_checks() -> void:
 	# The host at the sword stand: the request is ruled at once.
 	await tick_request(func() -> void:
 		placed()
-		_local.global_position = rack.global_position + Vector3(-2.0 * WeaponRack.SPACING, 0.9, 0.0)
+		_local.global_position = rack.zone_position(WeaponKinds.Kind.SWORD) + Vector3(0.0, 0.9, 0.0)
 		_local.velocity = Vector3.ZERO
 		_local.movement.cancel_target())
 	await _wait(0.4)
@@ -644,26 +645,28 @@ func _weapon_checks() -> void:
 	expect(_local.weapon == WeaponKinds.Kind.NONE and _judge.weapon_of(1) == WeaponKinds.Kind.NONE, "and_dropped_it_again")
 	if mate == null:
 		return
-	# The client asks through the door: the server's table and the client's
-	# hand agree. Then the client draws a spear on its own: the server's table
-	# does not move, and the disagreement is counted.
-	var mismatches := _judge.weapon_mismatches
+	# The client asks through the door: the server's word and the client's
+	# hand agree. Then the client writes a spear onto its own replica (M-5: the
+	# weapon rides the server's Vitals synchronizer): the write is gone on the
+	# next packet, the server and this screen never saw it.
 	_reports.erase("weapon")
 	client_weapon.rpc_id(_client_peer(), WeaponKinds.Kind.BOW, false)
 	if await _wait_report("weapon"):
-		note("client asked for a bow: client holds %s, server rules %s" % [
-			WeaponKinds.LABELS.get(int(_reports["weapon"]), "?"), WeaponKinds.LABELS.get(_judge.weapon_of(_client_peer()), "?")])
-		expect(int(_reports["weapon"]) == WeaponKinds.Kind.BOW and _judge.weapon_of(_client_peer()) == WeaponKinds.Kind.BOW,
-			"a_clients_request_is_ruled_and_applied")
+		note("client asked for a bow: client holds %s, server rules %s, host sees %s" % [
+			WeaponKinds.LABELS.get(int(_reports["weapon"]), "?"), WeaponKinds.LABELS.get(_judge.weapon_of(_client_peer()), "?"),
+			WeaponKinds.LABELS.get(mate.weapon, "?")])
+		expect(int(_reports["weapon"]) == WeaponKinds.Kind.BOW and _judge.weapon_of(_client_peer()) == WeaponKinds.Kind.BOW
+			and mate.weapon == WeaponKinds.Kind.BOW, "a_clients_request_is_ruled_and_replicated_to_everyone")
 	_reports.erase("weapon")
 	client_weapon.rpc_id(_client_peer(), WeaponKinds.Kind.SPEAR, true)
 	if await _wait_report("weapon"):
-		await _wait(0.5)
-		note("client drew a spear on its own: client shows %s, server rules %s, mismatches %d -> %d" % [
-			WeaponKinds.LABELS.get(int(_reports["weapon"]), "?"), WeaponKinds.LABELS.get(_judge.weapon_of(_client_peer()), "?"),
-			mismatches, _judge.weapon_mismatches])
-		expect(_judge.weapon_of(_client_peer()) == WeaponKinds.Kind.BOW, "a_clients_own_weapon_write_never_reached_the_server")
-		expect(_judge.weapon_mismatches > mismatches, "and_the_server_counts_the_disagreement")
+		var forged: Dictionary = _reports["weapon_forge"] if _reports.has("weapon_forge") else {}
+		note("client wrote a spear on its replica: it held %s for a moment, now holds %s, server rules %s, host sees %s" % [
+			WeaponKinds.LABELS.get(int(forged.get("at_once", -1)), "?"), WeaponKinds.LABELS.get(int(_reports["weapon"]), "?"),
+			WeaponKinds.LABELS.get(_judge.weapon_of(_client_peer()), "?"), WeaponKinds.LABELS.get(mate.weapon, "?")])
+		expect(_judge.weapon_of(_client_peer()) == WeaponKinds.Kind.BOW and mate.weapon == WeaponKinds.Kind.BOW,
+			"a_clients_own_weapon_write_never_reached_the_server_or_the_other_screen")
+		expect(int(_reports["weapon"]) == WeaponKinds.Kind.BOW, "and_was_taken_off_the_client_again")
 	_reports.erase("weapon")
 	client_weapon.rpc_id(_client_peer(), WeaponKinds.Kind.NONE, false)
 	await _wait_report("weapon")
@@ -792,17 +795,75 @@ func client_forge_race(kind: int) -> void:
 	report.rpc_id(1, "race", _local.stats.race)
 
 
-# Server -> client: take a weapon through the door, or draw it on our own
-# synchronizer (forge), then report what we hold.
+# Server -> client: take a weapon through the door, or write it onto our own
+# replica of the server's value (forge), then report what we hold.
 @rpc("authority", "call_remote", "reliable")
 func client_weapon(kind: int, forge: bool) -> void:
+	var at_once := -1
 	await tick_request(func() -> void:
 		if forge:
+			_local.sync_weapon = kind
 			_local._apply_weapon(kind)
 		else:
 			_local.set_weapon(kind))
+	if forge:
+		at_once = _local.weapon
 	await _wait(0.8)
+	if forge:
+		report.rpc_id(1, "weapon_forge", {"at_once": at_once})
 	report.rpc_id(1, "weapon", _local.weapon)
+
+
+# ------------------------------------------- M-5: the cast's show on the other screen
+
+func _phase_replication_check() -> void:
+	var mate := _judge.actor_for(_client_peer())
+	if mate == null:
+		return
+	Tuning.values.smart_key_enabled = true
+	var kick := Skills.get_def("kick")
+	await _wait(kick.value("cooldown"))
+	await _park(HOME)
+	client_park.rpc_id(_client_peer(), HOME + Vector3(-3.0, 0.0, 0.0))
+	await _wait(0.8)
+	_reports.erase("phase")
+	client_watch_phase.rpc_id(_client_peer(), _local.get_path(), 2.5)
+	await _wait(0.3)
+	_local.movement.set_aim_override(HOME + Vector3(3.0, 0.0, 0.0))
+	await tick_request(func() -> void: _local.skills.press_slot(3))
+	if await _wait_report("phase"):
+		var seen: Dictionary = _reports["phase"]
+		note("kick windup on the other screen: seen=%s lean %.1f deg (def %.1f), delay after the owner's clock %.3f s, phases seen %d, cleared after=%s" % [
+			seen.get("seen", false), float(seen.get("lean", 0.0)), kick.windup_lean_deg,
+			float(seen.get("delay", -1.0)), int(seen.get("count", 0)), seen.get("cleared", false)])
+		expect(bool(seen.get("seen", false)) and float(seen.get("lean", 0.0)) > 0.5, "the_other_screen_shows_the_windup_lean")
+		expect(float(seen.get("delay", 9.0)) < 0.25, "and_no_later_than_a_quarter_second_after_the_owner")
+		expect(bool(seen.get("cleared", false)), "and_takes_it_down_when_the_cast_ends")
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+
+
+# Server -> client: watch `path` for its first windup phase, note when it was
+# seen against the owner's stamp and how far it leaned, then whether the lean
+# came down again.
+@rpc("authority", "call_remote", "reliable")
+func client_watch_phase(path: NodePath, seconds: float) -> void:
+	var body := get_node_or_null(path) as Player
+	var out := {"seen": false, "lean": 0.0, "delay": -1.0, "count": 0, "cleared": false}
+	var t := 0.0
+	while t < seconds and body != null:
+		await get_tree().physics_frame
+		t += get_physics_process_delta_time()
+		if not bool(out["seen"]) and body.sync_skill_phase == "windup":
+			await get_tree().physics_frame
+			out["seen"] = true
+			out["lean"] = body._skill_lean_deg
+			out["delay"] = body.last_remote_phase_delay
+		elif bool(out["seen"]) and body.sync_skill_phase == "" and body._skill_lean_deg == 0.0:
+			out["cleared"] = true
+			break
+	if body != null:
+		out["count"] = body.remote_phases_seen
+	report.rpc_id(1, "phase", out)
 
 
 @rpc("authority", "call_remote", "reliable")

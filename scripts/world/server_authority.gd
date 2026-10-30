@@ -196,12 +196,6 @@ var _skill_cooldown := {}
 var skills_ruled := 0
 # M-2: the last strike's ruling, for the checks: {skill, hits, downed}.
 var last_strike := {}
-# M-3: what the server has ruled each peer is holding. The owner still writes
-# its own weapon (pose synchronizer), so a client can draw a sword it was never
-# given -- but this table is what any ruling reads, and a body whose shown
-# weapon disagrees with it is counted here.
-var _weapons := {}
-var weapon_mismatches := 0
 var last_refusal := ""
 # How far a body's centre may be from the strike's height and still be hit: a
 # body's own half height, and the reach of a leg or an arm beyond it. A body
@@ -1517,14 +1511,6 @@ func _watch_vitals(delta: float) -> void:
 				_expire_flight_source(peer)
 		_fall_watch[peer] = watch
 		_check_move(player, delta)
-		# M-3: a weapon shown that the server never gave. Counted, and the
-		# table keeps the server's answer; the owner's picture is its own.
-		if player.sync_weapon != weapon_of(peer) and not player.is_local():
-			weapon_mismatches += 1
-			if weapon_mismatches % 120 == 1:
-				print("PLAYGROUND_WEAPON_MISMATCH peer=%s shown=%s ruled=%s" % [
-					player.name, WeaponKinds.LABELS.get(player.sync_weapon, "?"),
-					WeaponKinds.LABELS.get(weapon_of(peer), "?")])
 
 		if player.sync_dead:
 			_respawn_left[peer] = maxf(0.0, float(_respawn_left.get(peer, 0.0)) - delta)
@@ -1734,8 +1720,10 @@ func _rule_race(actor: Player, kind: int) -> Variant:
 	return true
 
 
-# M-3: the weapon rack. Ruled here, kept in _weapons, and the owner is told
-# what it may hold; the owner's set_weapon() is a request that lands here.
+# M-3: the weapon rack; M-5: ruled here and written here, onto the Vitals
+# synchronizer the server owns. Every peer applies what it carries, so there
+# is one weapon per body and a client writing its own copy loses it on the
+# next packet. The owner's set_weapon() is the request that lands here.
 func _rule_weapon(actor: Player, kind: int) -> Variant:
 	if not WeaponKinds.LABELS.has(kind) or actor.sync_dead:
 		return null
@@ -1744,28 +1732,16 @@ func _rule_weapon(actor: Player, kind: int) -> Variant:
 		last_refusal = "holding"
 		print("PLAYGROUND_WEAPON_REFUSED peer=%s why=holding" % actor.name)
 		return null
-	_weapons[peer] = kind
+	actor.sync_weapon = kind
 	print("PLAYGROUND_WEAPON peer=%s kind=%s" % [actor.name, WeaponKinds.LABELS.get(kind, "?")])
-	if actor.is_local():
-		actor.apply_weapon_ruling(kind)
-	else:
-		apply_weapon.rpc_id(peer, kind)
 	return true
 
 
-# What the server has ruled this peer holds. Nothing ruled yet is bare hands.
+# What the server holds this peer to be carrying: its own copy's sync_weapon,
+# which only _rule_weapon writes.
 func weapon_of(peer: int) -> int:
-	return int(_weapons.get(peer, WeaponKinds.Kind.NONE))
-
-
-# Server -> owner: the weapon it may now hold.
-@rpc("any_peer", "call_remote", "reliable")
-func apply_weapon(kind: int) -> void:
-	if not result_is_server_sent("apply_weapon", multiplayer.get_remote_sender_id()):
-		return
-	var actor := actor_for(multiplayer.get_unique_id())
-	if actor != null and actor.is_local():
-		Net.queue_physics(func() -> void: actor.apply_weapon_ruling(kind))
+	var actor := actor_for(peer)
+	return actor.sync_weapon if actor != null else WeaponKinds.Kind.NONE
 
 
 # M-1: a slot's cast. The SkillDef names the rule; this door keeps the clock.

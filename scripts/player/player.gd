@@ -107,7 +107,20 @@ var sync_dead := false
 # a jump keeps what you are carrying, a fall does not -- and only the owner
 # knows which it was, so it travels with the pose.
 var sync_jumped := false
+# M-5: the weapon is the server's (Vitals synchronizer, with the race). The
+# owner asks (Intent.WEAPON); the server writes it; every peer, the owner too,
+# applies what arrives. Nothing on a client writes this and keeps it.
 var sync_weapon: int = WeaponKinds.Kind.NONE
+# M-5: the cast's show, replicated so the other screen can read a windup: the
+# slot's skill, the phase, and the owner's wall clock when it started. Remote
+# bodies replay the same hooks off these.
+var sync_skill_id := ""
+var sync_skill_phase := ""
+var sync_skill_at := 0.0
+var _shown_skill_stamp := ""
+# For the checks: how long after the owner's clock the phase was seen here.
+var last_remote_phase_delay := -1.0
+var remote_phases_seen := 0
 
 # H-1: the stats travel on the Vitals synchronizer, which is the server's, not
 # on the pose one, which is the owner's. A shove is worked out from the pusher's
@@ -542,6 +555,11 @@ func _physics_process(delta: float) -> void:
 	_sync_stats()
 	if stats != null and stats.race != _body_race:
 		_apply_body_size()
+	# M-5: the weapon follows the server's word on every peer, the owner too.
+	if sync_weapon != weapon:
+		_apply_weapon(sync_weapon)
+		if skills != null:
+			skills.fill_slots()
 	_except_holder()
 	if is_local():
 		# The server owns the flag; this is the body catching up with it, which
@@ -599,13 +617,23 @@ func _physics_process(delta: float) -> void:
 		sync_yaw = rotation.y
 		sync_state = state
 		sync_jumped = _jumped_this_flight
-		sync_weapon = weapon
 		_update_shadow()
 		return
-	if sync_weapon != weapon:
-		_apply_weapon(sync_weapon)
 	# Shown, not simulated, like the pose: the owner's number as last heard.
 	stamina = sync_stamina
+	# M-5: the cast's show, replayed from the owner's stamp. The strike box
+	# times itself out here as it does on the owner.
+	var stamp := "%s|%s|%.3f" % [sync_skill_id, sync_skill_phase, sync_skill_at]
+	if stamp != _shown_skill_stamp:
+		_shown_skill_stamp = stamp
+		if sync_skill_at > 0.0:
+			remote_phases_seen += 1
+			last_remote_phase_delay = Time.get_unix_time_from_system() - sync_skill_at
+		show_skill_phase(Skills.get_def(sync_skill_id) if sync_skill_id != "" else null, sync_skill_phase)
+	if _strike_left > 0.0:
+		_strike_left -= delta
+		if _strike_left <= 0.0 and _strike_box != null:
+			_strike_box.visible = false
 	if _teleport_blind_left > 0.0:
 		_teleport_blind_left -= delta
 		if _teleport_blind_left <= 0.0:
@@ -800,30 +828,19 @@ func apply_respawn(at: Vector3) -> void:
 	print("PLAYGROUND_RESPAWN peer=%s at=%s" % [name, global_position])
 
 
-# Picked up by standing on a rack pedestal. Only the body's owner may change it;
-# everyone else receives it through sync_weapon.
-# M-3: a request. The rack asks for a kind; the server rules and answers with
-# apply_weapon_ruling, on the host at once and on a client a round trip later.
+# Picked up by standing on a rack pedestal. M-3: a request -- the rack asks for
+# a kind and the server rules. M-5: the answer is the server's sync_weapon on
+# the Vitals synchronizer, applied by every peer in _physics_process; nothing
+# on the owner writes the weapon itself any more.
 func set_weapon(kind: int) -> void:
 	if not is_local() or kind == weapon:
 		return
 	ServerAuthority.submit_intent(self, ServerAuthority.Intent.WEAPON, {"weapon": kind})
 
 
-# The server's answer. The only way the weapon changes on the owner.
-func apply_weapon_ruling(kind: int) -> void:
-	if not is_local() or kind == weapon:
-		return
-	_apply_weapon(kind)
-	# M-1: what the hands hold decides what the slots hold.
-	if skills != null:
-		skills.fill_slots()
-	print("PLAYGROUND_WEAPON_APPLIED peer=%s kind=%s" % [name, WeaponKinds.LABELS.get(kind, "?")])
-
-
+# The picture of the weapon. Only ever called with the server's value.
 func _apply_weapon(kind: int) -> void:
 	weapon = kind
-	sync_weapon = kind
 	if is_instance_valid(_weapon_node):
 		_weapon_node.queue_free()
 	_weapon_node = null
@@ -1140,6 +1157,11 @@ func _apply_predicted_pose() -> void:
 # into the strike, "strike" pushes the box out for a moment, "recovery" leans
 # it back; null ends it. Every number is the SkillDef's.
 func show_skill_phase(def: SkillDef, phase: String) -> void:
+	if is_local():
+		# M-5: stamped for the other screens, which replay the same hooks.
+		sync_skill_id = def.id if def != null else ""
+		sync_skill_phase = phase
+		sync_skill_at = Time.get_unix_time_from_system()
 	if def == null or phase == "":
 		_skill_lean_deg = 0.0
 		if _strike_box != null:

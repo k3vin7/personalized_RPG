@@ -81,15 +81,23 @@ func _ready() -> void:
 	# M-3: the race stands, a column along the plaza's west edge (x -18.5,
 	# z 4.5 to 11.1), turned to run along z. The back edge was tried first and
 	# the orc's stand landed inside the 2 m step (x -10.5..-7.5, z 15..18).
+	# M-3/M-5: the race stands, a column along the plaza's west edge (x -18.5,
+	# z 0.7 to 7.3), turned to run along z.
 	var pedestals := RacePedestal.new()
 	pedestals.name = "RacePedestal"
-	pedestals.position = Vector3(-18.5, 0.0, 7.8)
+	pedestals.position = Vector3(-18.5, 0.0, 4.0)
 	pedestals.rotation_degrees.y = 90.0
 	add_child(pedestals)
 
+	# M-5: the weapon rack beside the race stands on the same edge (x -17.5,
+	# z 9.1 to 17.9), turned the other way so its drop zone faces the edge
+	# (x -19.3, z 13.5) and not the plaza: facing inward it covered E's carry
+	# stand at (-16, 12). It stood at z 16 across the step row (z 15 to 18)
+	# before, with its stands inside the 3 m and 3.5 m steps.
 	var rack := WeaponRack.new()
 	rack.name = "WeaponRack"
-	rack.position = Vector3(0.0, 0.0, 16.0)
+	rack.position = Vector3(-17.5, 0.0, 13.5)
+	rack.rotation_degrees.y = -90.0
 	add_child(rack)
 
 	# 3-chapter structure: the judge is a sibling of Players, not a child of a
@@ -292,6 +300,8 @@ func _run_smoke() -> void:
 				await _run_respawn_checks(local)
 			elif Net.auto_only == "2":
 				await _run_stage2_checks(local)
+				# M-5: the rack moved; its smoke is reachable on its own now.
+				await _run_weapon_rack_check(local)
 		else:
 			await _client_support(local)
 		return
@@ -631,14 +641,21 @@ func _run_weapon_rack_check(local: Player) -> void:
 		print("PLAYGROUND_RACK missing")
 		return
 	var picked := PackedStringArray()
+	var kinds := [WeaponKinds.Kind.SWORD, WeaponKinds.Kind.BOW, WeaponKinds.Kind.SPEAR,
+		WeaponKinds.Kind.SHIELD, WeaponKinds.Kind.STAFF]
 	for index in range(5):
-		var lane := rack.global_position + Vector3((float(index) - 2.0) * WeaponRack.SPACING, 1.0, -3.0)
-		await _settle(local, lane)
-		local.movement.set_target(rack.global_position + Vector3((float(index) - 2.0) * WeaponRack.SPACING, 0.0, 0.0))
+		# M-5: the rack runs along z on the west edge; the lane is 3 m into the
+		# plaza from each stand, found from the stand itself.
+		var stand := (rack as WeaponRack).zone_position(kinds[index])
+		await _settle(local, stand + Vector3(3.0, 1.0, 0.0))
+		local.movement.set_target(stand)
 		await get_tree().create_timer(1.6).timeout
-		# Standing on it is not enough any more; the key is what equips.
+		# Standing on it is not enough any more; the key is what equips. M-5:
+		# the answer is the server's, applied a step later, so wait for it.
 		var before := local.weapon
 		var took: bool = (rack as WeaponRack).interact(local)
+		for _frame in range(6):
+			await get_tree().physics_frame
 		picked.append("%d:%s%s" % [
 			index,
 			WeaponKinds.LABELS.get(local.weapon, "?"),
@@ -1209,6 +1226,63 @@ func _run_audit(local: Player) -> void:
 		closest, local.radius() * 2.0, closest < local.radius() * 2.0 - 0.05,
 		_flat(dummy.global_position - dummy.home)])
 	local.movement.cancel_target()
+	_audit_orc_fit()
+
+
+# M-5: where an orc does not fit. Measured off the static boxes, not fixed: the
+# navigation mesh is the one 1.8 m / 0.4 m bake (결정 3), so a body 2.2 m tall
+# and 0.49 m wide is told where it would catch. Two kinds of place: a ceiling a
+# human walks under and an orc hits (box bottom between 1.8 and 2.2 m over the
+# floor), and a corridor between two boxes a human passes and an orc does not
+# (gap between 0.8 and 0.98 m). The 9 cm the orc's radius exceeds the bake's
+# is also noted: along every wall it stands that much inside the mesh's edge.
+func _audit_orc_fit() -> void:
+	var human := Races.data_for(Races.DEFAULT)
+	var orc := Races.data_for(Races.Kind.ORC)
+	var orc_scale := orc.height_cm / human.height_cm
+	var orc_height := Player.BODY_HALF_HEIGHT * 2.0 * orc_scale
+	var orc_width := Player.BODY_RADIUS * 2.0 * orc_scale
+	var human_width := Player.BODY_RADIUS * 2.0
+	var boxes: Array[Dictionary] = []
+	for node in find_children("*", "StaticBody3D", true, false):
+		var body := node as StaticBody3D
+		for child in body.get_children():
+			var shape_node := child as CollisionShape3D
+			if shape_node == null or not (shape_node.shape is BoxShape3D):
+				continue
+			var size: Vector3 = (shape_node.shape as BoxShape3D).size
+			var centre := shape_node.global_position
+			boxes.append({"name": body.name, "min": centre - size * 0.5, "max": centre + size * 0.5})
+	var found := 0
+	for box in boxes:
+		var bottom: float = (box["min"] as Vector3).y
+		if bottom > Player.BODY_HALF_HEIGHT * 2.0 and bottom < orc_height:
+			found += 1
+			print("PLAYGROUND_AUDIT_ORC_FIT kind=ceiling body=%s bottom=%.2f (human %.2f passes, orc %.2f catches)" % [
+				box["name"], bottom, Player.BODY_HALF_HEIGHT * 2.0, orc_height])
+	for i in boxes.size():
+		for j in range(i + 1, boxes.size()):
+			var a: Dictionary = boxes[i]
+			var b: Dictionary = boxes[j]
+			var a_min: Vector3 = a["min"]
+			var a_max: Vector3 = a["max"]
+			var b_min: Vector3 = b["min"]
+			var b_max: Vector3 = b["max"]
+			# Both have to stand in the walking band to form a corridor.
+			if a_min.y > orc_height or b_min.y > orc_height or a_max.y < 0.3 or b_max.y < 0.3:
+				continue
+			for axis in [0, 2]:
+				var other := 2 if axis == 0 else 0
+				if a_max[other] < b_min[other] or b_max[other] < a_min[other]:
+					continue
+				var gap := maxf(b_min[axis] - a_max[axis], a_min[axis] - b_max[axis])
+				if gap >= human_width and gap < orc_width:
+					found += 1
+					print("PLAYGROUND_AUDIT_ORC_FIT kind=corridor between=%s|%s axis=%s gap=%.2f (human %.2f passes, orc %.2f does not)" % [
+						a["name"], b["name"], "x" if axis == 0 else "z", gap, human_width, orc_width])
+	print("PLAYGROUND_AUDIT_ORC_FIT summary=%d places orc_height=%.2f orc_width=%.2f mesh_agent_radius=%.2f orc_radius=%.2f edge_overrun=%.2f boxes=%d" % [
+		found, orc_height, orc_width, Player.BODY_RADIUS, Player.BODY_RADIUS * orc_scale,
+		Player.BODY_RADIUS * orc_scale - Player.BODY_RADIUS, boxes.size()])
 
 
 func _collect_bodies(node: Node, into: Array[CollisionObject3D]) -> void:
