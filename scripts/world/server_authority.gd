@@ -36,6 +36,10 @@ enum Intent {
 	# every peer, so the slider is a request and the server's table is the one
 	# that counts -- and the one the server's own move check reads.
 	RACE_MULT,
+	# H-3: the three tuning values HP and stamina are built from. They sit in
+	# PhysicsTuning like every other number, but they enter the server's HP
+	# ruling, so the server's copy is the one everyone computes with.
+	VITALS_TUNING,
 }
 
 # Anything that can be picked up joins this group and offers
@@ -165,6 +169,17 @@ var race_tolerance_mults := PackedFloat32Array([1.0, 1.0, 1.0, 1.0])
 var race_move_mults := PackedFloat32Array([1.0, 1.0, 1.0, 1.0])
 const DEBUG_RACE_MULT_RANGE := Vector2(0.0, 3.0)
 const RACE_MULT_FIELDS := ["tolerance", "move"]
+# H-3: the server's copy of the three vitals coefficients. Seeded from the
+# shipped PhysicsTuning on every peer (same file everywhere), then overwritten
+# on clients by push_vitals_tuning -- so CharacterStats.max_hp comes out the
+# same on every machine, and a client moving its own slider moves nothing.
+const VITALS_TUNING_FIELDS := ["hp_per_endurance", "stamina_base", "stamina_per_endurance"]
+const DEBUG_VITALS_RANGES := {
+	"hp_per_endurance": Vector2(0.1, 10.0),
+	"stamina_base": Vector2(0.0, 400.0),
+	"stamina_per_endurance": Vector2(0.0, 5.0),
+}
+var vitals_tuning := {}
 
 
 func _ready() -> void:
@@ -172,6 +187,8 @@ func _ready() -> void:
 	# resolves on both ends.
 	set_multiplayer_authority(1)
 	instance = self
+	for field: String in VITALS_TUNING_FIELDS:
+		vitals_tuning[field] = float(Tuning.values.get(field))
 
 
 func _exit_tree() -> void:
@@ -343,6 +360,7 @@ func _push_view() -> void:
 	# The race table rides the same heartbeat: it changes rarely, a late joiner
 	# gets it within one beat, and a dropped change is repaired by the next.
 	_push_race_mults()
+	_push_vitals_tuning()
 
 
 # Server -> every peer. Reliable: a dropped row would leave a client carrying
@@ -398,6 +416,37 @@ func push_race_mults(tolerance: PackedFloat32Array, move: PackedFloat32Array) ->
 		return
 	race_tolerance_mults = tolerance
 	race_move_mults = move
+
+
+# ------------------------------------------------------ the vitals coefficients
+# H-3. Readable on every peer, writable only on the server, like the race table.
+# Static so CharacterStats can ask without holding a node; before the judge is
+# in the tree (a body spawned ahead of it) the shipped tuning answers, which is
+# the same number the table was seeded from.
+
+static func vitals_coeff(field: String) -> float:
+	if instance != null and instance.vitals_tuning.has(field):
+		return float(instance.vitals_tuning[field])
+	return float(Tuning.values.get(field))
+
+
+func _push_vitals_tuning() -> void:
+	if not multiplayer.has_multiplayer_peer():
+		return
+	push_vitals_tuning.rpc(vitals_tuning)
+
+
+# Server -> every peer. A client that sends this is refused like any other
+# forged result, and a field this build does not know is ignored.
+@rpc("any_peer", "call_remote", "reliable")
+func push_vitals_tuning(values: Dictionary) -> void:
+	if not result_is_server_sent("push_vitals_tuning", multiplayer.get_remote_sender_id()):
+		return
+	for field: String in VITALS_TUNING_FIELDS:
+		if values.has(field):
+			var value: Variant = values[field]
+			if (value is float or value is int) and is_finite(float(value)):
+				vitals_tuning[field] = float(value)
 
 
 # ---------------------------------------------------------------- the door
@@ -459,6 +508,8 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 			result = _rule_stats(actor, payload)
 		Intent.RACE_MULT:
 			result = _rule_race_mult(payload)
+		Intent.VITALS_TUNING:
+			result = _rule_vitals_tuning(payload)
 	if result == null:
 		return _refuse(sender, kind, "refused")
 	granted_intents += 1
@@ -519,6 +570,10 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 			var race_ok := Races.is_known(int(payload.get("race", -1)))
 			var value_ok := (value is float or value is int) and is_finite(float(value))
 			return field_ok and race_ok and value_ok
+		Intent.VITALS_TUNING:
+			var asked: Variant = payload.get("value")
+			return String(payload.get("field", "")) in VITALS_TUNING_FIELDS \
+				and (asked is float or asked is int) and is_finite(float(asked))
 		Intent.FALL:
 			return payload.has("peak") and payload.has("land") \
 				and is_finite(float(payload.get("peak", INF))) \
@@ -715,6 +770,34 @@ func _rule_race_mult(payload: Dictionary) -> Variant:
 	return true
 
 
+# H-3: the vitals slider. One coefficient, clamped, mirrored into the server's
+# own tuning copy so its panel and export agree, then pushed to everyone. A
+# maximum that just fell takes the current HP down with it, the same as a race
+# change does.
+func _rule_vitals_tuning(payload: Dictionary) -> Variant:
+	var field := String(payload.get("field", ""))
+	if not vitals_tuning.has(field):
+		return null
+	var limits: Vector2 = DEBUG_VITALS_RANGES[field]
+	var value := clampf(float(payload.get("value", 0.0)), limits.x, limits.y)
+	vitals_tuning[field] = value
+	Tuning.values.set(field, value)
+	Tuning.notify_changed()
+	_push_vitals_tuning()
+	_clamp_all_hp()
+	print("PLAYGROUND_VITALS_TUNING field=%s value=%.3f" % [field, value])
+	return true
+
+
+# The maximum is derived, so when what it derives from moves, the current HP is
+# brought back inside it. Only ever down: a bigger maximum is not a heal.
+func _clamp_all_hp() -> void:
+	for node in Net.spawn_root.get_children():
+		var player := node as Player
+		if player != null and not player.sync_dead:
+			server_set_hp(player, player.hp)
+
+
 # For the automated checks only, and deliberately not an RPC: the abilities are
 # the server's, so the one door open from outside is Intent.STATS above. A
 # check runs on the host and sets a number here, on the server, for whichever
@@ -739,6 +822,9 @@ func harness_set_stats(player: Player, strength: float, weight := INF,
 		player.stats.weight_override = weight
 	if not is_inf(gear):
 		player.stats.gear_weight = 0.0 if is_nan(gear) else gear
+	# H-3: max_hp is derived, so the current HP is kept inside the new one.
+	if not player.sync_dead:
+		server_set_hp(player, player.hp)
 	forgive_move(player.get_multiplayer_authority(), "harness_stats")
 	return true
 
@@ -766,6 +852,10 @@ func harness_set_race(player: Player, kind: int) -> bool:
 	player.stats.race = kind
 	player.stats.clear_overrides()
 	player.stats.gear_weight = 0.0
+	# H-3: a dwarf's 150 does not fit a human's 105. Clamped, not refilled --
+	# the playground refill on a race change is H-4's pedestal, not this door.
+	if not player.sync_dead:
+		server_set_hp(player, player.hp)
 	forgive_move(player.get_multiplayer_authority(), "harness_race")
 	return true
 

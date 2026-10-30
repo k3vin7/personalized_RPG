@@ -57,11 +57,22 @@ extends Resource
 @export_group("Climb")
 @export var climb_speed: float = 2.0
 @export var climb_attach_distance: float = 0.6
-@export var stamina_max: float = 100.0
 @export var stamina_climb_drain: float = 15.0
 @export var stamina_regen: float = 25.0
 # 6-chapter stamina costs. Dash is the one stage C spends.
 @export var stamina_dash_cost: float = 10.0
+
+@export_group("Vitals")
+# H-3: HP and stamina come out of endurance, not out of a stored maximum. HP is
+# proportional, so the difference between races lands on how much they take;
+# stamina is a base plus a small slice of it, so the same difference barely
+# touches how far they move. These three go into the server's HP ruling, so the
+# copy that counts is the server's table (ServerAuthority.vitals_coeff) and the
+# slider is a request, like the abilities. 1.5 puts a human (70) at 105, a
+# dwarf (100) at 150, an orc (80) at 120 -- 100 was a placeholder, not a value.
+@export var hp_per_endurance: float = 1.5
+@export var stamina_base: float = 80.0
+@export var stamina_per_endurance: float = 0.3
 
 @export_group("Force")
 @export var shove_power: float = 7.0

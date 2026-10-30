@@ -117,7 +117,7 @@ func _process(delta: float) -> void:
 	if not is_instance_valid(player) or not player.is_inside_tree():
 		return
 	var max_hp: float = maxf(player.stats.max_hp, 0.01)
-	var max_stamina: float = maxf(Tuning.values.stamina_max, 0.01)
+	var max_stamina: float = maxf(player.stats.max_stamina, 0.01)
 	_set_bar(_hp_fill, _hp_trail, _hp_text, player.hp, max_hp, "HP", HP_COLOR, HP_LOW_COLOR, delta)
 	_set_bar(
 		_stamina_fill, _stamina_trail, _stamina_text, player.stamina, max_stamina,

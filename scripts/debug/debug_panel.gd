@@ -127,6 +127,20 @@ func _build_ui() -> void:
 				ServerAuthority.DEBUG_RACE_MULT_RANGE.y,
 				func(value: float) -> void: _ask_race_mult(field, kind, value)))
 
+	# H-3: the three numbers HP and stamina are made of. They live in
+	# PhysicsTuning like the rest, but they are in the server's HP ruling, so
+	# the slider asks and the answer comes back replicated -- the generic loop
+	# below skips them.
+	column.add_child(_heading("HP·스태미나 계수 (서버 승인)"))
+	for field: String in ServerAuthority.VITALS_TUNING_FIELDS:
+		var limits: Vector2 = ServerAuthority.DEBUG_VITALS_RANGES[field]
+		column.add_child(_slider(
+			field,
+			ServerAuthority.vitals_coeff(field),
+			limits.x,
+			limits.y,
+			func(value: float) -> void: _ask_vitals_tuning(field, value)))
+
 	column.add_child(_heading("튜닝 (각자 로컬)"))
 	var pull := Button.new()
 	pull.text = "호스트 튜닝 받아오기"
@@ -137,6 +151,8 @@ func _build_ui() -> void:
 			continue
 		var name_text := String(property["name"])
 		if name_text.begins_with("resource_") or name_text == "script":
+			continue
+		if name_text in ServerAuthority.VITALS_TUNING_FIELDS:
 			continue
 		var value: Variant = Tuning.values.get(name_text)
 		if typeof(value) == TYPE_BOOL:
@@ -235,9 +251,32 @@ func _refresh_readout() -> void:
 			player.get_jump_height(), player.get_jump_velocity()],
 		"이동 속도: %.2f m/s" % player.get_move_speed(),
 		"이동 의도: %.2f초 남음" % (movement.intent_seconds_left() if movement != null else 0.0),
-		"HP: %.0f / %.0f" % [player.hp, player.stats.max_hp],
-		"지구력: %.0f / %.0f" % [player.stamina, Tuning.values.stamina_max],
+		"HP: %.0f / %.0f   스태미나: %.0f / %.0f" % [
+			player.hp, player.stats.max_hp, player.stamina, player.stats.max_stamina],
+		"종족별 HP/스태미나 최대: " + _race_vitals_line(),
 	]))
+
+
+# H-3: the four races' derived maxima, from the server's coefficients -- the
+# same numbers the server clamps HP to, so this line is a readout of a ruling.
+func _race_vitals_line() -> String:
+	var parts := PackedStringArray()
+	for kind in Races.all_kinds():
+		var endurance := Races.data_for(kind).endurance
+		parts.append("%s %.0f/%.0f" % [
+			Races.label_for(kind),
+			endurance * ServerAuthority.vitals_coeff("hp_per_endurance"),
+			ServerAuthority.vitals_coeff("stamina_base")
+				+ endurance * ServerAuthority.vitals_coeff("stamina_per_endurance")])
+	return "  ".join(parts)
+
+
+# H-3: one coefficient, asked for. The server clamps and pushes the table back.
+func _ask_vitals_tuning(field: String, value: float) -> void:
+	if not is_instance_valid(player):
+		return
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.VITALS_TUNING, {
+		"field": field, "value": value})
 
 
 func _build_arc() -> void:

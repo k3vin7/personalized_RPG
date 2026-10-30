@@ -21,7 +21,6 @@ extends Resource
 @export var weight_override: float = NAN
 
 @export var gear_weight: float = 0.0
-@export var max_hp: float = 100.0
 
 # Stage E: what this body is carrying. Not exported -- it is set by the hold,
 # not by the character sheet -- but it is part of the weight every formula in
@@ -61,6 +60,19 @@ var intellect: float:
 var height_cm: float:
 	get:
 		return race_data().height_cm
+
+# H-3: derived, like the abilities above. The coefficients are the server's --
+# ServerAuthority.vitals_coeff reads the server's table on every peer, never
+# this peer's own tuning copy -- so a client that moves its own slider changes
+# nothing about how much it can take.
+var max_hp: float:
+	get:
+		return endurance * ServerAuthority.vitals_coeff("hp_per_endurance")
+
+var max_stamina: float:
+	get:
+		return ServerAuthority.vitals_coeff("stamina_base") \
+			+ endurance * ServerAuthority.vitals_coeff("stamina_per_endurance")
 
 
 func total_weight() -> float:

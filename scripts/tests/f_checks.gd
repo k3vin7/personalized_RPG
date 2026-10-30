@@ -131,7 +131,7 @@ func _attach(degrees: float, from_behind := false) -> bool:
 			_local.climb.detach(0.0)
 		_local.global_position = stand
 		_local.velocity = Vector3.ZERO
-		_local.stamina = Tuning.values.stamina_max
+		_local.stamina = _local.stats.max_stamina
 		_local.movement.cancel_target())
 	await _wait(0.5)
 	var wall := _ring_wall(degrees)
@@ -507,7 +507,7 @@ func client_climb(degrees: float) -> void:
 		placed()
 		_local.global_position = face + outward * (Player.BODY_RADIUS + 0.2)
 		_local.velocity = Vector3.ZERO
-		_local.stamina = Tuning.values.stamina_max
+		_local.stamina = _local.stats.max_stamina
 		_local.movement.cancel_target())
 	await _wait(0.5)
 	await tick_request(func() -> void:

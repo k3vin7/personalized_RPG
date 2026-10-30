@@ -113,6 +113,7 @@ func run(world: Node3D) -> void:
 	await _gap_width_checks()
 	await _shadow_checks()
 	await _stamina_check()
+	await _vitals_checks()
 	await _client_feel_check()
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_c")
 	print("C_RESULT lag=%s peer=%d checks=%d failures=%d" % [_label, _peer_id, _checks, _failures])
@@ -286,7 +287,7 @@ func _dash_to(home: Vector3, cursor_distance: float) -> Dictionary:
 		placed()
 		_local.global_position = home
 		_local.velocity = Vector3.ZERO
-		_local.stamina = Tuning.values.stamina_max
+		_local.stamina = _local.stats.max_stamina
 		_local.movement.cancel_target())
 	await _wait(0.4)
 	var from := _local.global_position
@@ -480,7 +481,7 @@ func _air_space_checks() -> void:
 		placed()
 		_local.global_position = HOME
 		_local.velocity = Vector3.ZERO
-		_local.stamina = Tuning.values.stamina_max
+		_local.stamina = _local.stats.max_stamina
 		_local.movement.cancel_target()
 		_local.movement.set_aim_override(HOME + Vector3(8.0, 0.0, 0.0))
 		_local.movement.request_dash())
@@ -551,7 +552,7 @@ func _smart_key_checks() -> void:
 		placed()
 		_local.global_position = HOME
 		_local.velocity = Vector3.ZERO
-		_local.stamina = Tuning.values.stamina_max
+		_local.stamina = _local.stats.max_stamina
 		_local.movement.set_aim_override(HOME + Vector3(2.5, 0.0, 0.0))
 		_local.movement.press_dash())
 	await _wait(0.3)
@@ -729,7 +730,7 @@ func _stamina_check() -> void:
 		placed()
 		_local.global_position = HOME
 		_local.velocity = Vector3.ZERO
-		_local.stamina = Tuning.values.stamina_max
+		_local.stamina = _local.stats.max_stamina
 		_local.movement.cancel_target())
 	await _wait(0.5
 	)
@@ -752,8 +753,158 @@ func _stamina_check() -> void:
 		refused = not _local.movement.request_dash())
 	expect(refused, "no_stamina_no_dash")
 	await tick_request(func() -> void:
-		_local.stamina = Tuning.values.stamina_max
+		_local.stamina = _local.stats.max_stamina
 		_local.movement.set_aim_override(Vector3.INF))
+
+
+# ------------------------------------ H-3: endurance to HP and stamina
+
+# What the client computed for its own body, [max_hp, max_stamina, hp]: once
+# as asked, and once more after it wrote a coefficient on its own tuning copy.
+var _vitals_report := {}
+
+
+func _vitals_checks() -> void:
+	var judge := _judge
+	# Checked against what the server holds, not against what this file thinks
+	# the numbers are: the formula is the claim, the table is the input.
+	var hp_k := ServerAuthority.vitals_coeff("hp_per_endurance")
+	var st_base := ServerAuthority.vitals_coeff("stamina_base")
+	var st_k := ServerAuthority.vitals_coeff("stamina_per_endurance")
+	note("vitals coefficients: hp_per_endurance %.3f stamina_base %.1f stamina_per_endurance %.3f" % [
+		hp_k, st_base, st_k])
+	for kind: int in Races.all_kinds():
+		var data := Races.data_for(kind)
+		var tag: String = String(Races.Kind.keys()[kind]).to_lower()
+		await tick_request(func() -> void: judge.harness_set_race(_local, kind))
+		await _wait(0.3)
+		var want_hp := data.endurance * hp_k
+		var want_stamina := st_base + data.endurance * st_k
+		note("race %s: endurance %.0f -> max_hp %.1f (formula %.1f), max_stamina %.1f (formula %.1f), hp now %.1f, stamina now %.1f" % [
+			data.label, data.endurance, _local.stats.max_hp, want_hp,
+			_local.stats.max_stamina, want_stamina, _local.hp, _local.stamina])
+		expect(absf(_local.stats.max_hp - want_hp) < 0.01, "%s_max_hp_is_endurance_times_the_coefficient" % tag)
+		expect(absf(_local.stats.max_stamina - want_stamina) < 0.01, "%s_max_stamina_is_base_plus_a_slice_of_endurance" % tag)
+		expect(_local.hp <= _local.stats.max_hp + 0.01, "%s_hp_sits_inside_its_max" % tag)
+		expect(_local.stamina <= _local.stats.max_stamina + 0.01, "%s_stamina_sits_inside_its_max" % tag)
+
+	# The decided numbers: a human is 105 / 101, not the old 100 / 100.
+	await tick_request(func() -> void: judge.harness_set_race(_local, Races.Kind.HUMAN))
+	await _wait(0.3)
+	expect(absf(_local.stats.max_hp - 105.0) < 0.01, "a_human_has_105_hp")
+	expect(absf(_local.stats.max_stamina - 101.0) < 0.01, "and_101_stamina")
+
+	# A race change clamps: a full dwarf (150) put back on human keeps 105.
+	await tick_request(func() -> void: judge.harness_set_race(_local, Races.Kind.DWARF))
+	await _wait(0.3)
+	await tick_request(func() -> void: judge.server_set_hp(_local, _local.stats.max_hp))
+	expect(absf(_local.hp - 150.0) < 0.01, "a_dwarf_fills_to_150")
+	await tick_request(func() -> void: judge.harness_set_race(_local, Races.Kind.HUMAN))
+	await _wait(0.3)
+	note("dwarf 150 -> human: hp %.1f / %.1f" % [_local.hp, _local.stats.max_hp])
+	expect(absf(_local.hp - 105.0) < 0.01, "back_on_human_the_hp_is_clamped_to_105")
+	# And the stamina pool regrows to the new maximum, no further.
+	await tick_request(func() -> void: judge.harness_set_race(_local, Races.Kind.DWARF))
+	await _wait(1.0)
+	note("human -> dwarf after 1 s: stamina %.1f / %.1f (regen %.0f/s)" % [
+		_local.stamina, _local.stats.max_stamina, Tuning.values.stamina_regen])
+	expect(absf(_local.stamina - _local.stats.max_stamina) < 0.5, "the_stamina_pool_regrows_to_110")
+	await tick_request(func() -> void: judge.harness_set_race(_local, Races.Kind.HUMAN))
+	await _wait(0.3)
+	expect(_local.stamina <= 101.01, "and_is_cut_back_to_101")
+
+	# A respawn fills to the derived maximum.
+	await tick_request(func() -> void: judge.server_set_hp(_local, 20.0))
+	await tick_request(func() -> void: judge.server_respawn(_local))
+	await _wait(0.5)
+	expect(absf(_local.hp - _local.stats.max_hp) < 0.01 and absf(_local.hp - 105.0) < 0.01,
+		"respawn_fills_to_the_derived_max")
+
+	# The other machine. The server puts the client on orc; the client has to
+	# arrive at the same 120 from the same table, and nothing it writes on its
+	# own tuning copy -- or pushes at the server -- may move that.
+	var mate := judge.actor_for(_client_peer())
+	if mate != null:
+		await tick_request(func() -> void: judge.harness_set_race(mate, Races.Kind.ORC))
+		await _wait(0.5)
+		expect(absf(mate.stats.max_hp - 80.0 * hp_k) < 0.01, "the_server_sees_the_clients_orc_at_120")
+		var own := await _ask_client_vitals()
+		if own.size() == 2:
+			var seen: PackedFloat32Array = own[0]
+			var forged: PackedFloat32Array = own[1]
+			note("client's own body: max_hp %.1f max_stamina %.1f hp %.1f | after writing its own coefficient: %.1f %.1f %.1f | server: %.1f %.1f %.1f" % [
+				seen[0], seen[1], seen[2], forged[0], forged[1], forged[2],
+				mate.stats.max_hp, mate.stats.max_stamina, mate.hp])
+			expect(absf(seen[0] - mate.stats.max_hp) < 0.01, "the_client_computes_the_same_max_hp")
+			expect(absf(seen[1] - mate.stats.max_stamina) < 0.01, "and_the_same_max_stamina")
+			expect(absf(forged[0] - mate.stats.max_hp) < 0.01, "a_clients_own_coefficient_write_changes_nothing")
+		expect(absf(ServerAuthority.vitals_coeff("hp_per_endurance") - hp_k) < 0.0001,
+			"a_clients_push_of_the_table_is_refused")
+
+	# The slider is a request. Up: the max grows, the hp does not. Down: the hp
+	# is cut to fit. Both reach the client.
+	await tick_request(func() -> void: ServerAuthority.submit_intent(_local,
+		ServerAuthority.Intent.VITALS_TUNING, {"field": "hp_per_endurance", "value": 2.0}))
+	await _wait(0.5)
+	note("hp_per_endurance 2.0: human max_hp %.1f hp %.1f" % [_local.stats.max_hp, _local.hp])
+	expect(absf(_local.stats.max_hp - 140.0) < 0.01, "a_slider_request_changes_the_servers_table")
+	expect(absf(_local.hp - 105.0) < 0.01, "a_bigger_max_is_not_a_heal")
+	if mate != null:
+		var after := await _ask_client_vitals()
+		if after.size() == 2:
+			var seen_after: PackedFloat32Array = after[0]
+			expect(absf(seen_after[0] - 160.0) < 0.01, "the_new_coefficient_reached_the_client")
+	await tick_request(func() -> void: ServerAuthority.submit_intent(_local,
+		ServerAuthority.Intent.VITALS_TUNING, {"field": "hp_per_endurance", "value": 1.0}))
+	await _wait(0.5)
+	note("hp_per_endurance 1.0: human max_hp %.1f hp %.1f" % [_local.stats.max_hp, _local.hp])
+	expect(absf(_local.hp - 70.0) < 0.01, "a_smaller_max_takes_the_hp_down_with_it")
+
+	# Back where the rest of the stage expects things.
+	await tick_request(func() -> void: ServerAuthority.submit_intent(_local,
+		ServerAuthority.Intent.VITALS_TUNING, {"field": "hp_per_endurance", "value": hp_k}))
+	if mate != null:
+		await tick_request(func() -> void: judge.harness_set_race(mate, Races.Kind.HUMAN))
+	await _wait(0.5)
+	await tick_request(func() -> void:
+		judge.server_set_hp(_local, _local.stats.max_hp)
+		if mate != null:
+			judge.server_set_hp(mate, mate.stats.max_hp))
+	expect(absf(_local.stats.max_hp - 105.0) < 0.01, "the_coefficient_is_back_at_1_5")
+
+
+func _ask_client_vitals() -> Array:
+	_vitals_report.clear()
+	client_report_vitals.rpc_id(_client_peer())
+	var waited := 0.0
+	while not _vitals_report.has("own") and waited < 10.0 + _lag * 20.0:
+		await get_tree().create_timer(0.1).timeout
+		waited += 0.1
+	expect(_vitals_report.has("own"), "the_client_reported_its_vitals")
+	if not _vitals_report.has("own"):
+		return []
+	return [_vitals_report["own"], _vitals_report["forged"]]
+
+
+# Server -> client. Read the derived maxima, then try the two things a client
+# could do about them -- write the coefficient on its own tuning copy, and push
+# a table at the server -- and report what its own body says afterwards.
+@rpc("authority", "call_remote", "reliable")
+func client_report_vitals() -> void:
+	var own := PackedFloat32Array([_local.stats.max_hp, _local.stats.max_stamina, _local.hp])
+	var was: float = Tuning.values.hp_per_endurance
+	Tuning.values.hp_per_endurance = 9.0
+	var forged := PackedFloat32Array([_local.stats.max_hp, _local.stats.max_stamina, _local.hp])
+	Tuning.values.hp_per_endurance = was
+	_judge.push_vitals_tuning.rpc_id(1, {"hp_per_endurance": 9.0})
+	report_vitals.rpc_id(1, own, forged)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func report_vitals(own: PackedFloat32Array, forged: PackedFloat32Array) -> void:
+	if multiplayer.is_server() and multiplayer.get_peers().has(multiplayer.get_remote_sender_id()):
+		_vitals_report["own"] = own
+		_vitals_report["forged"] = forged
 
 
 # --------------------------- stage C's other half: how fast a press shows

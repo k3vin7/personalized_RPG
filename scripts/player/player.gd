@@ -99,6 +99,11 @@ var movement: PlayerMovement
 var climb: PlayerClimb
 var grab: PlayerGrab
 var stamina := 100.0
+# H-3: the owner's stamina, replicated on the pose synchronizer for display on
+# other screens. Spending it is still the owner's (the server does not check
+# stamina costs yet -- that is the combat stage), so this is a readout, not a
+# ruling: nothing on another peer may branch on it.
+var sync_stamina := 100.0
 var camera: QuarterCamera
 
 var _visual: Node3D
@@ -181,7 +186,8 @@ func vitals_are_mine() -> bool:
 func _ready() -> void:
 	stats = (load("res://data/default_stats.tres") as CharacterStats).duplicate(true)
 	hp = stats.max_hp
-	stamina = Tuning.values.stamina_max
+	stamina = stats.max_stamina
+	sync_stamina = stamina
 	collision_layer = PLAYER_LAYER
 	# Rocks are included: a rock you can walk through is not a thing you would
 	# bother picking up, and a thrown one has to be able to knock you about.
@@ -442,7 +448,10 @@ func _physics_process(delta: float) -> void:
 		if _fall_tracking and state == State.AIRBORNE:
 			_fall_peak_y = maxf(_fall_peak_y, global_position.y)
 		if is_grounded_state():
-			stamina = minf(Tuning.values.stamina_max, stamina + Tuning.values.stamina_regen * delta)
+			stamina = minf(stats.max_stamina, stamina + Tuning.values.stamina_regen * delta)
+		# A maximum that fell (slider, race) takes the pool down with it.
+		stamina = minf(stamina, stats.max_stamina)
+		sync_stamina = stamina
 		sync_position = global_position
 		sync_yaw = rotation.y
 		sync_state = state
@@ -452,6 +461,8 @@ func _physics_process(delta: float) -> void:
 		return
 	if sync_weapon != weapon:
 		_apply_weapon(sync_weapon)
+	# Shown, not simulated, like the pose: the owner's number as last heard.
+	stamina = sync_stamina
 	if _teleport_blind_left > 0.0:
 		_teleport_blind_left -= delta
 		if _teleport_blind_left <= 0.0:
@@ -557,7 +568,7 @@ func apply_respawn() -> void:
 	_respawn_echo_left = RESPAWN_ECHO_GRACE
 	global_position = _free_spawn_point()
 	velocity = Vector3.ZERO
-	stamina = Tuning.values.stamina_max
+	stamina = stats.max_stamina
 	floor_snap_length = _default_snap
 	if movement != null:
 		movement.cancel_target()

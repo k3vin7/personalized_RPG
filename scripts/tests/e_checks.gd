@@ -1107,7 +1107,7 @@ func _park_self(point: Vector3) -> void:
 		_local.global_position = point
 		_local.velocity = Vector3.ZERO
 		_judge.harness_clear_stats(_local)
-		_local.stamina = Tuning.values.stamina_max
+		_local.stamina = _local.stats.max_stamina
 		_local.movement.cancel_target())
 	await _wait(0.6)
 

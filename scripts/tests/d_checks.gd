@@ -725,7 +725,7 @@ func _dash_jump_range_check() -> void:
 		_judge.server_respawn(_local)
 		_local.global_position = HOME
 		_local.velocity = Vector3.ZERO
-		_local.stamina = Tuning.values.stamina_max
+		_local.stamina = _local.stats.max_stamina
 		_local.movement.cancel_target())
 	await _wait(0.8)
 	var from := _local.global_position
@@ -770,7 +770,7 @@ func _dash_jump_range_check() -> void:
 		# the body never moved.
 		_local.global_position = Vector3(GAP5_LANE, 0.9, 1.0)
 		_local.velocity = Vector3.ZERO
-		_local.stamina = Tuning.values.stamina_max
+		_local.stamina = _local.stats.max_stamina
 		_local.movement.cancel_target())
 	# The cooldown from the dash above has to run out, or the dash is refused
 	# and the body never leaves the mark -- which would pass this check for
