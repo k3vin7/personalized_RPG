@@ -143,6 +143,12 @@ var _label: Label3D
 var _default_snap := 0.3
 var spawn_point := Vector3.ZERO
 var _stun_left := 0.0
+# M-2: how long the body still lies, then how long standing up still takes. No
+# input through either; the pose eases from lying to standing through the
+# second. Read by the checks.
+var _down_left := 0.0
+var _getup_left := 0.0
+var downs_applied := 0
 # Fall measurement. The peak is tracked rather than the launch height: a push
 # that throws you up and then down has to count the whole drop.
 var _fall_peak_y := 0.0
@@ -323,6 +329,10 @@ func change_state(new_state: int) -> void:
 	if skills != null and (previous == State.CASTING or previous == State.RECOVERING) \
 			and new_state != State.CASTING and new_state != State.RECOVERING and new_state != State.IDLE:
 		skills.on_interrupted()
+	if previous == State.DOWNED and new_state != State.DOWNED:
+		_down_left = 0.0
+		_getup_left = 0.0
+	_apply_predicted_pose()
 	_apply_state_colour()
 	state_changed.emit(new_state)
 
@@ -441,6 +451,21 @@ func is_casting() -> bool:
 	return state == State.CASTING or state == State.RECOVERING
 
 
+# M-2: nothing may be ordered -- a cast's windup or recovery, or lying down.
+func is_incapacitated() -> bool:
+	return is_casting() or state == State.DOWNED
+
+
+# The lying-down pose, 0 standing to 1 flat. Remote bodies lie flat for the
+# whole of DOWNED; the owner eases back up through the getup.
+func _lying() -> float:
+	if state != State.DOWNED:
+		return 0.0
+	if is_local() and _down_left <= 0.0 and _getup_left > 0.0:
+		return clampf(_getup_left / maxf(Tuning.server.getup_time, 0.01), 0.0, 1.0)
+	return 1.0
+
+
 # The stats half of the step, run on every peer and on every body: the side
 # that owns the Vitals synchronizer publishes what the server ruled, and
 # everyone else takes it. Separate from the pose half below, because the two
@@ -494,6 +519,16 @@ func _physics_process(delta: float) -> void:
 			_strike_left -= delta
 			if _strike_left <= 0.0 and _strike_box != null:
 				_strike_box.visible = false
+		if state == State.DOWNED:
+			if _down_left > 0.0:
+				_down_left -= delta
+				if _down_left <= 0.0:
+					_getup_left = Tuning.server.getup_time
+			elif _getup_left > 0.0:
+				_getup_left -= delta
+				if _getup_left <= 0.0:
+					change_state(State.IDLE)
+			_apply_predicted_pose()
 		if _teleport_blind_left > 0.0:
 			# N-2: a correction snaps this body like a teleport, and arriving
 			# inside someone is handled the same way: no collision for a moment.
@@ -808,6 +843,12 @@ func apply_force_event(event: Dictionary) -> void:
 			var stun := float(event.get("stun_apply", 0.0))
 			if stun > 0.0:
 				_apply_stun(stun)
+	# M-2: the knockdown, ruled by the server like the stun. Applied whether or
+	# not the push launched us -- a kick that fails to move a heavy body still
+	# puts it down -- and a second one lands the body down for the full time.
+	var down := float(event.get("down_apply", 0.0))
+	if down > 0.0:
+		_apply_down(down)
 	print("PLAYGROUND_FORCE peer=%s power=%.2f verdict=%s airborne=%s hp=%.0f vel=(%.2f, %.2f, %.2f) y=%.2f" % [
 		name, change.length(), "launched" if launched else "slid",
 		state == State.AIRBORNE, hp,
@@ -839,6 +880,25 @@ func _apply_stun(seconds: float) -> void:
 	if movement != null:
 		movement.cancel_target()
 	change_state(State.STUNNED)
+
+
+# M-2: knocked down. Lying for `seconds`, then getup_time standing up; no
+# orders through either, pushes still land. Already down resets the clock.
+func _apply_down(seconds: float) -> void:
+	if state == State.DEAD or sync_dead or state == State.GRABBED:
+		return
+	_down_left = seconds
+	_getup_left = 0.0
+	downs_applied += 1
+	if movement != null:
+		movement.cancel_target()
+		movement.cancel_armed()
+	if climb != null and climb.is_climbing():
+		climb.detach(0.0)
+	if state != State.DOWNED:
+		change_state(State.DOWNED)
+	_apply_predicted_pose()
+	print("PLAYGROUND_DOWNED peer=%s for=%.2f" % [name, seconds])
 
 
 # Instant, unlike face_direction: a shove points the body where it was aimed
@@ -1003,9 +1063,11 @@ func _apply_predicted_pose() -> void:
 	if _visual == null:
 		return
 	var leaning := predicted_action != -1
-	# M-1: the cast's own lean adds to the prediction's.
-	_visual.rotation.x = deg_to_rad(-(12.0 if leaning else 0.0) - _skill_lean_deg)
-	_visual.position.y = -0.08 if leaning else 0.0
+	# M-1: the cast's own lean adds to the prediction's. M-2: a body that was
+	# knocked down lies flat, and eases back up through the getup.
+	var lying := _lying()
+	_visual.rotation.x = deg_to_rad(-(12.0 if leaning else 0.0) - _skill_lean_deg - 85.0 * lying)
+	_visual.position.y = (-0.08 if leaning else 0.0) - (BODY_HALF_HEIGHT - BODY_RADIUS) * lying
 
 
 # M-1: the procedural show, one phase at a time. "windup" leans the capsule

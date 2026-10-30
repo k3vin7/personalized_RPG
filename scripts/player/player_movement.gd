@@ -118,8 +118,9 @@ func note_pushed() -> void:
 
 
 func press_jump() -> void:
-	if player.is_casting():
-		# M-1: the windup and the recovery take every order but the cancel.
+	if player.is_incapacitated():
+		# M-1: the windup and the recovery take every order but the cancel;
+		# M-2: so does lying knocked down.
 		return
 	if not player.is_grounded_state():
 		# Off the ground Space is not a jump to aim. It is the wall catch, and
@@ -153,7 +154,7 @@ func request_jump() -> void:
 
 
 func press_dash() -> void:
-	if player.is_casting():
+	if player.is_incapacitated():
 		return
 	if Tuning.values.smart_key_enabled:
 		request_dash()
@@ -256,7 +257,7 @@ func _clear_intent() -> void:
 
 
 func set_target(world_point: Vector3) -> void:
-	if player.is_casting():
+	if player.is_incapacitated():
 		# M-1: no moving in the windup or the recovery (cancel is the skill
 		# stage's). The order is dropped, not kept for later.
 		return
@@ -905,7 +906,7 @@ func dash_plan() -> Dictionary:
 
 func request_dash() -> bool:
 	_disarm()
-	if player.is_casting() or not player.is_grounded_state() or _dash_cooldown_left > 0.0:
+	if player.is_incapacitated() or not player.is_grounded_state() or _dash_cooldown_left > 0.0:
 		return false
 	var plan := dash_plan()
 	if float(plan["distance"]) <= 0.0:

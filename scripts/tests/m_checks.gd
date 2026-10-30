@@ -108,6 +108,8 @@ func run(world: Node3D) -> void:
 	await _cooldown_checks()
 	await _smart_key_checks()
 	await _client_cast_check()
+	await _strike_checks()
+	await _knockdown_sequence_check()
 	Tuning.values.smart_key_enabled = smart
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_m")
 	expect(_judge.move_corrections == corrections, "no_corrections_during_stage_m")
@@ -234,7 +236,8 @@ func _recovery_checks() -> void:
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(HOME + Vector3(3.0, 0.0, 0.0))
 		_local.skills.press_slot(2))
-	await _wait(0.15)
+	# Host-local timing: the punch's own clock, not the wire's.
+	await get_tree().create_timer(0.12).timeout
 	expect(_local.state == Player.State.RECOVERING, "the_body_is_recovering_after_the_strike")
 	await tick_request(func() -> void: _local.skills.press_slot(2))
 	expect(_local.skills.casts_started == started + 1 and _local.skills.presses_ignored == ignored + 1,
@@ -324,6 +327,232 @@ func _client_cast_check() -> void:
 	expect(_judge.skills_ruled == ruled + 1, "a_clients_cast_is_ruled_by_the_server")
 
 
+# ------------------------------------------------ M-2: the punch and the kick
+
+# The client body beside the host, a metre east, facing the host's strike.
+func _place_target(mate: Player) -> void:
+	await _park(HOME)
+	client_park.rpc_id(_client_peer(), HOME + Vector3(1.0, 0.0, 0.0))
+	await _wait(0.8)
+	_local.movement.set_aim_override(mate.global_position)
+
+
+func _strike_checks() -> void:
+	var mate := _judge.actor_for(_client_peer())
+	if mate == null:
+		return
+	Tuning.values.smart_key_enabled = true
+	var punch := Skills.get_def("punch")
+	var kick := Skills.get_def("kick")
+	await tick_request(func() -> void: _judge.server_respawn(mate))
+	await _place_target(mate)
+
+	# The punch: lands, costs punch_damage, and the puncher recovers.
+	var hp_before := mate.hp
+	await tick_request(func() -> void: _local.skills.press_slot(2))
+	await get_tree().create_timer(punch.value("windup") + 0.05).timeout
+	var recovering := _local.state == Player.State.RECOVERING
+	await _wait(punch.value("recovery") + 0.3)
+	note("punch: hits=%s hp %.0f -> %.0f (damage %.1f), puncher recovering right after=%s, now %s" % [
+		_judge.last_strike.get("hits", -1), hp_before, mate.hp, punch.value("damage"), recovering,
+		Player.State.keys()[_local.state]])
+	expect(int(_judge.last_strike.get("hits", 0)) == 1, "the_punch_landed")
+	expect(absf((hp_before - mate.hp) - punch.value("damage")) < 0.01, "and_cost_punch_damage")
+	expect(recovering and _local.state == Player.State.IDLE, "the_puncher_recovered_and_stood_again")
+	expect(mate.state != Player.State.DOWNED, "a_punch_does_not_knock_down")
+
+	# The kick: the body goes down, lies for down_time, stands up through
+	# getup_time, and is itself again.
+	await _wait(kick.value("cooldown"))
+	hp_before = mate.hp
+	await tick_request(func() -> void: _local.skills.press_slot(3))
+	var waited := 0.0
+	while mate.state != Player.State.DOWNED and waited < 2.0:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+	var went_down := mate.state == Player.State.DOWNED
+	var down_for := 0.0
+	while mate.state == Player.State.DOWNED and down_for < 4.0:
+		await get_tree().physics_frame
+		down_for += get_physics_process_delta_time()
+	var expected := Tuning.server.down_time + Tuning.server.getup_time
+	note("kick: hits=%s downed=%s hp %.0f -> %.0f (damage %.1f), went down after %.2f s, lay %.2f s (down %.1f + getup %.1f = %.1f), then %s" % [
+		_judge.last_strike.get("hits", -1), _judge.last_strike.get("downed", -1), hp_before, mate.hp,
+		kick.value("damage"), waited, down_for, Tuning.server.down_time, Tuning.server.getup_time, expected,
+		Player.State.keys()[mate.state]])
+	expect(went_down, "the_kick_knocked_the_client_down")
+	expect(absf((hp_before - mate.hp) - kick.value("damage")) < 0.01, "and_cost_kick_damage_more_than_the_punch")
+	expect(absf(down_for - expected) < 0.35, "the_knockdown_lasted_down_time_plus_getup_time")
+	expect(mate.state == Player.State.IDLE, "and_ended_standing")
+
+	# A second kick while down resets the clock: the whole lie is longer.
+	await _wait(kick.value("cooldown"))
+	await _place_target(mate)
+	await tick_request(func() -> void: _local.skills.press_slot(3))
+	waited = 0.0
+	while mate.state != Player.State.DOWNED and waited < 2.0:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+	# The second kick is cast the moment the cooldown allows -- the cooldown
+	# runs from the first strike, so this lands about 1.05 s into a 1.3 s lie.
+	# Unpadded by the latency label on purpose: later than this and the body
+	# has already stood up.
+	await get_tree().create_timer(kick.value("cooldown") - 0.2).timeout
+	# The first kick slid the body half a metre out of reach: step up to it.
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = mate.global_position + Vector3(-1.0, 0.0, 0.0)
+		_local.velocity = Vector3.ZERO
+		_local.movement.set_aim_override(mate.global_position))
+	await get_tree().create_timer(0.22).timeout
+	await tick_request(func() -> void: _local.skills.press_slot(3))
+	var span := waited + kick.value("cooldown") + 0.02
+	while mate.state == Player.State.DOWNED and span < 6.0:
+		await get_tree().physics_frame
+		span += get_physics_process_delta_time()
+	note("kick twice: downs applied on the client reported later; the lie spanned %.2f s from the first kick (one lie is %.1f)" % [
+		span, expected])
+	expect(span > expected + 0.5, "a_second_kick_resets_the_knockdown")
+
+	# In the air the kick is a push and nothing more.
+	await _wait(kick.value("cooldown"))
+	await _place_target(mate)
+	# Lifted rather than jumped: a jump is past the kick's reach by the time
+	# the windup has run; a body set 1.2 m up is still falling through it.
+	client_lift.rpc_id(_client_peer(), 1.2)
+	await tick_request(func() -> void: _local.skills.press_slot(3))
+	await _wait(kick.value("windup") + 0.1)
+	var strike: Dictionary = _judge.last_strike.duplicate()
+	var downed_in_air := false
+	waited = 0.0
+	while waited < 2.0:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		if mate.state == Player.State.DOWNED:
+			downed_in_air = true
+	note("kick at a body in the air: hits=%s downed=%s, ever down afterwards=%s" % [
+		strike.get("hits", -1), strike.get("downed", -1), downed_in_air])
+	expect(int(strike.get("hits", 0)) == 1, "the_kick_reached_the_body_in_the_air")
+	expect(int(strike.get("downed", 1)) == 0 and not downed_in_air, "but_only_pushed_it")
+
+	# Hands full: the punch is shut, the kick is open and casts.
+	await _wait(kick.value("cooldown"))
+	await _place_target(mate)
+	var rock := _world.get_node("Rock_0") as Rock
+	await tick_request(func() -> void:
+		placed()
+		rock.freeze = false
+		rock.global_position = _local.global_position + Vector3(0.0, -0.3, -0.9)
+		rock.linear_velocity = Vector3.ZERO)
+	await _wait(0.3)
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(rock.global_position)
+		_local.movement.interact())
+	await _wait(0.5)
+	expect(_local.grab.is_holding(), "the_rock_is_in_hand")
+	var started := _local.skills.casts_started
+	_local.movement.set_aim_override(mate.global_position)
+	await tick_request(func() -> void: _local.skills.press_slot(2))
+	expect(_local.skills.casts_started == started, "holding_the_punch_is_shut")
+	await tick_request(func() -> void: _local.skills.press_slot(3))
+	expect(_local.skills.casts_started == started + 1, "holding_the_kick_still_casts")
+	await _wait(kick.value("windup") + kick.value("recovery") + 0.3)
+	expect(_local.grab.is_holding(), "and_the_rock_stayed_in_hand_through_it")
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(Vector3.INF)
+		_local.grab.drop())
+	await _wait(0.5)
+
+	# A scarecrow takes the damage and nothing else; a rock is pushed.
+	var dummy := _world.get_node("Dummy_0") as Dummy
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = dummy.global_position + Vector3(-1.0, 0.0, 0.0)
+		_local.velocity = Vector3.ZERO
+		_local.movement.set_aim_override(dummy.global_position))
+	await _wait(0.5)
+	await _wait(kick.value("cooldown"))
+	var dummy_hp := dummy.hp
+	await tick_request(func() -> void: _local.skills.press_slot(3))
+	await _wait(kick.value("windup") + 0.3)
+	note("kick at the scarecrow: hp %.0f -> %.0f" % [dummy_hp, dummy.hp])
+	expect(dummy.hp < dummy_hp, "the_scarecrow_takes_the_kicks_damage")
+	await _wait(kick.value("recovery") + kick.value("cooldown"))
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = HOME + Vector3(-6.0, 0.0, 0.0)
+		_local.velocity = Vector3.ZERO
+		rock.freeze = false
+		rock.global_position = HOME + Vector3(-6.0, -0.5, -1.0)
+		rock.linear_velocity = Vector3.ZERO
+		rock.angular_velocity = Vector3.ZERO
+		_local.movement.set_aim_override(rock.global_position))
+	await _wait(0.6)
+	var rock_from := rock.global_position
+	await tick_request(func() -> void: _local.skills.press_slot(3))
+	await _wait(kick.value("windup") + 1.0)
+	note("kick at a rock: moved %.2f m" % rock.global_position.distance_to(rock_from))
+	expect(rock.global_position.distance_to(rock_from) > 0.3, "a_kicked_rock_is_pushed")
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(Vector3.INF)
+		rock.global_position = rock.home
+		rock.linear_velocity = Vector3.ZERO)
+	await _wait(kick.value("recovery") + 0.3)
+
+
+# The pass criterion: A kicks B down, A punches B while down, B gets up. Both
+# screens see the same order of states and have B in the same place.
+func _knockdown_sequence_check() -> void:
+	var mate := _judge.actor_for(_client_peer())
+	if mate == null:
+		return
+	Tuning.values.smart_key_enabled = true
+	var kick := Skills.get_def("kick")
+	await _wait(kick.value("cooldown"))
+	await tick_request(func() -> void: _judge.server_respawn(mate))
+	await _place_target(mate)
+	_reports.erase("states")
+	client_trace_states.rpc_id(_client_peer(), 3.0)
+	var seen: Array = []
+	var tracing := 0.0
+	var kicked := false
+	var punched := false
+	while tracing < 3.0:
+		await get_tree().physics_frame
+		tracing += get_physics_process_delta_time()
+		if not kicked and tracing >= 0.2:
+			kicked = true
+			Net.queue_physics(func() -> void: _local.skills.press_slot(3))
+		if not punched and tracing >= 0.2 + kick.value("windup") + kick.value("recovery") + 0.15:
+			punched = true
+			Net.queue_physics(func() -> void:
+				_local.movement.set_aim_override(mate.global_position)
+				_local.skills.press_slot(2))
+		var state_name: String = Player.State.keys()[mate.state]
+		if seen.is_empty() or seen[seen.size() - 1] != state_name:
+			seen.append(state_name)
+	var here := mate.global_position
+	if await _wait_report("states"):
+		var there: Dictionary = _reports["states"]
+		var theirs: Array = there.get("states", [])
+		var pos: Vector3 = there.get("position", Vector3.INF)
+		note("knockdown sequence: host saw %s, client saw %s | client at (%.2f, %.2f, %.2f), host sees (%.2f, %.2f, %.2f), gap %.3f" % [
+			seen, theirs, pos.x, pos.y, pos.z, here.x, here.y, here.z, here.distance_to(pos)])
+		expect(seen == theirs, "both_screens_saw_the_same_order_of_states")
+		expect(seen.has("DOWNED") and seen[seen.size() - 1] == "IDLE", "down_then_up")
+		expect(here.distance_to(pos) < 0.5, "and_have_the_body_in_the_same_place")
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+
+
+func _wait_report(key: String, seconds := 10.0) -> bool:
+	var waited := 0.0
+	while not _reports.has(key) and waited < seconds + _lag * 20.0:
+		await get_tree().create_timer(0.1).timeout
+		waited += 0.1
+	expect(_reports.has(key), "the_client_reported_%s" % key)
+	return _reports.has(key)
+
+
 # ------------------------------------------------------------------ RPCs
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -346,6 +575,40 @@ func client_park(point: Vector3) -> void:
 		_local.velocity = Vector3.ZERO
 		_local.movement.cancel_target()
 		_local.movement.set_aim_override(Vector3.INF))
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_lift(height: float) -> void:
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position += Vector3.UP * height
+		_local.velocity = Vector3.ZERO
+		_local.floor_snap_length = 0.0
+		_local.change_state(Player.State.AIRBORNE))
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_jump() -> void:
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(_local.global_position)
+		_local.movement.cast_jump())
+	await _wait(0.3)
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+
+
+# Server -> client: our own state, each time it changes, for `seconds`, and
+# where we ended up.
+@rpc("authority", "call_remote", "reliable")
+func client_trace_states(seconds: float) -> void:
+	var seen: Array = []
+	var t := 0.0
+	while t < seconds:
+		await get_tree().physics_frame
+		t += get_physics_process_delta_time()
+		var state_name: String = Player.State.keys()[_local.state]
+		if seen.is_empty() or seen[seen.size() - 1] != state_name:
+			seen.append(state_name)
+	report.rpc_id(1, "states", {"states": seen, "position": _local.global_position})
 
 
 @rpc("authority", "call_remote", "reliable")

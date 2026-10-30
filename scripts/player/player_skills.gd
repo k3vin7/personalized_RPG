@@ -155,7 +155,8 @@ func current_def() -> SkillDef:
 # own keys' old entry, which the checks call directly.
 func press_slot(index: int) -> bool:
 	var def := slot_def(index)
-	if def == null or slot_locked(index) or slot_on_cooldown(index) or is_busy():
+	if def == null or slot_locked(index) or slot_on_cooldown(index) or is_busy() \
+			or player.state == Player.State.DOWNED:
 		presses_ignored += 1
 		print("PLAYGROUND_SLOT_IGNORED slot=%d why=%s" % [index + 1,
 			"empty" if def == null else ("locked" if slot_locked(index) else ("cooldown" if slot_on_cooldown(index) else "busy"))])

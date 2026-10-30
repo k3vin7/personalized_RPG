@@ -189,6 +189,12 @@ var last_correction := {}
 var _skill_lock := {}
 var _skill_cooldown := {}
 var skills_ruled := 0
+# M-2: the last strike's ruling, for the checks: {skill, hits, downed}.
+var last_strike := {}
+# How far a body's centre may be from the strike's height and still be hit: a
+# body's own half height, and the reach of a leg or an arm beyond it. A body
+# that has jumped clear is out of it; one just off the ground is not.
+const STRIKE_BAND := Player.BODY_HALF_HEIGHT + 0.9
 # N-3: when the held people's positions were last pushed. They ride the hand on
 # the rock's interval, from here, like a rock.
 var _held_push_left := 0.0
@@ -1225,6 +1231,14 @@ func _rule_hurt(target: Player, event: Dictionary) -> void:
 		server_damage(target, damage, "force")
 	if target.sync_dead:
 		return
+	# M-2: the knockdown. Asked for by the strike; granted to a body that is on
+	# the ground (or already down, which puts it down for the full time again).
+	# A body in the air returned above with its push alone. Ruled before the
+	# slide verdict below: a kick is a knockdown whether or not it moved the
+	# body -- a 5 m/s kick against a 7.2 m/s tolerance slides, and still fells.
+	if bool(event.get("down_request", false)) and (not ally or Tuning.server.ally_ground_stun):
+		if target.is_grounded_state() or target.state == Player.State.DOWNED:
+			event["down_apply"] = Tuning.server.down_time
 	# 결정 2: a slide is not a stun. The damage above is taken either way --
 	# holding your ground does not mean the shove missed -- but the body that
 	# stayed on its feet keeps acting.
@@ -1682,10 +1696,19 @@ func _rule_strike(actor: Player, def: SkillDef, direction: Vector3) -> Variant:
 	var params := PhysicsShapeQueryParameters3D.new()
 	params.shape = shape
 	params.transform = Transform3D(Basis.IDENTITY, actor.global_position)
+	# M-2: a knockdown strike (the kick) reaches rocks too, and pushes them.
 	params.collision_mask = Player.PLAYER_LAYER | Dummy.LAYER
+	if def.outcome == SkillDef.Outcome.DOWN:
+		params.collision_mask |= Layers.THROWABLE
 	params.collide_with_areas = false
 	params.exclude = [actor.get_rid()]
+	# M-2: the strike has a height. The punch is at the chest, the kick at the
+	# legs (the SkillDef's strike_height, off the body's centre); a target whose
+	# body does not cross that height is not hit. A body on a knee-high step is
+	# still punched; one a ledge up is not kicked.
+	var strike_y := actor.global_position.y + def.strike_height
 	var hits := 0
+	var downed := 0
 	for collision in actor.get_world_3d().direct_space_state.intersect_shape(params, 8):
 		var body := collision.get("collider") as Node3D
 		if body == null or body == actor:
@@ -1697,6 +1720,10 @@ func _rule_strike(actor: Player, def: SkillDef, direction: Vector3) -> Variant:
 		if along <= -Player.BODY_RADIUS or along > reach + Player.BODY_RADIUS:
 			continue
 		if across > half_width + Player.BODY_RADIUS:
+			continue
+		if absf(body.global_position.y - strike_y) > STRIKE_BAND:
+			continue
+		if body is Rock and holder_of(body) != 0:
 			continue
 		var is_ally := body is Player and Tuning.server.same_party
 		var push := (forward + Vector3.UP * Tuning.server.shove_up_bias).normalized()
@@ -1710,9 +1737,17 @@ func _rule_strike(actor: Player, def: SkillDef, direction: Vector3) -> Variant:
 			def.value("damage"),
 			0.0)
 		event["skill"] = def.id
+		# M-2: the knockdown is asked for here and ruled in _rule_hurt, like
+		# the stun: only a body on the ground goes down; in the air the push is
+		# all it gets. A body already down is put down again, for the full time.
+		if def.outcome == SkillDef.Outcome.DOWN:
+			event["down_request"] = true
 		send_force(body, event)
 		hits += 1
-	print("PLAYGROUND_SKILL by=%s skill=%s hits=%d" % [actor.name, def.id, hits])
+		if float(event.get("down_apply", 0.0)) > 0.0:
+			downed += 1
+	last_strike = {"skill": def.id, "hits": hits, "downed": downed}
+	print("PLAYGROUND_SKILL by=%s skill=%s hits=%d downed=%d" % [actor.name, def.id, hits, downed])
 	return hits
 
 
@@ -1937,7 +1972,8 @@ func release_at(at: Vector3) -> void:
 func _hold_lost_at_once(holder: Player) -> bool:
 	return holder.state == Player.State.STUNNED \
 			or holder.state == Player.State.DEAD \
-			or holder.state == Player.State.GRABBED
+			or holder.state == Player.State.GRABBED \
+			or holder.state == Player.State.DOWNED
 
 
 # Stage E follow-up: 7-6 is narrowed to what it was written for. A holder keeps
@@ -1947,7 +1983,7 @@ func _hold_lost_at_once(holder: Player) -> bool:
 # a fall, a stun, or being picked up.
 func _can_keep_holding(holder: Player) -> bool:
 	if holder.state == Player.State.STUNNED or holder.state == Player.State.DEAD \
-			or holder.state == Player.State.GRABBED:
+			or holder.state == Player.State.GRABBED or holder.state == Player.State.DOWNED:
 		return false
 	if holder.state == Player.State.AIRBORNE:
 		# Its own jump keeps the hold; coming off an edge does not.
