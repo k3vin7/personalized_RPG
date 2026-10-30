@@ -78,6 +78,15 @@ func _ready() -> void:
 	_sign("돌 (G 잡기 / G 던지기)", Vector3(6.0, 2.2, 6.0), Color("dfe6ee"))
 	_sign("무거운 돌 40 / 80 / 120kg", Vector3(6.4, 2.2, 9.0), Color("dfe6ee"))
 
+	# M-3: the race stands, a column along the plaza's west edge (x -18.5,
+	# z 4.5 to 11.1), turned to run along z. The back edge was tried first and
+	# the orc's stand landed inside the 2 m step (x -10.5..-7.5, z 15..18).
+	var pedestals := RacePedestal.new()
+	pedestals.name = "RacePedestal"
+	pedestals.position = Vector3(-18.5, 0.0, 7.8)
+	pedestals.rotation_degrees.y = 90.0
+	add_child(pedestals)
+
 	var rack := WeaponRack.new()
 	rack.name = "WeaponRack"
 	rack.position = Vector3(0.0, 0.0, 16.0)

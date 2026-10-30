@@ -749,14 +749,23 @@ func apply_respawn(at: Vector3) -> void:
 
 # Picked up by standing on a rack pedestal. Only the body's owner may change it;
 # everyone else receives it through sync_weapon.
+# M-3: a request. The rack asks for a kind; the server rules and answers with
+# apply_weapon_ruling, on the host at once and on a client a round trip later.
 func set_weapon(kind: int) -> void:
+	if not is_local() or kind == weapon:
+		return
+	ServerAuthority.submit_intent(self, ServerAuthority.Intent.WEAPON, {"weapon": kind})
+
+
+# The server's answer. The only way the weapon changes on the owner.
+func apply_weapon_ruling(kind: int) -> void:
 	if not is_local() or kind == weapon:
 		return
 	_apply_weapon(kind)
 	# M-1: what the hands hold decides what the slots hold.
 	if skills != null:
 		skills.fill_slots()
-	print("PLAYGROUND_WEAPON peer=%s kind=%s" % [name, WeaponKinds.LABELS.get(kind, "?")])
+	print("PLAYGROUND_WEAPON_APPLIED peer=%s kind=%s" % [name, WeaponKinds.LABELS.get(kind, "?")])
 
 
 func _apply_weapon(kind: int) -> void:

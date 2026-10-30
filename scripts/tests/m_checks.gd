@@ -19,6 +19,8 @@ var _stage_done := ""
 var _lag := 0.0
 var _label := "0"
 var _reports := {}
+# A value worked out inside a lambda comes back on a field.
+var _asked := false
 
 
 func expect(condition: bool, label: String) -> void:
@@ -110,6 +112,8 @@ func run(world: Node3D) -> void:
 	await _client_cast_check()
 	await _strike_checks()
 	await _knockdown_sequence_check()
+	await _race_checks()
+	await _weapon_checks()
 	Tuning.values.smart_key_enabled = smart
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_m")
 	expect(_judge.move_corrections == corrections, "no_corrections_during_stage_m")
@@ -544,6 +548,126 @@ func _knockdown_sequence_check() -> void:
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
 
 
+# ------------------------------------------ M-3: the race stand and the weapon rack
+
+func _race_checks() -> void:
+	var pedestals := _world.get_node("RacePedestal") as RacePedestal
+	var mate := _judge.actor_for(_client_peer())
+	for kind: int in Races.all_kinds():
+		var data := Races.data_for(kind)
+		var spot := pedestals.zone_position(kind)
+		await tick_request(func() -> void:
+			placed()
+			_local.global_position = spot + Vector3(0.0, 0.9, 0.0)
+			_local.velocity = Vector3.ZERO
+			_local.movement.cancel_target())
+		await _wait(0.4)
+		_asked = false
+		await tick_request(func() -> void: _asked = pedestals.interact(_local))
+		await _wait(0.3)
+		note("stand %s: asked=%s -> race %s, strength %.0f (data %.0f), weight %.0f (data %.0f), max_hp %.0f, max_stamina %.0f, hp %.0f" % [
+			data.label, _asked, Races.label_for(_local.stats.race), _local.stats.strength, data.strength,
+			_local.stats.race_weight, data.body_weight, _local.stats.max_hp, _local.stats.max_stamina, _local.hp])
+		expect(_local.stats.race == kind, "standing_on_the_%s_stand_and_pressing_g_takes_the_race" % String(Races.Kind.keys()[kind]).to_lower())
+		expect(absf(_local.stats.strength - data.strength) < 0.01 and absf(_local.stats.race_weight - data.body_weight) < 0.01,
+			"%s_strength_and_weight_are_the_race_data" % String(Races.Kind.keys()[kind]).to_lower())
+		expect(absf(_local.stats.max_hp - data.endurance * Tuning.server.hp_per_endurance) < 0.01
+			and _local.hp <= _local.stats.max_hp + 0.01, "%s_hp_follows_and_is_clamped" % String(Races.Kind.keys()[kind]).to_lower())
+	# Back to human for everything after. Told to the move check: the orc
+	# stand to the human stand is 6.6 m in a step.
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = pedestals.zone_position(Races.Kind.HUMAN) + Vector3(0.0, 0.9, 0.0))
+	await _wait(0.4)
+	await tick_request(func() -> void: pedestals.interact(_local))
+	await _wait(0.3)
+	expect(_local.stats.race == Races.Kind.HUMAN, "back_on_the_human_stand")
+
+	# Full hands are refused, and so is a client naming a race the stand does
+	# not have. Away from the stands first: a rock put down on one is in it.
+	await _park(HOME)
+	var rock := _world.get_node("Rock_0") as Rock
+	await tick_request(func() -> void:
+		placed()
+		rock.freeze = false
+		rock.global_position = _local.global_position + Vector3(0.9, -0.3, 0.0)
+		rock.linear_velocity = Vector3.ZERO)
+	await _wait(0.3)
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(rock.global_position)
+		_local.movement.interact())
+	await _wait(0.5)
+	expect(_local.grab.is_holding(), "the_rock_is_in_hand_for_the_race_refusal")
+	var rejected := _judge.rejected_intents
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(Vector3.INF)
+		ServerAuthority.submit_intent(_local, ServerAuthority.Intent.RACE, {"race": Races.Kind.ORC}))
+	expect(_judge.rejected_intents == rejected + 1 and _local.stats.race == Races.Kind.HUMAN,
+		"a_race_asked_with_full_hands_is_refused")
+	await tick_request(func() -> void: _local.grab.drop())
+	await _wait(0.5)
+	await tick_request(func() -> void:
+		ServerAuthority.submit_intent(_local, ServerAuthority.Intent.RACE, {"race": 9}))
+	expect(_judge.rejected_intents == rejected + 2, "an_unknown_race_is_refused")
+	# The client's own write never reaches the server (H-1's rule, re-read).
+	if mate != null:
+		var before := mate.stats.race
+		_reports.erase("race")
+		client_forge_race.rpc_id(_client_peer(), Races.Kind.DWARF)
+		if await _wait_report("race"):
+			note("client wrote dwarf on its own stats: it now reads %s, server holds %s" % [
+				Races.label_for(int(_reports["race"])), Races.label_for(mate.stats.race)])
+			expect(mate.stats.race == before, "a_clients_own_race_write_never_reached_the_server")
+			expect(int(_reports["race"]) == before, "and_was_taken_off_the_client_again")
+
+
+func _weapon_checks() -> void:
+	var rack := _world.get_node("WeaponRack") as WeaponRack
+	var mate := _judge.actor_for(_client_peer())
+	# The host at the sword stand: the request is ruled at once.
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = rack.global_position + Vector3(-2.0 * WeaponRack.SPACING, 0.9, 0.0)
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target())
+	await _wait(0.4)
+	await tick_request(func() -> void: rack.interact(_local))
+	await _wait(0.2)
+	note("sword stand: host weapon %s, server rules %s" % [
+		WeaponKinds.LABELS.get(_local.weapon, "?"), WeaponKinds.LABELS.get(_judge.weapon_of(1), "?")])
+	expect(_local.weapon == WeaponKinds.Kind.SWORD and _judge.weapon_of(1) == WeaponKinds.Kind.SWORD,
+		"the_rack_asks_and_the_server_rules_the_weapon")
+	expect(_ids(4, 8) == Skills.BARE_IDS, "and_the_slots_followed_the_ruling")
+	await tick_request(func() -> void: _local.set_weapon(WeaponKinds.Kind.NONE))
+	await _wait(0.2)
+	expect(_local.weapon == WeaponKinds.Kind.NONE and _judge.weapon_of(1) == WeaponKinds.Kind.NONE, "and_dropped_it_again")
+	if mate == null:
+		return
+	# The client asks through the door: the server's table and the client's
+	# hand agree. Then the client draws a spear on its own: the server's table
+	# does not move, and the disagreement is counted.
+	var mismatches := _judge.weapon_mismatches
+	_reports.erase("weapon")
+	client_weapon.rpc_id(_client_peer(), WeaponKinds.Kind.BOW, false)
+	if await _wait_report("weapon"):
+		note("client asked for a bow: client holds %s, server rules %s" % [
+			WeaponKinds.LABELS.get(int(_reports["weapon"]), "?"), WeaponKinds.LABELS.get(_judge.weapon_of(_client_peer()), "?")])
+		expect(int(_reports["weapon"]) == WeaponKinds.Kind.BOW and _judge.weapon_of(_client_peer()) == WeaponKinds.Kind.BOW,
+			"a_clients_request_is_ruled_and_applied")
+	_reports.erase("weapon")
+	client_weapon.rpc_id(_client_peer(), WeaponKinds.Kind.SPEAR, true)
+	if await _wait_report("weapon"):
+		await _wait(0.5)
+		note("client drew a spear on its own: client shows %s, server rules %s, mismatches %d -> %d" % [
+			WeaponKinds.LABELS.get(int(_reports["weapon"]), "?"), WeaponKinds.LABELS.get(_judge.weapon_of(_client_peer()), "?"),
+			mismatches, _judge.weapon_mismatches])
+		expect(_judge.weapon_of(_client_peer()) == WeaponKinds.Kind.BOW, "a_clients_own_weapon_write_never_reached_the_server")
+		expect(_judge.weapon_mismatches > mismatches, "and_the_server_counts_the_disagreement")
+	_reports.erase("weapon")
+	client_weapon.rpc_id(_client_peer(), WeaponKinds.Kind.NONE, false)
+	await _wait_report("weapon")
+
+
 func _wait_report(key: String, seconds := 10.0) -> bool:
 	var waited := 0.0
 	while not _reports.has(key) and waited < seconds + _lag * 20.0:
@@ -609,6 +733,28 @@ func client_trace_states(seconds: float) -> void:
 		if seen.is_empty() or seen[seen.size() - 1] != state_name:
 			seen.append(state_name)
 	report.rpc_id(1, "states", {"states": seen, "position": _local.global_position})
+
+
+# Server -> client: write a race straight onto our own stats, the way a cheat
+# would, wait a beat, and report what the stats say now.
+@rpc("authority", "call_remote", "reliable")
+func client_forge_race(kind: int) -> void:
+	_local.stats.race = kind
+	await _wait(0.5)
+	report.rpc_id(1, "race", _local.stats.race)
+
+
+# Server -> client: take a weapon through the door, or draw it on our own
+# synchronizer (forge), then report what we hold.
+@rpc("authority", "call_remote", "reliable")
+func client_weapon(kind: int, forge: bool) -> void:
+	await tick_request(func() -> void:
+		if forge:
+			_local._apply_weapon(kind)
+		else:
+			_local.set_weapon(kind))
+	await _wait(0.8)
+	report.rpc_id(1, "weapon", _local.weapon)
 
 
 @rpc("authority", "call_remote", "reliable")

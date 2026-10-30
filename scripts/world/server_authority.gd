@@ -48,6 +48,11 @@ enum Intent {
 	# M-1: a slot's cast. Which skill, and a heading; the SkillDef's own rule
 	# function decides the rest. The shove and the grab keep their own doors.
 	SKILL,
+	# M-3: the race stand and the weapon rack. A choice is a request: the
+	# server rules on the hands and the ground, writes the race (the Vitals
+	# synchronizer carries it) or tells the owner which weapon it may hold.
+	RACE,
+	WEAPON,
 }
 
 # Anything that can be picked up joins this group and offers
@@ -191,6 +196,13 @@ var _skill_cooldown := {}
 var skills_ruled := 0
 # M-2: the last strike's ruling, for the checks: {skill, hits, downed}.
 var last_strike := {}
+# M-3: what the server has ruled each peer is holding. The owner still writes
+# its own weapon (pose synchronizer), so a client can draw a sword it was never
+# given -- but this table is what any ruling reads, and a body whose shown
+# weapon disagrees with it is counted here.
+var _weapons := {}
+var weapon_mismatches := 0
+var last_refusal := ""
 # How far a body's centre may be from the strike's height and still be hit: a
 # body's own half height, and the reach of a leg or an arm beyond it. A body
 # that has jumped clear is out of it; one just off the ground is not.
@@ -552,6 +564,10 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 			result = _rule_dash(actor)
 		Intent.SKILL:
 			result = _rule_skill(actor, payload)
+		Intent.RACE:
+			result = _rule_race(actor, int(payload.get("race", -1)))
+		Intent.WEAPON:
+			result = _rule_weapon(actor, int(payload.get("weapon", -1)))
 	if result == null:
 		return _refuse(sender, kind, "refused")
 	granted_intents += 1
@@ -597,6 +613,12 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 		Intent.SKILL:
 			return Skills.is_known(String(payload.get("skill", ""))) \
 				and _direction_of(payload) != Vector3.ZERO
+		Intent.RACE:
+			var race: Variant = payload.get("race")
+			return race is int and Races.is_known(race)
+		Intent.WEAPON:
+			var weapon: Variant = payload.get("weapon")
+			return weapon is int and WeaponKinds.LABELS.has(weapon)
 		Intent.STATS:
 			# Either field may be absent (leave it alone) or null (follow the
 			# race again). A number has to be a number.
@@ -1469,6 +1491,14 @@ func _watch_vitals(delta: float) -> void:
 				_expire_flight_source(peer)
 		_fall_watch[peer] = watch
 		_check_move(player, delta)
+		# M-3: a weapon shown that the server never gave. Counted, and the
+		# table keeps the server's answer; the owner's picture is its own.
+		if player.sync_weapon != weapon_of(peer) and not player.is_local():
+			weapon_mismatches += 1
+			if weapon_mismatches % 120 == 1:
+				print("PLAYGROUND_WEAPON_MISMATCH peer=%s shown=%s ruled=%s" % [
+					player.name, WeaponKinds.LABELS.get(player.sync_weapon, "?"),
+					WeaponKinds.LABELS.get(weapon_of(peer), "?")])
 
 		if player.sync_dead:
 			_respawn_left[peer] = maxf(0.0, float(_respawn_left.get(peer, 0.0)) - delta)
@@ -1642,6 +1672,74 @@ func _check_move(player: Player, delta: float) -> void:
 		return
 	_move_watch[peer] = watch
 	_count_over(peer, "speed")
+
+
+# M-3: the race stand. Empty hands only: not holding, not held, on the ground,
+# not on a wall, not down, not mid-cast. The race is written here and travels
+# on the Vitals synchronizer; the debug overrides come off with it, and the HP
+# is clamped to the new maximum (H-3), not refilled.
+func _rule_race(actor: Player, kind: int) -> Variant:
+	if not Races.is_known(kind) or actor.sync_dead:
+		return null
+	var peer := actor.get_multiplayer_authority()
+	var why := ""
+	if _holds.has(peer):
+		why = "holding"
+	elif holder_of(actor) != 0:
+		why = "held"
+	elif actor.state == Player.State.CLIMB or actor.state == Player.State.MANTLE:
+		why = "climbing"
+	elif actor.state == Player.State.DOWNED or actor.state == Player.State.STUNNED:
+		why = "down"
+	elif not actor.is_grounded_state() or actor.is_casting():
+		why = "not_standing"
+	if why != "":
+		last_refusal = why
+		print("PLAYGROUND_RACE_REFUSED peer=%s race=%s why=%s" % [actor.name, Races.label_for(kind), why])
+		return null
+	actor.stats.race = kind
+	actor.stats.clear_overrides()
+	actor.stats.gear_weight = 0.0
+	server_set_hp(actor, actor.hp)
+	forgive_move(peer, "race_changed")
+	print("PLAYGROUND_RACE peer=%s race=%s strength=%.0f weight=%.0f max_hp=%.0f max_stamina=%.0f" % [
+		actor.name, Races.label_for(kind), actor.stats.strength, actor.stats.race_weight,
+		actor.stats.max_hp, actor.stats.max_stamina])
+	return true
+
+
+# M-3: the weapon rack. Ruled here, kept in _weapons, and the owner is told
+# what it may hold; the owner's set_weapon() is a request that lands here.
+func _rule_weapon(actor: Player, kind: int) -> Variant:
+	if not WeaponKinds.LABELS.has(kind) or actor.sync_dead:
+		return null
+	var peer := actor.get_multiplayer_authority()
+	if _holds.has(peer):
+		last_refusal = "holding"
+		print("PLAYGROUND_WEAPON_REFUSED peer=%s why=holding" % actor.name)
+		return null
+	_weapons[peer] = kind
+	print("PLAYGROUND_WEAPON peer=%s kind=%s" % [actor.name, WeaponKinds.LABELS.get(kind, "?")])
+	if actor.is_local():
+		actor.apply_weapon_ruling(kind)
+	else:
+		apply_weapon.rpc_id(peer, kind)
+	return true
+
+
+# What the server has ruled this peer holds. Nothing ruled yet is bare hands.
+func weapon_of(peer: int) -> int:
+	return int(_weapons.get(peer, WeaponKinds.Kind.NONE))
+
+
+# Server -> owner: the weapon it may now hold.
+@rpc("any_peer", "call_remote", "reliable")
+func apply_weapon(kind: int) -> void:
+	if not result_is_server_sent("apply_weapon", multiplayer.get_remote_sender_id()):
+		return
+	var actor := actor_for(multiplayer.get_unique_id())
+	if actor != null and actor.is_local():
+		Net.queue_physics(func() -> void: actor.apply_weapon_ruling(kind))
 
 
 # M-1: a slot's cast. The SkillDef names the rule; this door keeps the clock.
