@@ -51,6 +51,16 @@ enum InputMode {
 @export var width: float = 1.2
 @export var damage: float = 0.0
 @export var knock_power: float = 0.0
+# M-7: when the ruling lands, measured from the cast. 0 means "at the end of
+# the windup", which is every strike today; a bow or a boss swing can put it
+# elsewhere. The catch window closes at this moment.
+@export var impact_at: float = 0.0
+# M-7: how long before the impact a grab counts as catching this attack. 0
+# means Tuning.server.catch_window.
+@export var catch_window: float = 0.0
+# M-7: the "force" of this attack for the catch: the catcher's strength has to
+# be at least this times catch_power_mult. 0 means knock_power.
+@export var catch_force: float = 0.0
 @export var outcome: Outcome = Outcome.NONE
 # Which base skill this is a variant of (empty: a base skill). Reserved.
 @export var variant_of: String = ""
@@ -81,7 +91,28 @@ const TUNING_SUFFIX := {
 	"width": "width",
 	"damage": "damage",
 	"knock_power": "power",
+	"impact_at": "impact_at",
+	"catch_window": "catch_window",
+	"catch_force": "catch_force",
 }
+
+
+# M-7: seconds from the cast to the ruling.
+func impact_time() -> float:
+	var at := value("impact_at")
+	return at if at > 0.0 else value("windup")
+
+
+# M-7: how long before the impact a grab catches this.
+func catch_window_time() -> float:
+	var window := value("catch_window")
+	return window if window > 0.0 else float(Tuning.server.catch_window)
+
+
+# M-7: what a catcher's strength is measured against.
+func catch_force_value() -> float:
+	var force := value("catch_force")
+	return force if force > 0.0 else value("knock_power")
 
 
 # The number for `field`: the server's slider when the table has it, this

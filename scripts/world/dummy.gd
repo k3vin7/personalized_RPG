@@ -38,6 +38,14 @@ var _excepted: Node3D = null
 var _blind_left := 0.0
 var _label: Label3D
 var _material: StandardMaterial3D
+# M-7: the attack pattern, a stand-in for a boss swing. Every period a windup
+# it shows (the colour and a "!" above it), then a strike in front, booked and
+# ruled by ServerAuthority like a player's. Server-side clock; the phase
+# travels in push_state so every screen shows the windup.
+var _attack_timer := 0.0
+var _phase_left := 0.0
+var attack_phase := ""
+var attacks_made := 0
 
 
 func setup(at_position: Vector3, dummy_name: String) -> void:
@@ -182,18 +190,72 @@ func _physics_process(delta: float) -> void:
 			_refresh()
 
 	move_and_slide()
+	_attack_step(delta)
 	sync_position = global_position
 	sync_hp = hp
 	_state_left -= delta
 	if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 		_state_left = SyncRules.STATE_INTERVAL
-		push_state.rpc(global_position, hp)
+		push_state.rpc(global_position, hp, attack_phase)
+
+
+# M-7: the pattern, on the server. Nothing while held, dead-still or switched
+# off; otherwise the timer runs, the windup is shown, the strike is booked
+# with the judge at the start of the windup (so it can be caught), and the
+# recovery follows the impact.
+func _attack_step(delta: float) -> void:
+	if not Tuning.server.dummy_attack_enabled or holder_peer != 0 or ServerAuthority.instance == null:
+		if attack_phase != "":
+			_set_attack_phase("")
+		return
+	var def := Skills.get_def("dummy_slam")
+	if def == null:
+		return
+	match attack_phase:
+		"":
+			_attack_timer += delta
+			if _attack_timer >= Tuning.server.dummy_attack_period:
+				_attack_timer = 0.0
+				_phase_left = def.impact_time()
+				_set_attack_phase("windup")
+				ServerAuthority.instance.schedule_strike(self, def, attack_direction())
+				attacks_made += 1
+		"windup":
+			_phase_left -= delta
+			if _phase_left <= 0.0:
+				_phase_left = def.value("recovery")
+				_set_attack_phase("recovery")
+		"recovery", "stunned":
+			_phase_left -= delta
+			if _phase_left <= 0.0:
+				_set_attack_phase("")
+
+
+# M-7: caught mid-swing. The pattern stands still for `seconds`; the booked
+# strike is the judge's to cancel.
+func apply_catch_stun(seconds: float) -> void:
+	_phase_left = seconds
+	_set_attack_phase("stunned")
+
+
+func _set_attack_phase(phase: String) -> void:
+	attack_phase = phase
+	_refresh()
+
+
+# Which way the strike goes: the way the scarecrow faces.
+func attack_direction() -> Vector3:
+	var forward := -global_transform.basis.z
+	forward.y = 0.0
+	return forward.normalized() if forward.length_squared() > 0.0001 else Vector3.FORWARD
 
 
 @rpc("authority", "call_remote", "unreliable_ordered")
-func push_state(at_position: Vector3, at_hp: float) -> void:
+func push_state(at_position: Vector3, at_hp: float, at_phase := "") -> void:
 	sync_position = at_position
 	sync_hp = at_hp
+	if at_phase != attack_phase:
+		_set_attack_phase(at_phase)
 	if not _has_state:
 		# The first packet places it rather than easing in from the start mark.
 		global_position = at_position
@@ -225,5 +287,15 @@ func _peer_player(peer_id: int) -> Player:
 func _refresh() -> void:
 	if _label != null:
 		_label.text = "%d / %d" % [roundi(hp), roundi(MAX_HP)]
+		if attack_phase == "windup":
+			_label.text += "\n!"
 	if _material != null:
-		_material.albedo_color = Color("c9b48a").lerp(Color("ff7b6b"), 1.0 - hp / MAX_HP)
+		var colour := Color("c9b48a").lerp(Color("ff7b6b"), 1.0 - hp / MAX_HP)
+		match attack_phase:
+			"windup":
+				colour = Color("ff4d3d")
+			"recovery":
+				colour = colour.darkened(0.35)
+			"stunned":
+				colour = Color("6fa8dc")
+		_material.albedo_color = colour

@@ -916,12 +916,12 @@ func apply_force_event(event: Dictionary) -> void:
 			if velocity.y < Tuning.server.launch_min_up_speed:
 				velocity.y = Tuning.server.launch_min_up_speed
 			change_state(State.AIRBORNE)
-			# B-d: whether this hurt, and whether it stuns, was decided by the
-			# server before the event was sent. stun_apply is that verdict,
-			# and v4 only fills it in for a launch.
-			var stun := float(event.get("stun_apply", 0.0))
-			if stun > 0.0:
-				_apply_stun(stun)
+	# B-d: whether this hurt, and whether it stuns, was decided by the server
+	# before the event was sent. stun_apply is that verdict: v4 fills it in for
+	# a launch, M-7 for a caught attack whatever the push did.
+	var stun := float(event.get("stun_apply", 0.0))
+	if stun > 0.0 and state != State.DEAD:
+		_apply_stun(stun)
 	# M-2: the knockdown, ruled by the server like the stun. Applied whether or
 	# not the push launched us -- a kick that fails to move a heavy body still
 	# puts it down -- and a second one lands the body down for the full time.

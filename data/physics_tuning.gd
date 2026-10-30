@@ -377,6 +377,66 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			kick_power = value
+# M-7: the catch. How long before an attack lands a grab counts as catching it,
+# what the catcher's strength is measured against (attack catch_force times
+# this), and how long the caught attacker is held still.
+@export var catch_window: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			catch_window = value
+@export var catch_power_mult: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			catch_power_mult = value
+@export var catch_stun: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			catch_stun = value
+# M-7: the scarecrow's attack pattern, a stand-in for a boss swing: every
+# period seconds a windup it shows, then a strike in front of it. Off by
+# default -- the earlier stages stand bodies beside scarecrows for minutes.
+# catch_force is large on purpose: a bare human cannot catch it, a trained
+# one can.
+@export var dummy_attack_enabled: bool = false:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_attack_enabled = value
+@export var dummy_attack_period: float = 4.0:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_attack_period = value
+@export var dummy_attack_windup: float = 0.8:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_attack_windup = value
+@export var dummy_attack_recovery: float = 0.5:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_attack_recovery = value
+@export var dummy_attack_cooldown: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_attack_cooldown = value
+@export var dummy_attack_range: float = 1.8:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_attack_range = value
+@export var dummy_attack_width: float = 1.4:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_attack_width = value
+@export var dummy_attack_damage: float = 10.0:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_attack_damage = value
+@export var dummy_attack_power: float = 8.0:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_attack_power = value
+@export var dummy_attack_catch_force: float = 120.0:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_attack_catch_force = value
 # M-2: how long a knocked-down body lies, and how long standing up takes.
 # No input through either; pushes still land.
 @export var down_time: float = 1.0:

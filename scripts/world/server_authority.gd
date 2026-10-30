@@ -196,6 +196,14 @@ var _skill_cooldown := {}
 var skills_ruled := 0
 # M-2: the last strike's ruling, for the checks: {skill, hits, downed}.
 var last_strike := {}
+# M-7: strikes that have been cast and not yet landed, by the body casting
+# them (a player or a scarecrow): {def, direction, at (msec), since (msec)}.
+# The intent arrives at the start of the windup; the ruling runs here at the
+# impact time -- which is what a catch (and later a parry) has to see.
+var _pending_strikes := {}
+var strikes_cancelled := 0
+var catches := 0
+var last_catch := {}
 var last_refusal := ""
 # How far a body's centre may be from the strike's height and still be hit: a
 # body's own half height, and the reach of a leg or an arm beyond it. A body
@@ -1006,6 +1014,9 @@ func _hold_beats_attack(_actor: Player, _target: Node3D) -> bool:
 
 
 func _rule_grab(actor: Player, target: Node3D) -> Variant:
+	# M-7: an attack in its window is caught before the ordinary rules apply.
+	if _try_catch(actor, target):
+		return true
 	if not can_grab(actor, target):
 		return null
 	_take_hold(actor.get_multiplayer_authority(), target)
@@ -1273,13 +1284,18 @@ func _rule_hurt(target: Player, event: Dictionary) -> void:
 		server_damage(target, damage, "force")
 	if target.sync_dead:
 		return
+	# M-7: a caught attacker is held still through the stun path, whether or
+	# not the (empty) push moved it.
+	if event.has("catch_stun"):
+		event["stun_apply"] = float(event["catch_stun"])
 	# M-2: the knockdown. Asked for by the strike; granted to a body that is on
 	# the ground (or already down, which puts it down for the full time again).
 	# A body in the air returned above with its push alone. Ruled before the
 	# slide verdict below: a kick is a knockdown whether or not it moved the
 	# body -- a 5 m/s kick against a 7.2 m/s tolerance slides, and still fells.
 	if bool(event.get("down_request", false)) and (not ally or Tuning.server.ally_ground_stun):
-		if target.is_grounded_state() or target.state == Player.State.DOWNED:
+		if target.is_grounded_state() or target.state == Player.State.DOWNED \
+				or target.state == Player.State.STUNNED:
 			event["down_apply"] = Tuning.server.down_time
 	# 결정 2: a slide is not a stun. The damage above is taken either way --
 	# holding your ground does not mean the shove missed -- but the body that
@@ -1298,12 +1314,16 @@ func _rule_hurt(target: Player, event: Dictionary) -> void:
 # last_knock is the harness's read of it: the verdict as the server made it,
 # per peer, so a check can assert on the ruling rather than on a log line.
 func _rule_knockback(target: Player, event: Dictionary) -> bool:
+	# M-7: a stunned or knocked-down body is standing on the ground for the
+	# tolerance -- it is not flying, it is held still -- so a push on it is
+	# judged like any other, not waved through as "already in the air".
 	var verdict := ForceSystem.judge_knockback(
 		event,
 		target.stats.total_weight(),
 		target.stats.strength,
 		race_tolerance_mult(target.stats.race),
-		target.is_grounded_state())
+		target.is_grounded_state() or target.state == Player.State.STUNNED
+			or target.state == Player.State.DOWNED)
 	event["knock_h_speed"] = float(verdict["h_speed"])
 	event["knock_tolerance"] = float(verdict["tolerance"])
 	event["knock_launched"] = bool(verdict["launched"])
@@ -1767,8 +1787,11 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 			actor.name, def.id, Player.State.keys()[actor.state]])
 		return null
 	var direction := _direction_of(payload)
-	_skill_lock[peer] = now + int(def.value("recovery") * 1000.0)
-	cooldowns[def.id] = now + int(def.value("cooldown") * 1000.0)
+	# M-7: the intent arrives at the start of the windup, so the recovery lock
+	# and the cooldown run from the impact, not from now.
+	var impact_ms := int(def.impact_time() * 1000.0)
+	_skill_lock[peer] = now + impact_ms + int(def.value("recovery") * 1000.0)
+	cooldowns[def.id] = now + impact_ms + int(def.value("cooldown") * 1000.0)
 	_skill_cooldown[peer] = cooldowns
 	skills_ruled += 1
 	match def.id:
@@ -1776,14 +1799,126 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 			return _rule_shove(actor, direction)
 		"grab":
 			return _rule_grab(actor, _target_for(payload))
-	return _rule_strike(actor, def, direction)
+	schedule_strike(actor, def, direction)
+	return true
+
+
+# M-7: a strike is booked, not ruled, when its intent arrives: the ruling runs
+# at the impact time, and until then it can be caught (or, in the combat stage,
+# parried) or cancelled by what happens to its caster. One per body.
+func schedule_strike(actor: Node3D, def: SkillDef, direction: Vector3) -> void:
+	var now := Time.get_ticks_msec()
+	_pending_strikes[actor] = {
+		"def": def,
+		"direction": direction,
+		"at": now + int(def.impact_time() * 1000.0),
+		"since": now,
+	}
+	print("PLAYGROUND_STRIKE_SCHEDULED by=%s skill=%s in=%.2fs" % [actor.name, def.id, def.impact_time()])
+
+
+func pending_strike(actor: Node3D) -> Dictionary:
+	return _pending_strikes.get(actor, {})
+
+
+# Every step: strikes whose caster was stunned, knocked down, grabbed or killed
+# in the windup are cancelled; the rest land when their time comes.
+func _run_pending_strikes() -> void:
+	var now := Time.get_ticks_msec()
+	for actor: Variant in _pending_strikes.keys():
+		if not is_instance_valid(actor):
+			_pending_strikes.erase(actor)
+			continue
+		var record: Dictionary = _pending_strikes[actor]
+		var def: SkillDef = record["def"]
+		if actor is Player:
+			var caster := actor as Player
+			var interrupted := caster.sync_dead or caster.state == Player.State.STUNNED \
+				or caster.state == Player.State.DOWNED or caster.state == Player.State.GRABBED \
+				or caster.state == Player.State.DEAD
+			if interrupted:
+				_pending_strikes.erase(actor)
+				strikes_cancelled += 1
+				print("PLAYGROUND_STRIKE_CANCELLED by=%s skill=%s why=%s" % [
+					caster.name, def.id, Player.State.keys()[caster.state]])
+				continue
+		elif actor is Dummy:
+			# A scarecrow picked up or caught mid-windup does not swing.
+			if holder_of(actor) != 0 or (actor as Dummy).attack_phase == "stunned":
+				_pending_strikes.erase(actor)
+				strikes_cancelled += 1
+				print("PLAYGROUND_STRIKE_CANCELLED by=%s skill=%s why=%s" % [
+					actor.name, def.id, "held" if holder_of(actor) != 0 else "caught"])
+				continue
+		if now >= int(record["at"]):
+			_pending_strikes.erase(actor)
+			_rule_strike(actor, def, record["direction"])
+
+
+# M-7: the catch. A grab aimed at a body whose strike is booked and inside its
+# window -- catch_window before the impact, up to the impact -- by a catcher
+# strong enough (strength >= catch_force x catch_power_mult) and in reach:
+# the strike is cancelled, the attacker is held still for catch_stun through
+# the stun path, and if the catcher can lift them the hold follows. The catcher
+# is otherwise free (no GRABBING state): a kick or the other hand's weapon can
+# follow at once. Anything short of this falls through to the ordinary grab.
+func _try_catch(actor: Player, target: Node3D) -> bool:
+	if not _pending_strikes.has(target):
+		return false
+	var peer := actor.get_multiplayer_authority()
+	if _holds.has(peer) or holder_of(actor) != 0 or not actor.is_grounded_state() or actor.sync_dead:
+		return false
+	var record: Dictionary = _pending_strikes[target]
+	var def: SkillDef = record["def"]
+	var now := Time.get_ticks_msec()
+	var at := int(record["at"])
+	var window_ms := int(def.catch_window_time() * 1000.0)
+	if now < at - window_ms or now > at:
+		print("PLAYGROUND_CATCH_MISSED by=%s target=%s skill=%s offset=%.3fs window=%.2fs" % [
+			actor.name, target.name, def.id, float(at - now) / 1000.0, def.catch_window_time()])
+		return false
+	if actor.global_position.distance_to(target.global_position) > (
+			Tuning.server.grab_range + actor.radius() + INTENT_RANGE_SLACK):
+		return false
+	var needed := def.catch_force_value() * Tuning.server.catch_power_mult
+	if actor.stats.strength < needed:
+		print("PLAYGROUND_CATCH_WEAK by=%s target=%s skill=%s strength=%.0f needed=%.0f" % [
+			actor.name, target.name, def.id, actor.stats.strength, needed])
+		return false
+	_pending_strikes.erase(target)
+	catches += 1
+	last_catch = {"by": peer, "target": target.name, "skill": def.id,
+		"before_impact": float(at - now) / 1000.0, "lifted": false}
+	if target is Player:
+		var toward := target.global_position - actor.global_position
+		toward.y = 0.0
+		if toward.length_squared() < 0.0001:
+			toward = Vector3.FORWARD
+		var event := ForceSystem.make_event(
+			ForceSystem.Kind.KNOCKBACK, toward.normalized(), 0.0, 0.0, peer, false, 0.0, 0.0)
+		event["catch_stun"] = Tuning.server.catch_stun
+		send_force(target, event)
+	elif target is Dummy:
+		# The scarecrow has no states to stun; its pattern stands still instead.
+		(target as Dummy).apply_catch_stun(Tuning.server.catch_stun)
+	if weight_of(target) <= lift_limit(actor) and holder_of(target) == 0:
+		_take_hold(peer, target)
+		last_catch["lifted"] = true
+	print("PLAYGROUND_CATCH by=%s target=%s skill=%s before_impact=%.3fs lifted=%s" % [
+		actor.name, target.name, def.id, last_catch["before_impact"], last_catch["lifted"]])
+	return true
 
 
 # M-1: the generic strike -- a rectangle in front of the heading, like the
 # shove's, with the SkillDef's reach, width, damage and push. M-2 fills in the
 # heights and the knockdown.
-func _rule_strike(actor: Player, def: SkillDef, direction: Vector3) -> Variant:
-	var peer := actor.get_multiplayer_authority()
+func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3) -> Variant:
+	# M-7: a scarecrow strikes too. It has no peer, no strength of its own
+	# behind the push, no party and the human's body size.
+	var caster := actor as Player
+	var peer := caster.get_multiplayer_authority() if caster != null else 0
+	var caster_strength := caster.stats.strength if caster != null else 0.0
+	var caster_scale := caster.body_scale() if caster != null else 1.0
 	var reach := def.value("reach")
 	var half_width := def.value("width") * 0.5
 	var forward := Vector3(direction.x, 0.0, direction.z)
@@ -1806,7 +1941,7 @@ func _rule_strike(actor: Player, def: SkillDef, direction: Vector3) -> Variant:
 	# legs (the SkillDef's strike_height, off the body's centre); a target whose
 	# body does not cross that height is not hit. A body on a knee-high step is
 	# still punched; one a ledge up is not kicked.
-	var strike_y := actor.global_position.y + def.strike_height * actor.body_scale()
+	var strike_y := actor.global_position.y + def.strike_height * caster_scale
 	var hits := 0
 	var downed := 0
 	for collision in actor.get_world_3d().direct_space_state.intersect_shape(params, 8):
@@ -1826,13 +1961,13 @@ func _rule_strike(actor: Player, def: SkillDef, direction: Vector3) -> Variant:
 			continue
 		if body is Rock and holder_of(body) != 0:
 			continue
-		var is_ally := body is Player and Tuning.server.same_party
+		var is_ally := body is Player and caster != null and Tuning.server.same_party
 		var push := (forward + Vector3.UP * Tuning.server.shove_up_bias).normalized()
 		var event := ForceSystem.make_event(
 			ForceSystem.Kind.KNOCKBACK,
 			push,
 			def.value("knock_power"),
-			actor.stats.strength,
+			caster_strength,
 			peer,
 			is_ally,
 			def.value("damage"),
@@ -1847,7 +1982,8 @@ func _rule_strike(actor: Player, def: SkillDef, direction: Vector3) -> Variant:
 		hits += 1
 		if float(event.get("down_apply", 0.0)) > 0.0:
 			downed += 1
-	last_strike = {"skill": def.id, "hits": hits, "downed": downed}
+	last_strike = {"skill": def.id, "hits": hits, "downed": downed, "by": actor.name,
+		"at_unix": Time.get_unix_time_from_system()}
 	print("PLAYGROUND_SKILL by=%s skill=%s hits=%d downed=%d" % [actor.name, def.id, hits, downed])
 	return hits
 
@@ -1927,6 +2063,7 @@ func _physics_process(delta: float) -> void:
 		_shove_cooldown[peer] = maxf(0.0, float(_shove_cooldown[peer]) - delta)
 	_enforce_holds(delta)
 	_place_held_people(delta)
+	_run_pending_strikes()
 	_watch_vitals(delta)
 	# N-1: any write to the server's table reaches the replicas within a step,
 	# whoever made it. The heartbeat below repairs a dropped push.

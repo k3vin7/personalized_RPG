@@ -54,6 +54,11 @@ func _judge() -> ServerAuthority:
 # DOC: ground only, inside grab_range, and of everything in reach the one
 # nearest the cursor. Picking the target is the client's job -- it is the one
 # with the cursor -- and whether the hold may start is the server's.
+# M-6/M-7: a grab asked for and not yet answered.
+func has_pending() -> bool:
+	return is_instance_valid(_pending_target)
+
+
 func grab() -> bool:
 	if is_holding() or is_held() or not player.is_grounded_state() or is_instance_valid(_pending_target):
 		return false

@@ -37,6 +37,15 @@ var _cooldown_until := {}
 var casts_started := 0
 var casts_sent := 0
 var presses_ignored := 0
+# M-7: the wall clock when the last intent went out and when the last windup
+# ended on this machine, for the latency notes.
+var last_cast_unix := 0.0
+var last_fire_unix := 0.0
+# M-7: whether the cast in progress already sent its intent (at the start of
+# the windup) so _fire() does not send it again.
+var _sent_at_start := false
+# M-6/M-7: the grab key came up before the hold landed; put it down when it does.
+var _drop_when_held_until := 0
 
 
 func setup(owner_player: Player) -> void:
@@ -209,6 +218,11 @@ func release_slot(index: int) -> bool:
 		return false
 	if player.grab == null:
 		return false
+	# M-7: the key came up while the grab was still being answered (a catch
+	# that lifts, a round trip later): the hold is put down the moment it
+	# lands, so a tap catches without carrying.
+	if not player.grab.is_holding() and player.grab.has_pending():
+		_drop_when_held_until = Time.get_ticks_msec() + int(ServerAuthority.INTENT_TIMEOUT * 1000.0)
 	player.grab.release_throw_key()
 	return true
 
@@ -245,6 +259,20 @@ func cast_slot(index: int) -> bool:
 	casts_started += 1
 	# Shown on the frame of the press, taken back if the server says no.
 	player.begin_predicted(def.server_intent())
+	# M-7: a strike's intent goes out now, at the start of the windup, aimed
+	# now; the server books the ruling for the impact time. The shove and the
+	# grab keep their own entries, called when the (zero) windup ends.
+	_sent_at_start = false
+	if def.server_intent() == ServerAuthority.Intent.SKILL:
+		var heading := player.movement.shove_direction() if player.movement != null else -player.global_transform.basis.z
+		if heading != Vector3.ZERO:
+			player.snap_facing(heading)
+		ServerAuthority.submit_intent(player, ServerAuthority.Intent.SKILL, {
+			"skill": def.id,
+			"direction": heading,
+		})
+		last_cast_unix = Time.get_unix_time_from_system()
+		_sent_at_start = true
 	var windup := def.value("windup")
 	if windup > 0.0:
 		_phase_left = windup
@@ -262,7 +290,7 @@ func _fire() -> void:
 	if def == null:
 		return
 	var direction := player.movement.shove_direction() if player.movement != null else -player.global_transform.basis.z
-	if direction != Vector3.ZERO:
+	if direction != Vector3.ZERO and not _sent_at_start:
 		player.snap_facing(direction)
 	match def.id:
 		"shove":
@@ -272,11 +300,13 @@ func _fire() -> void:
 			if player.movement != null:
 				player.movement.interact()
 		_:
-			ServerAuthority.submit_intent(player, ServerAuthority.Intent.SKILL, {
-				"skill": def.id,
-				"direction": direction,
-			})
+			if not _sent_at_start:
+				ServerAuthority.submit_intent(player, ServerAuthority.Intent.SKILL, {
+					"skill": def.id,
+					"direction": direction,
+				})
 	casts_sent += 1
+	last_fire_unix = Time.get_unix_time_from_system()
 	var cooldown := def.value("cooldown")
 	if cooldown > 0.0:
 		_cooldown_until[def.id] = Time.get_ticks_msec() + int(cooldown * 1000.0)
@@ -314,7 +344,15 @@ func on_interrupted() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if not player.is_local() or _cast_def == null:
+	if not player.is_local():
+		return
+	if _drop_when_held_until > 0:
+		if Time.get_ticks_msec() > _drop_when_held_until:
+			_drop_when_held_until = 0
+		elif player.grab != null and player.grab.is_holding():
+			_drop_when_held_until = 0
+			player.grab.drop()
+	if _cast_def == null:
 		return
 	if player.state == Player.State.CASTING:
 		_phase_left -= delta

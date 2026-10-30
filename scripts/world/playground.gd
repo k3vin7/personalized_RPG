@@ -194,6 +194,12 @@ func _run_smoke() -> void:
 		get_tree().root.add_child(checks)
 		checks.run(self)
 		return
+	if Net.auto_only == "M7":
+		var m7 := preload("res://scripts/tests/m7_checks.gd").new()
+		m7.name = "M7Checks"
+		get_tree().root.add_child(m7)
+		m7.run(self)
+		return
 	if Net.auto_only == "M":
 		var mc := preload("res://scripts/tests/m_checks.gd").new()
 		mc.name = "MChecks"

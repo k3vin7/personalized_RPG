@@ -10,6 +10,8 @@ const PATHS := {
 	"grab": "res://data/skills/grab.tres",
 	"punch": "res://data/skills/punch.tres",
 	"kick": "res://data/skills/kick.tres",
+	# M-7: the scarecrow's one attack, a stand-in for a boss swing.
+	"dummy_slam": "res://data/skills/dummy_slam.tres",
 }
 
 # What an empty hand can do, in slot order.
