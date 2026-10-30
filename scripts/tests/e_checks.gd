@@ -232,11 +232,13 @@ func _one_key_checks() -> void:
 	expect(await _take(rock), "took_the_rock_for_the_one_key_checks")
 
 	# A tap is a put-down: it lands next to the body, not across the plaza.
+	# M-6: through the grab's slot, the way the key does it -- the press with
+	# something in hand starts the charge, the release decides.
 	var dropped := _released("dropped")
 	var from := rock.global_position
-	await tick_request(_local.grab.press_throw)
+	await tick_request(func() -> void: _local.skills.press_slot(1))
 	await _beat(0.2)
-	await tick_request(_local.grab.release_throw_key)
+	await tick_request(func() -> void: _local.skills.release_slot(1))
 	await _wait(0.8)
 	var put_down := Vector2(rock.global_position.x - _local.global_position.x,
 		rock.global_position.z - _local.global_position.z).length()
@@ -252,9 +254,9 @@ func _one_key_checks() -> void:
 		var aim := _local.global_position + Vector3(float(distance), 0.0, 0.0)
 		await tick_request(func() -> void:
 			_local.movement.set_aim_override(aim)
-			_local.grab.press_throw())
+			_local.skills.press_slot(1))
 		await _beat(Tuning.values.throw_charge_max + 0.1)
-		await tick_request(_local.grab.release_throw_key)
+		await tick_request(func() -> void: _local.skills.release_slot(1))
 		# The nearest the rock ever came to the mark, not where it finally
 		# stopped: a thrown sphere lands and then rolls, and the roll is not
 		# part of the throw.

@@ -116,6 +116,7 @@ func run(world: Node3D) -> void:
 	await _weapon_checks()
 	await _body_size_checks()
 	await _phase_replication_check()
+	await _grab_key_checks()
 	Tuning.values.smart_key_enabled = smart
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_stage_m")
 	expect(_judge.move_corrections == corrections, "no_corrections_during_stage_m")
@@ -157,8 +158,11 @@ func _fill_checks() -> void:
 	var locked := []
 	for index in 4:
 		locked.append(_local.skills.slot_locked(index))
+	# M-6: the grab's slot is the hands themselves (hold-and-release: the key
+	# that puts the load down or throws it), so it stays open; the kick is the
+	# one attack open with full hands (M-2).
 	note("holding a rock: locked %s" % [locked])
-	expect(locked == [true, true, true, false], "holding_locks_every_slot_but_the_kick")
+	expect(locked == [true, false, true, false], "holding_locks_every_slot_but_the_grab_key_and_the_kick")
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(Vector3.INF)
 		_local.grab.drop())
@@ -812,6 +816,94 @@ func client_weapon(kind: int, forge: bool) -> void:
 	if forge:
 		report.rpc_id(1, "weapon_forge", {"at_once": at_once})
 	report.rpc_id(1, "weapon", _local.weapon)
+
+
+# ----------------------------------------- M-6: the grab is the second slot's key
+
+func _grab_key_checks() -> void:
+	await _park(HOME)
+	Tuning.values.smart_key_enabled = false
+	var grab := Skills.get_def("grab")
+	expect(grab.input_mode == SkillDef.InputMode.HOLD_RELEASE, "the_grab_is_a_hold_and_release_skill")
+	expect(not InputMap.has_action("grab_throw"), "the_old_grab_action_is_gone")
+	# G does nothing any more: no grab, no cast, no arming.
+	var rock := _world.get_node("Rock_0") as Rock
+	await tick_request(func() -> void:
+		placed()
+		rock.freeze = false
+		rock.global_position = _local.global_position + Vector3(0.9, -0.3, 0.0)
+		rock.linear_velocity = Vector3.ZERO)
+	await _wait(0.3)
+	var started := _local.skills.casts_started
+	_local.movement.set_aim_override(rock.global_position)
+	var g := InputEventKey.new()
+	g.physical_keycode = KEY_G
+	g.pressed = true
+	Input.parse_input_event(g)
+	await _wait(0.4)
+	var g_up := InputEventKey.new()
+	g_up.physical_keycode = KEY_G
+	Input.parse_input_event(g_up)
+	await _wait(0.2)
+	expect(not _local.grab.is_holding() and _local.skills.casts_started == started
+		and _local.movement.armed_action() == PlayerMovement.Armed.NONE, "g_does_nothing")
+	# The slot's key, with the smart key off: the press grabs at once (no
+	# arming, no left button), holding it charges, the release throws.
+	var slot_key := _local.skills.key_for(1)
+	var down := InputEventKey.new()
+	down.physical_keycode = slot_key as Key
+	down.pressed = true
+	Input.parse_input_event(down)
+	await _wait(0.5)
+	expect(_local.grab.is_holding(), "the_slot_key_grabs_on_the_press_without_arming")
+	expect(_local.movement.armed_action() == PlayerMovement.Armed.NONE, "and_arms_nothing_with_the_smart_key_off")
+	var up := InputEventKey.new()
+	up.physical_keycode = slot_key as Key
+	Input.parse_input_event(up)
+	await _wait(0.5)
+	# Pressed again with the rock in hand and held past the threshold: a throw.
+	_local.movement.set_aim_override(_local.global_position + Vector3(4.0, 0.0, 0.0))
+	var from := rock.global_position
+	Input.parse_input_event(down)
+	await get_tree().create_timer(Tuning.values.throw_hold_threshold + 0.3).timeout
+	Input.parse_input_event(up)
+	await _wait(1.5)
+	note("slot 2 key: held %.1f s then released -> rock moved %.2f m, holding=%s" % [
+		Tuning.values.throw_hold_threshold + 0.3, rock.global_position.distance_to(from), _local.grab.is_holding()])
+	expect(not _local.grab.is_holding() and rock.global_position.distance_to(from) > 1.5,
+		"holding_the_slot_key_past_the_threshold_throws_on_release")
+	# Rebound to another key: the same flow.
+	_local.skills.rebind(1, KEY_Y)
+	await tick_request(func() -> void:
+		placed()
+		rock.freeze = false
+		rock.global_position = _local.global_position + Vector3(0.9, -0.3, 0.0)
+		rock.linear_velocity = Vector3.ZERO)
+	await _wait(0.3)
+	_local.movement.set_aim_override(rock.global_position)
+	var y_down := InputEventKey.new()
+	y_down.physical_keycode = KEY_Y
+	y_down.pressed = true
+	Input.parse_input_event(y_down)
+	await _wait(0.5)
+	expect(_local.grab.is_holding(), "a_rebound_grab_key_grabs_the_same_way")
+	var y_up := InputEventKey.new()
+	y_up.physical_keycode = KEY_Y
+	Input.parse_input_event(y_up)
+	await _wait(0.5)
+	# A tap: put down beside the body.
+	Input.parse_input_event(y_down)
+	await get_tree().create_timer(0.2).timeout
+	Input.parse_input_event(y_up)
+	await _wait(0.6)
+	expect(not _local.grab.is_holding() and rock.global_position.distance_to(_local.global_position) < 2.0,
+		"a_tap_on_the_rebound_key_puts_it_down_at_the_feet")
+	_local.skills.rebind(1, slot_key)
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(Vector3.INF)
+		rock.global_position = rock.home
+		rock.linear_velocity = Vector3.ZERO)
+	Tuning.values.smart_key_enabled = true
 
 
 # ------------------------------------------- M-5: the cast's show on the other screen

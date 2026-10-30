@@ -23,6 +23,16 @@ enum Outcome {
 	DOWN,
 }
 
+# M-6: how the key is read. PRESS_CAST is the cast flow (arm or cast on the
+# press, windup, ruling, recovery). HOLD_RELEASE is the grab's: the press is
+# the request (or, with something in hand, the start of a charge), the release
+# decides -- under the threshold a put-down, over it an arc, Shift a line. The
+# smart key and the left button play no part in it.
+enum InputMode {
+	PRESS_CAST,
+	HOLD_RELEASE,
+}
+
 @export var id: String = ""
 @export var label: String = ""
 @export var hands: Hands = Hands.BARE
@@ -30,6 +40,7 @@ enum Outcome {
 # -1 means Intent.SKILL, the generic strike door; the shove and the grab name
 # their own.
 @export var intent: int = -1
+@export var input_mode: InputMode = InputMode.PRESS_CAST
 # Seconds. Windup is the time from the cast to the ruling; recovery the time
 # after it. Both lock out moving, jumping, dashing and other casts.
 @export var windup: float = 0.0

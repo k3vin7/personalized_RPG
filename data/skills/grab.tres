@@ -7,6 +7,7 @@ script = ExtResource("1")
 id = "grab"
 label = "잡기"
 intent = 1
+input_mode = 1
 outcome = 0
 usable_while_holding = false
 tuning_prefix = "grab"

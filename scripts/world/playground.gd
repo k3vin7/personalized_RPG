@@ -81,22 +81,23 @@ func _ready() -> void:
 	# M-3: the race stands, a column along the plaza's west edge (x -18.5,
 	# z 4.5 to 11.1), turned to run along z. The back edge was tried first and
 	# the orc's stand landed inside the 2 m step (x -10.5..-7.5, z 15..18).
-	# M-3/M-5: the race stands, a column along the plaza's west edge (x -18.5,
-	# z 0.7 to 7.3), turned to run along z.
+	# M-3/M-5/M-6: the race stands, a column along the plaza's west edge
+	# (x -18.5, z -0.3 to 6.3), turned to run along z.
 	var pedestals := RacePedestal.new()
 	pedestals.name = "RacePedestal"
-	pedestals.position = Vector3(-18.5, 0.0, 4.0)
+	pedestals.position = Vector3(-18.5, 0.0, 3.0)
 	pedestals.rotation_degrees.y = 90.0
 	add_child(pedestals)
 
-	# M-5: the weapon rack beside the race stands on the same edge (x -17.5,
-	# z 9.1 to 17.9), turned the other way so its drop zone faces the edge
-	# (x -19.3, z 13.5) and not the plaza: facing inward it covered E's carry
+	# M-5/M-6: the weapon rack beside the race stands on the same edge (x -17.5,
+	# z 8.1 to 16.9), turned the other way so its drop zone faces the edge
+	# (x -19.3, z 12.5) and not the plaza: facing inward it covered E's carry
 	# stand at (-16, 12). It stood at z 16 across the step row (z 15 to 18)
-	# before, with its stands inside the 3 m and 3.5 m steps.
+	# before, with its stands inside the 3 m and 3.5 m steps; M-6 pulled the
+	# row a metre in so the staff's zone (to z 17.7) is inside the plaza (18).
 	var rack := WeaponRack.new()
 	rack.name = "WeaponRack"
-	rack.position = Vector3(-17.5, 0.0, 13.5)
+	rack.position = Vector3(-17.5, 0.0, 12.5)
 	rack.rotation_degrees.y = -90.0
 	add_child(rack)
 

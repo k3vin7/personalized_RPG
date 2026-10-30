@@ -339,17 +339,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		_click_to_target()
 		get_viewport().set_input_as_handled()
 		return
-	if event.is_action_pressed("grab_throw"):
-		# Stage E: with something in your hands G starts a charge and the
-		# release decides what it was. With empty hands it is still a grab.
-		Net.queue_physics(interact)
-		get_viewport().set_input_as_handled()
-		return
-	if event.is_action_released("grab_throw"):
-		if player.grab != null:
-			Net.queue_physics(player.grab.release_throw_key)
-		get_viewport().set_input_as_handled()
-		return
+	# M-6: the grab's own key is gone. The grab, the charge and the release
+	# are the second slot's (SkillDef input_mode HOLD_RELEASE), read by
+	# PlayerSkills; interact() below is the entry it calls.
 	if event.is_action_pressed("dash"):
 		Net.queue_physics(press_dash)
 		get_viewport().set_input_as_handled()

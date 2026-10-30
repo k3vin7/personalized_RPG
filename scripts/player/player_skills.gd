@@ -72,10 +72,14 @@ func slot_def(index: int) -> SkillDef:
 
 
 # Empty, or shut while the hands are full (M-2: only the kick is open then).
+# M-6: a hold-and-release skill is the hands themselves -- it is what puts the
+# load down or throws it -- so full hands never shut it.
 func slot_locked(index: int) -> bool:
 	var def := slot_def(index)
 	if def == null:
 		return true
+	if def.input_mode == SkillDef.InputMode.HOLD_RELEASE:
+		return false
 	if player.grab != null and player.grab.is_holding() and not def.usable_while_holding:
 		return true
 	return false
@@ -130,8 +134,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not player.is_local():
 		return
 	for index in SLOT_COUNT:
-		if event.is_action_pressed(ACTION_PREFIX + str(index + 1)):
+		var action := ACTION_PREFIX + str(index + 1)
+		if event.is_action_pressed(action):
 			Net.queue_physics(func() -> void: press_slot(index))
+			get_viewport().set_input_as_handled()
+			return
+		if event.is_action_released(action):
+			# M-6: only a hold-and-release skill reads its key coming up.
+			Net.queue_physics(func() -> void: release_slot(index))
 			get_viewport().set_input_as_handled()
 			return
 
@@ -165,9 +175,41 @@ func press_slot(index: int) -> bool:
 		presses_ignored += 1
 		print("PLAYGROUND_SLOT_IGNORED slot=%d why=state_%s" % [index + 1, Player.State.keys()[player.state]])
 		return false
+	if def.input_mode == SkillDef.InputMode.HOLD_RELEASE:
+		return _hold_press(def)
 	if Tuning.values.smart_key_enabled:
 		return cast_slot(index)
 	arm(index)
+	return true
+
+
+# M-6: the press of a hold-and-release skill. With empty hands it is the
+# request (the grab, through the same entry the key always had, which also
+# asks the stands and the rack); with something in hand it starts the charge
+# the release will read. No arming, no left button, no windup.
+func _hold_press(def: SkillDef) -> bool:
+	if player.movement == null:
+		return false
+	casts_started += 1
+	player.begin_predicted(def.server_intent())
+	var acted := player.movement.interact()
+	if acted:
+		casts_sent += 1
+	else:
+		player.clear_predicted()
+	return acted
+
+
+# M-6: the key coming up. Only a hold-and-release skill cares: under the
+# threshold the load is put down, over it thrown in an arc, with Shift held
+# thrown in a line. Everything about that is PlayerGrab's already.
+func release_slot(index: int) -> bool:
+	var def := slot_def(index)
+	if def == null or def.input_mode != SkillDef.InputMode.HOLD_RELEASE:
+		return false
+	if player.grab == null:
+		return false
+	player.grab.release_throw_key()
 	return true
 
 

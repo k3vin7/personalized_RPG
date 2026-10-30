@@ -29,7 +29,7 @@ func _ready() -> void:
 	add_to_group(INTERACT_GROUP)
 
 	var sign_label := Label3D.new()
-	sign_label.text = "무기 선택대 · 받침대에 서서 G"
+	sign_label.text = "무기 선택대 · 받침대에 서서 잡기 키(슬롯 2)"
 	sign_label.position = Vector3(0.0, 2.6, 0.0)
 	sign_label.font_size = 34
 	sign_label.outline_size = 7
