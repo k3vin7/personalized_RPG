@@ -15,6 +15,12 @@ enum State {
 	GRABBING,
 	GRABBED,
 	STUNNED,
+	# M-1: a cast's windup and recovery. Both lock out moving, jumping, dashing
+	# and other casts; the body stands where it is.
+	CASTING,
+	RECOVERING,
+	# M-2: knocked down. Lying for down_time, then getup_time standing up.
+	DOWNED,
 	DEAD,
 }
 
@@ -70,6 +76,9 @@ const STATE_COLORS := {
 	State.GRABBING: "ffa94d",
 	State.GRABBED: "ff7b6b",
 	State.STUNNED: "ff7b6b",
+	State.CASTING: "f4e285",
+	State.RECOVERING: "c9b26b",
+	State.DOWNED: "b07a7a",
 	State.DEAD: "4b535c",
 }
 
@@ -111,6 +120,12 @@ var sync_gear_weight := 0.0
 var movement: PlayerMovement
 var climb: PlayerClimb
 var grab: PlayerGrab
+# M-1: the eight slots and the cast flow. Local, like the three above.
+var skills: PlayerSkills
+# M-1: the procedural show of a cast -- a lean, and a box that is the strike.
+var _skill_lean_deg := 0.0
+var _strike_box: MeshInstance3D
+var _strike_left := 0.0
 var stamina := 100.0
 # H-3: the owner's stamina, replicated on the pose synchronizer for display on
 # other screens. Spending it is still the owner's (the server does not check
@@ -232,6 +247,11 @@ func _ready() -> void:
 		add_child(grab)
 		grab.setup(self)
 
+		skills = PlayerSkills.new()
+		skills.name = "PlayerSkills"
+		add_child(skills)
+		skills.setup(self)
+
 		camera = QuarterCamera.new()
 		camera.name = "QuarterCamera"
 		# Not under the player's parent: that node is the spawner's spawn path,
@@ -298,6 +318,11 @@ func change_state(new_state: int) -> void:
 	if state != new_state:
 		return # A nested change (a landing, a hold) got there first.
 	_update_hold(previous, new_state)
+	# M-1: leaving a cast by any route but its own end (a stun, a grab, a fall,
+	# a death) takes the picture of it down with it.
+	if skills != null and (previous == State.CASTING or previous == State.RECOVERING) \
+			and new_state != State.CASTING and new_state != State.RECOVERING and new_state != State.IDLE:
+		skills.on_interrupted()
 	_apply_state_colour()
 	state_changed.emit(new_state)
 
@@ -407,7 +432,13 @@ func default_snap_length() -> float:
 # grounded" -- so a holder that was not grounded was a holder that could not
 # act.
 func is_grounded_state() -> bool:
-	return state == State.IDLE or state == State.MOVE or state == State.GRABBING
+	return state == State.IDLE or state == State.MOVE or state == State.GRABBING \
+		or state == State.CASTING or state == State.RECOVERING
+
+
+# M-1: in a cast's windup or recovery. Nothing else may be ordered meanwhile.
+func is_casting() -> bool:
+	return state == State.CASTING or state == State.RECOVERING
 
 
 # The stats half of the step, run on every peer and on every body: the side
@@ -459,6 +490,10 @@ func _physics_process(delta: float) -> void:
 			_stun_left -= delta
 			if _stun_left <= 0.0:
 				change_state(State.IDLE)
+		if _strike_left > 0.0:
+			_strike_left -= delta
+			if _strike_left <= 0.0 and _strike_box != null:
+				_strike_box.visible = false
 		if _teleport_blind_left > 0.0:
 			# N-2: a correction snaps this body like a teleport, and arriving
 			# inside someone is handled the same way: no collision for a moment.
@@ -683,6 +718,9 @@ func set_weapon(kind: int) -> void:
 	if not is_local() or kind == weapon:
 		return
 	_apply_weapon(kind)
+	# M-1: what the hands hold decides what the slots hold.
+	if skills != null:
+		skills.fill_slots()
 	print("PLAYGROUND_WEAPON peer=%s kind=%s" % [name, WeaponKinds.LABELS.get(kind, "?")])
 
 
@@ -903,6 +941,17 @@ func _build_body() -> void:
 	_shadow.material_override = blob_material
 	add_child(_shadow)
 
+	# M-1: the strike, shown as a box pushed out of the body for a moment. Size
+	# and height come off the SkillDef when it is shown; hidden otherwise.
+	_strike_box = MeshInstance3D.new()
+	_strike_box.name = "StrikeBox"
+	_strike_box.mesh = BoxMesh.new()
+	var strike_material := StandardMaterial3D.new()
+	strike_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_strike_box.material_override = strike_material
+	_strike_box.visible = false
+	_visual.add_child(_strike_box)
+
 	_label = Label3D.new()
 	_label.position = Vector3(0.0, 1.45, 0.0)
 	_label.font_size = 26
@@ -922,6 +971,7 @@ const PREDICT_NAMES := {
 	ServerAuthority.Intent.GRAB: "잡기",
 	ServerAuthority.Intent.THROW: "던지기",
 	ServerAuthority.Intent.ESCAPE: "탈출",
+	ServerAuthority.Intent.SKILL: "기술",
 }
 
 
@@ -953,8 +1003,36 @@ func _apply_predicted_pose() -> void:
 	if _visual == null:
 		return
 	var leaning := predicted_action != -1
-	_visual.rotation.x = deg_to_rad(-12.0) if leaning else 0.0
+	# M-1: the cast's own lean adds to the prediction's.
+	_visual.rotation.x = deg_to_rad(-(12.0 if leaning else 0.0) - _skill_lean_deg)
 	_visual.position.y = -0.08 if leaning else 0.0
+
+
+# M-1: the procedural show, one phase at a time. "windup" leans the capsule
+# into the strike, "strike" pushes the box out for a moment, "recovery" leans
+# it back; null ends it. Every number is the SkillDef's.
+func show_skill_phase(def: SkillDef, phase: String) -> void:
+	if def == null or phase == "":
+		_skill_lean_deg = 0.0
+		if _strike_box != null:
+			_strike_box.visible = false
+		_apply_predicted_pose()
+		return
+	match phase:
+		"windup":
+			_skill_lean_deg = def.windup_lean_deg
+		"recovery":
+			_skill_lean_deg = def.recovery_lean_deg
+		"strike":
+			_skill_lean_deg = def.windup_lean_deg * 0.5
+			if _strike_box != null:
+				var box := _strike_box.mesh as BoxMesh
+				box.size = Vector3(0.25, 0.25, def.strike_extent)
+				_strike_box.position = Vector3(0.0, def.strike_height, -(BODY_RADIUS + def.strike_extent * 0.5))
+				(_strike_box.material_override as StandardMaterial3D).albedo_color = def.colour
+				_strike_box.visible = true
+				_strike_left = PlayerSkills.STRIKE_SHOW
+	_apply_predicted_pose()
 
 
 func _apply_state_colour() -> void:

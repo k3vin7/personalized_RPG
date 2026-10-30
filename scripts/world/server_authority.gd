@@ -45,6 +45,9 @@ enum Intent {
 	# tells the server so a dash inside the cooldown counts against the body
 	# like a speed over the cap does.
 	DASH,
+	# M-1: a slot's cast. Which skill, and a heading; the SkillDef's own rule
+	# function decides the rest. The shove and the grab keep their own doors.
+	SKILL,
 }
 
 # Anything that can be picked up joins this group and offers
@@ -181,6 +184,11 @@ var move_warnings := 0
 # by the checks; the log line carries the rest.
 var move_corrections := 0
 var last_correction := {}
+# M-1: per peer, when the current recovery ends (msec) and when each skill's
+# cooldown ends. A cast inside either is refused; the server keeps the clock.
+var _skill_lock := {}
+var _skill_cooldown := {}
+var skills_ruled := 0
 # N-3: when the held people's positions were last pushed. They ride the hand on
 # the rock's interval, from here, like a rock.
 var _held_push_left := 0.0
@@ -536,6 +544,8 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 			result = _rule_server_tuning(payload)
 		Intent.DASH:
 			result = _rule_dash(actor)
+		Intent.SKILL:
+			result = _rule_skill(actor, payload)
 	if result == null:
 		return _refuse(sender, kind, "refused")
 	granted_intents += 1
@@ -578,6 +588,9 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 			return _target_for(payload) != null
 		Intent.DROP, Intent.ESCAPE, Intent.RESPAWN, Intent.DASH:
 			return true
+		Intent.SKILL:
+			return Skills.is_known(String(payload.get("skill", ""))) \
+				and _direction_of(payload) != Vector3.ZERO
 		Intent.STATS:
 			# Either field may be absent (leave it alone) or null (follow the
 			# race again). A number has to be a number.
@@ -1615,6 +1628,92 @@ func _check_move(player: Player, delta: float) -> void:
 		return
 	_move_watch[peer] = watch
 	_count_over(peer, "speed")
+
+
+# M-1: a slot's cast. The SkillDef names the rule; this door keeps the clock.
+# Inside the caster's own recovery, or inside the skill's cooldown, the cast is
+# refused -- the owner's slot would not have sent it, so one that arrives is a
+# forged or a stale one. Judged against the server's copy of the body, which
+# has to be standing.
+func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
+	var def := Skills.get_def(String(payload.get("skill", "")))
+	if def == null or actor.sync_dead:
+		return null
+	var peer := actor.get_multiplayer_authority()
+	var now := Time.get_ticks_msec()
+	if now < int(_skill_lock.get(peer, 0)):
+		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=recovery" % [actor.name, def.id])
+		return null
+	var cooldowns: Dictionary = _skill_cooldown.get(peer, {})
+	if now < int(cooldowns.get(def.id, 0)):
+		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=cooldown" % [actor.name, def.id])
+		return null
+	if not actor.is_grounded_state():
+		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=state_%s" % [
+			actor.name, def.id, Player.State.keys()[actor.state]])
+		return null
+	var direction := _direction_of(payload)
+	_skill_lock[peer] = now + int(def.value("recovery") * 1000.0)
+	cooldowns[def.id] = now + int(def.value("cooldown") * 1000.0)
+	_skill_cooldown[peer] = cooldowns
+	skills_ruled += 1
+	match def.id:
+		"shove":
+			return _rule_shove(actor, direction)
+		"grab":
+			return _rule_grab(actor, _target_for(payload))
+	return _rule_strike(actor, def, direction)
+
+
+# M-1: the generic strike -- a rectangle in front of the heading, like the
+# shove's, with the SkillDef's reach, width, damage and push. M-2 fills in the
+# heights and the knockdown.
+func _rule_strike(actor: Player, def: SkillDef, direction: Vector3) -> Variant:
+	var peer := actor.get_multiplayer_authority()
+	var reach := def.value("reach")
+	var half_width := def.value("width") * 0.5
+	var forward := Vector3(direction.x, 0.0, direction.z)
+	if forward.length_squared() < 0.0001:
+		return null
+	forward = forward.normalized()
+	var side := Vector3(-forward.z, 0.0, forward.x)
+	var shape := SphereShape3D.new()
+	shape.radius = sqrt(reach * reach + half_width * half_width)
+	var params := PhysicsShapeQueryParameters3D.new()
+	params.shape = shape
+	params.transform = Transform3D(Basis.IDENTITY, actor.global_position)
+	params.collision_mask = Player.PLAYER_LAYER | Dummy.LAYER
+	params.collide_with_areas = false
+	params.exclude = [actor.get_rid()]
+	var hits := 0
+	for collision in actor.get_world_3d().direct_space_state.intersect_shape(params, 8):
+		var body := collision.get("collider") as Node3D
+		if body == null or body == actor:
+			continue
+		var offset := body.global_position - actor.global_position
+		offset.y = 0.0
+		var along := offset.dot(forward)
+		var across := absf(offset.dot(side))
+		if along <= -Player.BODY_RADIUS or along > reach + Player.BODY_RADIUS:
+			continue
+		if across > half_width + Player.BODY_RADIUS:
+			continue
+		var is_ally := body is Player and Tuning.server.same_party
+		var push := (forward + Vector3.UP * Tuning.server.shove_up_bias).normalized()
+		var event := ForceSystem.make_event(
+			ForceSystem.Kind.KNOCKBACK,
+			push,
+			def.value("knock_power"),
+			actor.stats.strength,
+			peer,
+			is_ally,
+			def.value("damage"),
+			0.0)
+		event["skill"] = def.id
+		send_force(body, event)
+		hits += 1
+	print("PLAYGROUND_SKILL by=%s skill=%s hits=%d" % [actor.name, def.id, hits])
+	return hits
 
 
 # N-2: the dash notice. Never refused -- the dash has already happened on the

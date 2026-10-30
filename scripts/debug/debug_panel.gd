@@ -28,6 +28,9 @@ var player: Player
 
 var _root: PanelContainer
 var _readout: Label
+# M-1: which slot is waiting for its next key, and the buttons that show them.
+var _rebind_slot := -1
+var _slot_buttons: Array[Button] = []
 var _arc: MeshInstance3D
 var _arc_enabled := true
 
@@ -42,6 +45,14 @@ func setup(owner_player: Player) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	# M-1: the next key pressed goes on the slot that asked for it.
+	if _rebind_slot >= 0 and event is InputEventKey and event.is_pressed() and not event.is_echo():
+		if is_instance_valid(player) and player.skills != null:
+			player.skills.rebind(_rebind_slot, (event as InputEventKey).physical_keycode)
+		_rebind_slot = -1
+		_refresh_slot_buttons()
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("debug_panel"):
 		visible = not visible
 		get_viewport().set_input_as_handled()
@@ -148,6 +159,39 @@ func _build_ui() -> void:
 				func(new_value: float) -> void: _ask_server_tuning(name_text, new_value),
 				typeof(value) == TYPE_INT))
 
+	# M-1: the slot keys. A button asks; the next key pressed is the answer.
+	column.add_child(_heading("슬롯 키 (로컬, 아무 키로 재배치)"))
+	_slot_buttons.clear()
+	for index in PlayerSkills.SLOT_COUNT:
+		var button := Button.new()
+		button.name = "SlotKey%d" % (index + 1)
+		button.pressed.connect(func() -> void:
+			_rebind_slot = index
+			_refresh_slot_buttons())
+		column.add_child(button)
+		_slot_buttons.append(button)
+	_refresh_slot_buttons()
+
+	# M-1: the procedural show of each skill, as this machine draws it.
+	column.add_child(_heading("기술 표시 (로컬 리소스)"))
+	for id in Skills.all_ids():
+		var def := Skills.get_def(id)
+		if def == null:
+			continue
+		for field in ["windup_lean_deg", "recovery_lean_deg", "strike_extent", "strike_height"]:
+			var current := float(def.get(field))
+			var limits := numeric_limits(field, current)
+			if field == "strike_height":
+				limits = Vector2(-1.0, 1.5)
+			elif field.ends_with("_deg"):
+				limits = Vector2(-45.0, 45.0)
+			column.add_child(_slider(
+				"%s.%s" % [id, field],
+				current,
+				limits.x,
+				limits.y,
+				func(new_value: float) -> void: def.set(field, new_value)))
+
 	# What stays on this machine: how a press is read, what is drawn.
 	column.add_child(_heading("로컬 튜닝 (각자)"))
 	for name_text in Tuning.field_names(Tuning.values):
@@ -156,7 +200,7 @@ func _build_ui() -> void:
 			column.add_child(_check(name_text, value, func(on: bool) -> void:
 				Tuning.values.set(name_text, on)
 				Tuning.notify_changed()))
-		else:
+		elif typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT:
 			var integer := typeof(value) == TYPE_INT
 			var limits := numeric_limits(name_text, float(value))
 			column.add_child(_slider(
@@ -168,6 +212,19 @@ func _build_ui() -> void:
 					Tuning.values.set(name_text, roundi(new_value) if integer else new_value)
 					Tuning.notify_changed(),
 				integer))
+
+
+func _refresh_slot_buttons() -> void:
+	if not is_instance_valid(player) or player.skills == null:
+		return
+	for index in _slot_buttons.size():
+		var def := player.skills.slot_def(index)
+		var what := def.label if def != null else "빈 칸"
+		if _rebind_slot == index:
+			_slot_buttons[index].text = "슬롯 %d (%s): 키를 누르세요…" % [index + 1, what]
+		else:
+			_slot_buttons[index].text = "슬롯 %d (%s): %s  — 키 변경" % [
+				index + 1, what, player.skills.key_label(index)]
 
 
 func numeric_limits(field: String, value: float) -> Vector2:

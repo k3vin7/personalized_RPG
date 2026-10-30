@@ -34,6 +34,8 @@ enum Armed {
 	NONE,
 	JUMP,
 	DASH,
+	# M-1: a slot, with the smart key off. The slot itself is PlayerSkills'.
+	SKILL,
 }
 
 var player: Player
@@ -116,6 +118,9 @@ func note_pushed() -> void:
 
 
 func press_jump() -> void:
+	if player.is_casting():
+		# M-1: the windup and the recovery take every order but the cancel.
+		return
 	if not player.is_grounded_state():
 		# Off the ground Space is not a jump to aim. It is the wall catch, and
 		# the coyote jump for a body that walked off something a moment ago,
@@ -148,6 +153,8 @@ func request_jump() -> void:
 
 
 func press_dash() -> void:
+	if player.is_casting():
+		return
 	if Tuning.values.smart_key_enabled:
 		request_dash()
 		return
@@ -175,8 +182,16 @@ func _arm(action: int) -> void:
 func _disarm() -> void:
 	if _armed == Armed.NONE:
 		return
+	if _armed == Armed.SKILL and player.skills != null:
+		player.skills.disarm()
 	_armed = Armed.NONE
 	_refresh_indicator()
+
+
+# M-1: a slot pressed with the smart key off. Shows the reach; the left button
+# casts it, through cast_armed() like a jump or a dash.
+func arm_skill(_slot: int) -> void:
+	_arm(Armed.SKILL)
 
 
 # The left button, and the one place an armed action turns into a cast.
@@ -189,6 +204,12 @@ func cast_armed() -> bool:
 			_disarm()
 			request_dash()
 			return true
+		Armed.SKILL:
+			var slot := player.skills.armed_slot() if player.skills != null else -1
+			_disarm()
+			if slot >= 0 and player.skills != null:
+				return player.skills.cast_slot(slot)
+			return false
 	return false
 
 
@@ -203,6 +224,14 @@ func _refresh_indicator() -> void:
 		var dash := dash_plan()
 		_indicator.show_arrow(player.global_position, dash["landing"] as Vector3,
 			bool(dash["clamped"]))
+		return
+	if _armed == Armed.SKILL:
+		# M-1: the reach as a ring, and where along the heading it ends.
+		var def := player.skills.slot_def(player.skills.armed_slot()) if player.skills != null else null
+		var reach := def.value("reach") if def != null else 1.0
+		var heading := shove_direction()
+		_indicator.show_aim(player.global_position, reach,
+			player.global_position + heading * reach, false)
 		return
 	var plan := jump_plan(cursor_jump_target())
 	_indicator.show_aim(player.global_position, player.leap_max_range(),
@@ -227,6 +256,10 @@ func _clear_intent() -> void:
 
 
 func set_target(world_point: Vector3) -> void:
+	if player.is_casting():
+		# M-1: no moving in the windup or the recovery (cancel is the skill
+		# stage's). The order is dropped, not kept for later.
+		return
 	if player.state == Player.State.AIRBORNE:
 		# In the air the click books a destination and nothing else: the arc is
 		# already decided and must not bend.
@@ -294,13 +327,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("cast_click"):
 		# The left button casts what is armed, and means nothing otherwise.
 		if _armed != Armed.NONE:
-			var action := _armed
-			Net.queue_physics(func() -> void:
-				if action == Armed.JUMP:
-					cast_jump()
-				else:
-					request_dash())
-			_disarm()
+			# M-1: one path for the three things that can be armed, decided in
+			# the step like every other order.
+			Net.queue_physics(cast_armed)
 			get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("move_click"):
@@ -308,10 +337,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		# a mode that swallows input, so the move counts as the cancel.
 		_disarm()
 		_click_to_target()
-		get_viewport().set_input_as_handled()
-		return
-	if event.is_action_pressed("debug_shove"):
-		Net.queue_physics(shove)
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("grab_throw"):
@@ -345,6 +370,13 @@ func _physics_process(delta: float) -> void:
 		return
 	if player.state == Player.State.GRABBED:
 		# Someone else's hands decide where this body is.
+		return
+	if player.is_casting() or player.state == Player.State.DOWNED:
+		# M-1: standing still through the windup and the recovery; M-2: lying
+		# through a knockdown. Physics still runs -- gravity, a push -- only
+		# the orders stop.
+		_dash_cooldown_left = maxf(0.0, _dash_cooldown_left - delta)
+		_stunned_step(delta)
 		return
 	if player.climb != null and player.climb.is_climbing():
 		# The wall owns the body until it lets go.
@@ -873,7 +905,7 @@ func dash_plan() -> Dictionary:
 
 func request_dash() -> bool:
 	_disarm()
-	if not player.is_grounded_state() or _dash_cooldown_left > 0.0:
+	if player.is_casting() or not player.is_grounded_state() or _dash_cooldown_left > 0.0:
 		return false
 	var plan := dash_plan()
 	if float(plan["distance"]) <= 0.0:

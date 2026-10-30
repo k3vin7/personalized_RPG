@@ -27,6 +27,15 @@ var _hp_text: Label
 var _stamina_fill: ProgressBar
 var _stamina_trail: ProgressBar
 var _stamina_text: Label
+# M-1: the eight slots along the bottom. Key over name; grey when empty or
+# shut, bright while armed or being cast, dim while cooling down.
+var _slot_labels: Array[Label] = []
+var _slot_panels: Array[PanelContainer] = []
+const SLOT_SIZE := Vector2(72.0, 46.0)
+const SLOT_OPEN := Color(0.16, 0.18, 0.22, 0.9)
+const SLOT_SHUT := Color(0.10, 0.10, 0.11, 0.7)
+const SLOT_ARMED := Color(0.55, 0.45, 0.15, 0.95)
+const SLOT_CASTING := Color(0.75, 0.62, 0.20, 0.95)
 
 
 func setup(owner_player: Player) -> void:
@@ -61,6 +70,62 @@ func _build() -> void:
 	_stamina_fill = stamina["fill"]
 	_stamina_text = stamina["text"]
 	column.add_child(stamina["row"])
+	_build_slots()
+
+
+# M-1: the slot bar, bottom centre.
+func _build_slots() -> void:
+	var bar := HBoxContainer.new()
+	bar.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	bar.offset_left = -(SLOT_SIZE.x + 4.0) * PlayerSkills.SLOT_COUNT * 0.5
+	bar.offset_right = (SLOT_SIZE.x + 4.0) * PlayerSkills.SLOT_COUNT * 0.5
+	bar.offset_top = -18.0 - SLOT_SIZE.y
+	bar.offset_bottom = -18.0
+	bar.add_theme_constant_override("separation", 4)
+	add_child(bar)
+	for index in PlayerSkills.SLOT_COUNT:
+		var panel := PanelContainer.new()
+		panel.custom_minimum_size = SLOT_SIZE
+		var style := StyleBoxFlat.new()
+		style.bg_color = SLOT_SHUT
+		style.set_corner_radius_all(4)
+		style.set_border_width_all(1)
+		style.border_color = Color(0.0, 0.0, 0.0, 0.7)
+		panel.add_theme_stylebox_override("panel", style)
+		var label := Label.new()
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.add_theme_font_size_override("font_size", 12)
+		label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.85))
+		label.add_theme_constant_override("outline_size", 4)
+		panel.add_child(label)
+		bar.add_child(panel)
+		_slot_panels.append(panel)
+		_slot_labels.append(label)
+
+
+func _refresh_slots() -> void:
+	var skills := player.skills
+	if skills == null:
+		return
+	for index in _slot_panels.size():
+		var def := skills.slot_def(index)
+		var label := _slot_labels[index]
+		label.text = "%s\n%s" % [skills.key_label(index), def.label if def != null else "—"]
+		var style := _slot_panels[index].get_theme_stylebox("panel") as StyleBoxFlat
+		if style == null:
+			continue
+		var colour := SLOT_OPEN
+		if def == null or skills.slot_locked(index):
+			colour = SLOT_SHUT
+		elif skills.slot_on_cooldown(index):
+			colour = SLOT_SHUT.lerp(SLOT_OPEN, 0.5)
+		if skills.armed_slot() == index:
+			colour = SLOT_ARMED
+		if skills.current_def() != null and skills.current_def() == def and player.is_casting():
+			colour = SLOT_CASTING
+		style.bg_color = colour
+		label.modulate = Color(0.6, 0.6, 0.6) if (def == null or skills.slot_locked(index)) else Color.WHITE
 
 
 # One bar is three things stacked: the dark bed, a pale trail that lags the
@@ -122,6 +187,7 @@ func _process(delta: float) -> void:
 	_set_bar(
 		_stamina_fill, _stamina_trail, _stamina_text, player.stamina, max_stamina,
 		"지구력", STAMINA_COLOR, STAMINA_LOW_COLOR, delta)
+	_refresh_slots()
 
 
 func _set_bar(

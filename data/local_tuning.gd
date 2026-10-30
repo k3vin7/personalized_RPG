@@ -29,3 +29,8 @@ extends Resource
 # travels in the intent, so these two only map a hold time onto it.
 @export var throw_hold_threshold: float = 1.0
 @export var throw_charge_max: float = 1.5
+
+@export_group("Slots")
+# M-1: the eight slot keys, as physical keycodes, in slot order. Defaults
+# Q W E R A S D F; any key can be put on any slot from the debug panel.
+@export var slot_keys: PackedInt32Array = PackedInt32Array([81, 87, 69, 82, 65, 83, 68, 70])

@@ -316,6 +316,78 @@ extends Resource
 		if Tuning.may_write(self):
 			ally_ground_stun = value
 
+@export_group("Skills")
+# M-1/M-2: the strikes the slots cast. Each SkillDef with tuning_prefix set
+# reads its numbers from here (<prefix>_windup, _recovery, _cooldown, _range,
+# _width, _damage, _power), so these sliders are the skill. The punch is
+# quick and light; the kick is slow, heavier and knocks down.
+@export var punch_windup: float = 0.1:
+	set(value):
+		if Tuning.may_write(self):
+			punch_windup = value
+@export var punch_recovery: float = 0.2:
+	set(value):
+		if Tuning.may_write(self):
+			punch_recovery = value
+@export var punch_cooldown: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			punch_cooldown = value
+@export var punch_range: float = 1.3:
+	set(value):
+		if Tuning.may_write(self):
+			punch_range = value
+@export var punch_width: float = 0.6:
+	set(value):
+		if Tuning.may_write(self):
+			punch_width = value
+@export var punch_damage: float = 2.0:
+	set(value):
+		if Tuning.may_write(self):
+			punch_damage = value
+@export var punch_power: float = 2.0:
+	set(value):
+		if Tuning.may_write(self):
+			punch_power = value
+@export var kick_windup: float = 0.25:
+	set(value):
+		if Tuning.may_write(self):
+			kick_windup = value
+@export var kick_recovery: float = 0.4:
+	set(value):
+		if Tuning.may_write(self):
+			kick_recovery = value
+@export var kick_cooldown: float = 0.8:
+	set(value):
+		if Tuning.may_write(self):
+			kick_cooldown = value
+@export var kick_range: float = 1.6:
+	set(value):
+		if Tuning.may_write(self):
+			kick_range = value
+@export var kick_width: float = 0.9:
+	set(value):
+		if Tuning.may_write(self):
+			kick_width = value
+@export var kick_damage: float = 5.0:
+	set(value):
+		if Tuning.may_write(self):
+			kick_damage = value
+@export var kick_power: float = 5.0:
+	set(value):
+		if Tuning.may_write(self):
+			kick_power = value
+# M-2: how long a knocked-down body lies, and how long standing up takes.
+# No input through either; pushes still land.
+@export var down_time: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			down_time = value
+@export var getup_time: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			getup_time = value
+
 @export_group("Survival")
 @export var fall_damage_min_height: float = 4.0:
 	set(value):

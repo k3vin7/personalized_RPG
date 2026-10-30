@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="SkillDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/skill_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "shove"
+label = "밀치기"
+intent = 0
+outcome = 1
+usable_while_holding = false
+tuning_prefix = "shove"
+windup_lean_deg = 10.0
+recovery_lean_deg = -4.0
+strike_extent = 0.9
+strike_height = 0.2
+colour = Color(1.0000, 0.7020, 0.2784, 1)
