@@ -58,7 +58,12 @@ func run(world: Node3D) -> void:
 		await tick_request(func() -> void:
 			_local.respawn()
 			placed()
-			_local.global_position = Vector3(-14.0, 0.9, 8.0))
+			_local.global_position = Vector3(-14.0, 0.9, 8.0)
+			# H-1: a human (60) lifts 72 kg and a bare human weighs 80, so the
+			# client's grab of this body below needs the strength handed to it,
+			# the way every person-carrying check does since the 100-point scale.
+			ServerAuthority.instance.harness_set_stats(
+				Net.spawn_root.get_node_or_null(str(peers[0])) as Player, 100.0))
 		exercise_requests.rpc_id(peers[0], _local.get_path(), rock.get_path())
 		await get_tree().create_timer(0.5).timeout
 		expect(_local.hp == _local.stats.max_hp and _local.state != Player.State.GRABBED, "forged_force_and_grab_rejected")
@@ -207,6 +212,11 @@ func _rock_checks() -> void:
 		_local.movement.set_aim_override(Vector3.INF)
 		_local.grab.drop())
 	await get_tree().create_timer(0.5).timeout
+	# N-4: what the three client checks below stood on. The rock put down here
+	# used to fall from the hand into the 120 kg rock that had rolled over from
+	# its own spawn, and leave at 220 m/s; the client then placed itself beside
+	# a rock that was out of the world. Logged so a repeat is visible.
+	print("BA_NOTE peer=%d rock after put-down: at=%s vel=%s" % [_peer_id, rock.global_position, rock.linear_velocity])
 	await tick_request(_local.respawn)
 
 
@@ -232,11 +242,24 @@ func exercise_requests(host_path: NodePath, rock_path: NodePath) -> void:
 		"target": rock_path, "holder": _peer_id, "presses": 0}])
 	judge.face_shove.rpc_id(1, Vector3.RIGHT)
 	await get_tree().create_timer(1.0).timeout
+	# N-4: a respawn is answered by the server with the mark, a round trip
+	# later. Placing the body in the same step as asking for one put it beside
+	# the rock and then had the answer move it away again -- which is what
+	# failed the three checks below since stage E. So: ask, let it land, place.
+	var applied := _local.respawns_applied
+	await tick_request(func() -> void: _local.respawn())
+	var landed := 0.0
+	while _local.respawns_applied == applied and landed < 3.0:
+		await get_tree().create_timer(0.05).timeout
+		landed += 0.05
 	await tick_request(func() -> void:
-		_local.respawn()
 		placed()
 		_local.global_position = rock.global_position + Vector3(1.0, 0.3, 0.0))
 	await get_tree().create_timer(0.4).timeout
+	print("BA_NOTE peer=%d before the grab: state=%s holding=%s held=%s pending=%s grounded=%s gap=%.2f rock_at=%s" % [
+		_peer_id, Player.State.keys()[_local.state], _local.grab.is_holding(), _local.grab.is_held(),
+		is_instance_valid(_local.grab._pending_target), _local.is_grounded_state(),
+		_local.global_position.distance_to(rock.global_position), rock.global_position])
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(rock.global_position)
 		_local.movement.interact())

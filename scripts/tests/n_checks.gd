@@ -93,6 +93,7 @@ func run(world: Node3D) -> void:
 	await _tuning_checks()
 	await _correction_checks()
 	await _held_checks()
+	await _respawn_checks()
 	print("N_RESULT lag=%s peer=%d checks=%d failures=%d" % [_label, _peer_id, _checks, _failures])
 	finish.rpc(_failures)
 	await _wait(1.0)
@@ -364,6 +365,57 @@ func _held_checks() -> void:
 		_judge.harness_clear_stats(mate))
 
 
+# ------------------------------------------ N-4: the mark is the server's to choose
+
+func _respawn_checks() -> void:
+	var mate := _judge.actor_for(_client_peer())
+	if mate == null:
+		return
+	# The server brings the client back: both screens, same mark.
+	await tick_request(func() -> void: _judge.server_respawn(mate))
+	await _wait(0.8)
+	var here := mate.global_position
+	_reports.erase("position")
+	client_report_position.rpc_id(_client_peer())
+	if await _wait_report("position"):
+		var there: Vector3 = _reports["position"]
+		note("server respawned the client: host sees (%.2f, %.2f, %.2f), client is at (%.2f, %.2f, %.2f), gap %.3f, nearest mark %.2f m" % [
+			here.x, here.y, here.z, there.x, there.y, there.z, here.distance_to(there), _mark_gap(there)])
+		expect(here.distance_to(there) < 0.3, "a_respawned_client_is_in_the_same_place_on_both_screens")
+		expect(_mark_gap(there) < 0.5, "and_on_a_mark_the_server_chose")
+	# R on the client, alive: the request goes up, the mark comes down.
+	client_respawn.rpc_id(_client_peer())
+	await _wait(0.8)
+	here = mate.global_position
+	_reports.erase("position")
+	client_report_position.rpc_id(_client_peer())
+	if await _wait_report("position"):
+		var there: Vector3 = _reports["position"]
+		note("client pressed R: host sees (%.2f, %.2f, %.2f), client is at (%.2f, %.2f, %.2f), gap %.3f" % [
+			here.x, here.y, here.z, there.x, there.y, there.z, here.distance_to(there)])
+		expect(here.distance_to(there) < 0.3, "a_clients_own_respawn_lands_on_the_servers_mark_on_both_screens")
+	# And the host's own.
+	await tick_request(func() -> void: _local.respawn())
+	await _wait(0.8)
+	var me := _local.global_position
+	_reports.erase("seen")
+	client_report_seen.rpc_id(_client_peer(), _local.get_path())
+	if await _wait_report("seen"):
+		var seen: Vector3 = _reports["seen"]
+		note("host pressed R: host is at (%.2f, %.2f, %.2f), client sees (%.2f, %.2f, %.2f), gap %.3f" % [
+			me.x, me.y, me.z, seen.x, seen.y, seen.z, me.distance_to(seen)])
+		expect(me.distance_to(seen) < 0.3, "the_hosts_respawn_is_in_the_same_place_on_both_screens")
+		expect(_mark_gap(me) < 0.5, "and_on_a_mark")
+
+
+# Flat distance from a point to the nearest spawn mark.
+func _mark_gap(at: Vector3) -> float:
+	var best := INF
+	for point: Vector3 in Net.spawn_points:
+		best = minf(best, Vector2(at.x - point.x, at.z - point.z).length())
+	return best
+
+
 # The largest gap between a carried body and its holder's hand over `seconds`,
 # as this machine sees both.
 func _sample_gap(carried: Player, holder: Player, seconds: float) -> float:
@@ -509,6 +561,11 @@ func client_grab(target_path: NodePath) -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_drop() -> void:
 	await tick_request(func() -> void: _local.grab.drop())
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_respawn() -> void:
+	await tick_request(func() -> void: _local.respawn())
 
 
 # Server -> client. Sprint by writing our own position at `times` the walk for

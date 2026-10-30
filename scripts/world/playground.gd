@@ -66,7 +66,13 @@ func _ready() -> void:
 	var rock_weights := [5.0, 10.0, 20.0, 40.0, 80.0, 120.0]
 	for index in rock_weights.size():
 		var rock := (load(ROCK_SCENE) as PackedScene).instantiate() as Rock
-		var spot := Vector3(4.0 + float(index) * 2.0, 1.0, 6.0) if index < 3 			else Vector3(4.0 + float(index - 3) * 2.4, 1.0, 9.0)
+		# N-4: resting on the floor, not centred a metre up. The heavy three
+		# have radii of 1.3 and 1.7 m, so at y = 1 they spawned inside the plaza
+		# and the solver popped them out -- the 120 kg rock rolled three metres
+		# into the 20 kg rock's spot, where B-a then put a rock down into it.
+		var rest_y := Rock.radius_for(rock_weights[index]) + 0.05
+		var spot := Vector3(4.0 + float(index) * 2.0, rest_y, 6.0) if index < 3 \
+			else Vector3(4.0 + float(index - 3) * 2.4, rest_y, 9.0)
 		rock.setup("Rock_%d" % index, spot, rock_weights[index])
 		add_child(rock)
 	_sign("돌 (G 잡기 / G 던지기)", Vector3(6.0, 2.2, 6.0), Color("dfe6ee"))

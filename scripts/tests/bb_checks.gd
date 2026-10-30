@@ -268,11 +268,23 @@ func forge(rock_path: NodePath) -> void:
 	stage_done.rpc_id(1, "forged")
 
 
+# N-4: a client's respawn is answered by the server with the mark, a round trip
+# later. Placing in the same step as asking had the answer move the body off
+# the spot the check had just put it on. So: ask, wait for it to land, place.
+func _respawn_and_land() -> void:
+	var applied := _local.respawns_applied
+	await tick_request(func() -> void: _local.respawn())
+	var waited := 0.0
+	while _local.respawns_applied == applied and waited < 3.0:
+		await get_tree().create_timer(0.05).timeout
+		waited += 0.05
+
+
 @rpc("authority", "call_remote", "reliable")
 func client_shove(host_path: NodePath) -> void:
 	var host_player := get_node(host_path) as Player
+	await _respawn_and_land()
 	await tick_request(func() -> void:
-		_local.respawn()
 		placed()
 		_local.global_position = host_player.global_position - Vector3(1.0, 0.0, 0.0)
 		_local.movement.set_aim_override(host_player.global_position))
@@ -288,8 +300,8 @@ func client_shove(host_path: NodePath) -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_rock(rock_path: NodePath) -> void:
 	var rock := get_node(rock_path) as Rock
+	await _respawn_and_land()
 	await tick_request(func() -> void:
-		_local.respawn()
 		placed()
 		_local.global_position = rock.global_position + Vector3(1.0, 0.3, 0.0)
 		_local.movement.set_aim_override(rock.global_position))
@@ -311,8 +323,8 @@ func client_rock(rock_path: NodePath) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func client_park(point: Vector3) -> void:
+	await _respawn_and_land()
 	await tick_request(func() -> void:
-		_local.respawn()
 		placed()
 		_local.global_position = point
 		_local.movement.set_aim_override(Vector3.INF))

@@ -47,6 +47,9 @@ const TELEPORT_STEP := 2.0
 const TELEPORT_BLIND := 0.2
 # N-2: how many times the server has put this body back. Read by the checks.
 var corrections_received := 0
+# N-4: how many respawns this body has applied. The checks wait on it: a
+# client's respawn lands a round trip after it was asked for.
+var respawns_applied := 0
 # N-3: where the server last put this body while it was being carried. Every
 # peer applies it, the owner included -- a carried body writes no position of
 # its own -- the way a rock in a hand is shown where the server says it is.
@@ -642,28 +645,30 @@ func respawn() -> void:
 	if vitals_are_mine():
 		ServerAuthority.instance.server_respawn(self)
 		return
+	# N-4: alive or dead, the mark is the server's to choose. The answer carries
+	# it, and apply_respawn below does the moving when it arrives.
 	ServerAuthority.submit_intent(self, ServerAuthority.Intent.RESPAWN, {})
-	if not sync_dead:
-		# Alive, so this is the debug "back to a mark", and a mark is pose --
-		# which is still ours to write. It happens now and the server's half,
-		# topping the HP back up, arrives on its own.
-		#
-		# A dead body does not get this: leaving DEAD is the server's ruling and
-		# its clock, which is what keeps a death decided once.
-		apply_respawn()
 
 
-# The owner's half of a respawn, run once the server has cleared the vitals.
-func apply_respawn() -> void:
+# The owner's half of a respawn, run once the server has cleared the vitals and
+# chosen the mark. Pose is ours, so the move is made here, to where it said.
+func apply_respawn(at: Vector3) -> void:
 	if not is_local():
 		return
 	# Our copy of the server's flag, brought forward by one packet. The server
 	# set it false before sending this; the replica confirms it a moment later.
 	sync_dead = false
 	_respawn_echo_left = RESPAWN_ECHO_GRACE
-	global_position = _free_spawn_point()
+	global_position = at
+	# N-4: a teleport, so no collision for a moment. Jolt reads a kinematic
+	# body's velocity off its motion, and a rock resting on this head left at
+	# the teleport's speed -- 220 m/s, measured -- when the body moved without
+	# this. The same blind every other snap in the game uses.
+	collision_layer = 0
+	_teleport_blind_left = TELEPORT_BLIND
 	velocity = Vector3.ZERO
 	stamina = stats.max_stamina
+	respawns_applied += 1
 	floor_snap_length = _default_snap
 	if movement != null:
 		movement.cancel_target()
@@ -672,27 +677,6 @@ func apply_respawn() -> void:
 	change_state(State.IDLE)
 	_respawning = false
 	print("PLAYGROUND_RESPAWN peer=%s at=%s" % [name, global_position])
-
-
-# DOC: an empty spawn point, not necessarily our own: two bodies arriving on the
-# same mark shove each other off it.
-func _free_spawn_point() -> Vector3:
-	var points := Net.spawn_points
-	if points.is_empty():
-		return spawn_point
-	var neighbours: Array[Node] = get_parent().get_children() if get_parent() != null else []
-	for point in points:
-		var taken := false
-		for node in neighbours:
-			var body := node as Node3D
-			if body == null or body == self:
-				continue
-			if Vector2(body.global_position.x - point.x, body.global_position.z - point.z).length() < 1.2:
-				taken = true
-				break
-		if not taken:
-			return point
-	return points[0]
 
 
 # Picked up by standing on a rack pedestal. Only the body's owner may change it;

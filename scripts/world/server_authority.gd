@@ -1044,9 +1044,50 @@ func _rule_drop(actor: Player) -> Variant:
 	if not _holds.has(peer):
 		return null
 	var target := _end_hold(peer, "dropped")
+	if target is Rock:
+		_put_down_rock(actor, target as Rock)
 	print("PLAYGROUND_DROP by=%s target=%s" % [
 		actor.name, target.name if target != null else "gone"])
 	return true
+
+
+# N-4: a put-down sets the rock on the ground beside the holder, the way a
+# person is put down, instead of letting it fall from the hand. Dropped from
+# 2.6 m it could land inside whatever stood beside the holder -- another rock,
+# in B-a -- and a sphere pushed out of a sphere by the solver left at 220 m/s.
+# Four spots around the holder are tried and the first free one taken; if none
+# is free the rock falls from the hand as before.
+func _put_down_rock(holder: Player, rock: Rock) -> void:
+	var radius := Rock.radius_for(rock.weight)
+	var reach := Player.BODY_RADIUS + radius + 0.1
+	var ground_y := holder.global_position.y - Player.BODY_HALF_HEIGHT + radius
+	var forward := -holder.global_transform.basis.z
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		forward = Vector3.FORWARD
+	forward = forward.normalized()
+	var right := forward.cross(Vector3.UP)
+	var space := holder.get_world_3d().direct_space_state
+	var shape := SphereShape3D.new()
+	shape.radius = radius + 0.05
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = shape
+	# Bodies only: the spot sits on the floor by construction, and the floor
+	# answering the query left every spot "taken".
+	query.collision_mask = Layers.PLAYER | Layers.THROWABLE | Layers.DUMMY
+	query.exclude = [rock.get_rid(), holder.get_rid()]
+	for direction: Vector3 in [forward, right, -right, -forward]:
+		var spot := Vector3(
+			holder.global_position.x + direction.x * reach, ground_y,
+			holder.global_position.z + direction.z * reach)
+		query.transform = Transform3D(Basis.IDENTITY, spot)
+		if space.intersect_shape(query, 1).is_empty():
+			rock.global_position = spot
+			rock.linear_velocity = Vector3.ZERO
+			rock.angular_velocity = Vector3.ZERO
+			print("PLAYGROUND_PUT_DOWN rock=%s at=(%.2f, %.2f, %.2f)" % [rock.name, spot.x, spot.y, spot.z])
+			return
+	print("PLAYGROUND_PUT_DOWN rock=%s no_free_spot" % rock.name)
 
 
 # The escape count lives in the table row, so the presses are counted where the
@@ -1247,11 +1288,11 @@ func server_kill(player: Player, cause: String) -> void:
 		enter_dead.rpc_id(peer)
 
 
-# tell_owner is false only when the owner has already put the body on a mark
-# itself: a mark is pose, and pose is the owner's. Telling it again would move
-# the body a second time, a round trip later, over whatever it was doing by
-# then -- which is exactly what it did before this argument existed.
-func server_respawn(player: Player, tell_owner := true) -> void:
+# N-4: the mark is chosen here, from the server's view of who is standing
+# where, and carried to the owner in the message that clears it. The owner
+# still does the moving -- pose is the owner's -- but where to is no longer its
+# own to pick, so two screens cannot disagree about where a body came back.
+func server_respawn(player: Player) -> void:
 	if player == null or not is_judge():
 		return
 	var peer := player.get_multiplayer_authority()
@@ -1259,18 +1300,39 @@ func server_respawn(player: Player, tell_owner := true) -> void:
 	player.sync_dead = false
 	_respawn_left.erase(peer)
 	_fall_watch.erase(peer)
+	var at := free_spawn_point(player)
 	# The server asked for this teleport, so it does not warn about it. Long
 	# enough to outlive a round trip: a client's body does not move until the
 	# message telling it to has arrived, and by then two samples are long gone.
 	forgive_move(peer, "", MOVE_FORGIVE_SAMPLES if player.is_local() else 30)
 	if _holds.has(peer):
 		_end_hold(peer, "holder_respawned")
-	if not tell_owner:
-		return
+	print("PLAYGROUND_RESPAWN_AT peer=%s at=(%.2f, %.2f, %.2f)" % [player.name, at.x, at.y, at.z])
 	if player.is_local():
-		player.apply_respawn()
+		player.apply_respawn(at)
 	else:
-		apply_respawn.rpc_id(peer)
+		apply_respawn.rpc_id(peer, at)
+
+
+# DOC: an empty spawn point, not necessarily the body's own: two bodies arriving
+# on the same mark shove each other off it. Judged from the server's copy of
+# the world, which is the one copy that sees everyone.
+func free_spawn_point(player: Player) -> Vector3:
+	var points := Net.spawn_points
+	if points.is_empty():
+		return player.spawn_point
+	for point in points:
+		var taken := false
+		for node in Net.spawn_root.get_children():
+			var body := node as Node3D
+			if body == null or body == player:
+				continue
+			if Vector2(body.global_position.x - point.x, body.global_position.z - point.z).length() < 1.2:
+				taken = true
+				break
+		if not taken:
+			return point
+	return points[0]
 
 
 # Server -> owner. The body's own machine puts it in the state and stops it,
@@ -1285,19 +1347,21 @@ func enter_dead() -> void:
 
 
 @rpc("any_peer", "call_remote", "reliable")
-func apply_respawn() -> void:
+func apply_respawn(at: Vector3) -> void:
 	if not result_is_server_sent("apply_respawn", multiplayer.get_remote_sender_id()):
 		return
 	var actor := actor_for(multiplayer.get_unique_id())
 	if actor != null and actor.is_local():
-		Net.queue_physics(actor.apply_respawn)
+		Net.queue_physics(func() -> void: actor.apply_respawn(at))
 
 
 # R, and the way back from a fall. The owner asked for this one: an alive body
 # has already moved itself, so only the vitals need clearing, while a dead one
 # is waiting to be told -- leaving DEAD is this ruling and nothing else.
 func _rule_respawn(actor: Player) -> Variant:
-	server_respawn(actor, actor.sync_dead)
+	# N-4: alive or dead, the mark is the server's to choose, so the owner is
+	# always told where. It used to move itself first when alive.
+	server_respawn(actor)
 	return true
 
 

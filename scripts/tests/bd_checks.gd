@@ -349,7 +349,7 @@ func client_forge_vitals() -> void:
 		_local.hp = 1.0
 		_local.sync_dead = true)
 	judge.enter_dead.rpc_id(1)
-	judge.apply_respawn.rpc_id(1)
+	judge.apply_respawn.rpc_id(1, Vector3.ZERO)
 	await get_tree().create_timer(0.8).timeout
 	# The local write is not replicated and the next vitals packet overwrites
 	# it: the client's own copy comes back to the server's number.
