@@ -179,6 +179,14 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			throw_line_power_base = value
+# The straight throw's own ratio cap. Its ratio is strength over the rock's
+# weight -- a bare human against a 5 kg rock is 12 -- so the shared
+# ratio_mult_max (2.0) sent a hand-height flat throw over a 1.8 m head at 3 m.
+# Same formula, same min; only the top of the clamp is this.
+@export var throw_line_mult_max: float = 1.3:
+	set(value):
+		if Tuning.may_write(self):
+			throw_line_mult_max = value
 # 6-chapter stamina costs.
 @export var stamina_hold_per_sec: float = 5.0:
 	set(value):

@@ -1079,7 +1079,7 @@ func _rule_throw(actor: Player, payload: Dictionary) -> Variant:
 		velocity = direction.normalized() * (Tuning.server.throw_line_power_base
 			* maxf(charge, 0.2)
 			* Tuning.ratio_mult(actor.stats.strength / maxf(weight_of(target), 0.1),
-				Tuning.server.ratio_k_jump))
+				Tuning.server.ratio_k_jump, Tuning.server.throw_line_mult_max))
 	else:
 		var landing: Variant = payload.get("target")
 		var aim: Vector3 = landing if landing is Vector3 else actor.global_position + direction * 3.0

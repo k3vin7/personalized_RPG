@@ -61,10 +61,13 @@ func may_write(resource: Resource) -> bool:
 # Log so that a bigger ratio keeps helping but with falling returns, and
 # divided by the reference so that the body the _base values were measured on
 # -- v4's human at training 0, bare, at 0.75 -- lands exactly on 1.0.
-func ratio_mult(ratio: float, k: float) -> float:
+# mult_max below 0 means the shared server.ratio_mult_max; a caller with its
+# own cap (the straight throw) passes it here. The formula is the same.
+func ratio_mult(ratio: float, k: float, mult_max: float = -1.0) -> float:
 	var reference: float = maxf(server.ratio_ref, 0.0001)
+	var top: float = server.ratio_mult_max if mult_max < 0.0 else mult_max
 	return clampf(1.0 + k * log(maxf(ratio, 0.0001) / reference),
-		server.ratio_mult_min, server.ratio_mult_max)
+		server.ratio_mult_min, top)
 
 
 func notify_changed() -> void:
