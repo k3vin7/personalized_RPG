@@ -72,7 +72,7 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			ratio_mult_min = value
-@export var ratio_mult_max: float = 1.3:
+@export var ratio_mult_max: float = 2.0:
 	set(value):
 		if Tuning.may_write(self):
 			ratio_mult_max = value
