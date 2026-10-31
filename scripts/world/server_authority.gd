@@ -214,13 +214,20 @@ const STRIKE_REACH_BEYOND := 0.9
 # M-4: a strike's height band, off the body it is judged against: its own half
 # height and the reach of a limb beyond it. Non-player bodies take the human's.
 func strike_band(body: Node3D) -> float:
-	return (body as Player).half_height() + STRIKE_REACH_BEYOND if body is Player \
-		else Player.BODY_HALF_HEIGHT + STRIKE_REACH_BEYOND
+	if body is Player:
+		return (body as Player).half_height() + STRIKE_REACH_BEYOND
+	if body is Dummy:
+		return Dummy.HALF_HEIGHT + STRIKE_REACH_BEYOND
+	return Player.BODY_HALF_HEIGHT + STRIKE_REACH_BEYOND
 
 
 # M-4: the radius of whatever a rectangle is being applied to.
 func body_radius(body: Node3D) -> float:
-	return (body as Player).radius() if body is Player else Player.BODY_RADIUS
+	if body is Player:
+		return (body as Player).radius()
+	if body is Dummy:
+		return Dummy.RADIUS
+	return Player.BODY_RADIUS
 # N-3: when the held people's positions were last pushed. They ride the hand on
 # the rock's interval, from here, like a rock.
 var _held_push_left := 0.0
@@ -396,6 +403,8 @@ func _end_hold(holder_peer: int, reason: String, away_hint := Vector3.ZERO) -> N
 	# their machine. Both are reliable and ordered behind this.
 	if target is Player:
 		_release_person(actor_for(holder_peer), target as Player, away_hint)
+	elif target is Dummy:
+		_release_dummy(actor_for(holder_peer), target as Dummy, away_hint, reason == "thrown")
 	release_reasons[reason] = int(release_reasons.get(reason, 0)) + 1
 	print("PLAYGROUND_HOLD_ENDED holder=%d target=%s reason=%s" % [
 		holder_peer, target.name if target != null else "gone", reason])
@@ -2193,6 +2202,34 @@ func _release_person(holder: Player, person: Player, away_hint := Vector3.ZERO) 
 	else:
 		person.clear_held_position()
 		release_at.rpc_id(peer, at)
+
+
+# The scarecrow's release: the person's geometry (above) on a body the server
+# owns outright. Found in play: thrown at a cursor within a metre -- or at
+# nothing, which the arc solver answers with "straight up" -- it came down on
+# the thrower's head and stood there until its return timer walked it off
+# (measured: 0.00 m along, 1.80 m up, on_floor, for two seconds). A throw lets
+# go beside the thrower at the hand's height, so the arc solved from the hand
+# stays true and whatever comes straight down lands beside the body. A put-down
+# sets it on the ground beside the holder, as a rock or a person is.
+func _release_dummy(holder: Player, dummy: Dummy, away_hint: Vector3, thrown: bool) -> void:
+	if holder == null:
+		return
+	var away := away_hint
+	away.y = 0.0
+	if away.length_squared() < 0.0001:
+		away = -holder.global_transform.basis.z
+		away.y = 0.0
+	if away.length_squared() < 0.0001:
+		away = Vector3.FORWARD
+	away = away.normalized()
+	var apart := (holder.radius() + Dummy.RADIUS) * 1.1
+	var y := holder.hand_position().y if thrown \
+		else holder.global_position.y - holder.half_height() + Dummy.HALF_HEIGHT
+	var at := Vector3(holder.global_position.x + away.x * apart, y,
+		holder.global_position.z + away.z * apart)
+	dummy.release_to(at)
+	print("PLAYGROUND_RELEASE_AT peer=%s at=(%.2f, %.2f, %.2f)" % [dummy.name, at.x, at.y, at.z])
 
 
 # Server -> owner. Reliable, and sent before the row goes, so by the time the

@@ -15,6 +15,10 @@ const MAX_HP := 60.0
 # for the lift limit: two expressions in two files that happened to agree, which
 # is the shape CLAUDE.md's eighth note warns about. The lift limit reads this.
 const WEIGHT := 12.0
+# The capsule, in one place: the judge's height band and radius for a scarecrow
+# and the spot it is released to both read these.
+const RADIUS := 0.4
+const HALF_HEIGHT := 0.9
 # 20 state packets a second. A dummy built in code has no synchronizer of its
 # own, so the host pushes its state: without this a client saw a dummy that
 # never moved however hard it was shoved.
@@ -70,15 +74,15 @@ func _ready() -> void:
 
 	var collision := CollisionShape3D.new()
 	var shape := CapsuleShape3D.new()
-	shape.radius = 0.4
-	shape.height = 1.8
+	shape.radius = RADIUS
+	shape.height = HALF_HEIGHT * 2.0
 	collision.shape = shape
 	add_child(collision)
 
 	var mesh_instance := MeshInstance3D.new()
 	var capsule := CapsuleMesh.new()
-	capsule.radius = 0.4
-	capsule.height = 1.8
+	capsule.radius = RADIUS
+	capsule.height = HALF_HEIGHT * 2.0
 	mesh_instance.mesh = capsule
 	_material = StandardMaterial3D.new()
 	_material.albedo_color = Color("c9b48a")
@@ -120,6 +124,18 @@ func set_hold_display(peer: int) -> void:
 	if is_multiplayer_authority() and peer == 0:
 		# Put down: it settles where it was left rather than snapping home.
 		_settle_left = RETURN_DELAY
+
+
+# Server only: where the hand lets go of it. Written by the judge when the
+# hold ends, the way a person is put beside their holder (N-5); left at the
+# hand it stood on the holder's head, because a capsule's foot at the hand's
+# height is exactly the top of the holder's capsule.
+func release_to(at: Vector3) -> void:
+	if not is_multiplayer_authority():
+		return
+	global_position = at
+	velocity = Vector3.ZERO
+	sync_position = at
 
 
 func _physics_process(delta: float) -> void:
