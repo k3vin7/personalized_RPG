@@ -41,3 +41,22 @@ extends Resource
 # M-1: the eight slot keys, as physical keycodes, in slot order. Defaults
 # Q W E R A S D F; any key can be put on any slot from the debug panel.
 @export var slot_keys: PackedInt32Array = PackedInt32Array([81, 87, 69, 82, 65, 83, 68, 70])
+
+@export_group("Hit feedback")
+# C-0: the hit feedback set (결정 #79). All drawn, none judged: a peer that
+# turns these to zero sees nothing different happen to anyone. Six sliders and
+# a master switch, as the work order asks, for the feel session.
+@export var hit_feedback_enabled: bool = true
+# Render frames the swing (and the body hit) hold still on contact. 2 to 4.
+@export var hitstop_frames: int = 3
+# Seconds the body that was hit shows white.
+@export var hit_flash_time: float = 0.12
+# Specks out of the point of contact.
+@export var hit_particle_count: int = 12
+# The sound hook: a stream dropped into HitFeedback's player plays here.
+@export var hit_sound_enabled: bool = true
+# Camera shake, big swings and launches only: metres of jitter, and for how long.
+@export var camera_shake_amp: float = 0.12
+@export var camera_shake_time: float = 0.18
+# How long the damage number floats before it is gone.
+@export var damage_number_time: float = 0.8

@@ -24,6 +24,10 @@ var _landing: MeshInstance3D
 # dash is a line and a ring says nothing about which way it runs.
 var _arrow: MeshInstance3D
 var _clamped := false
+# C-0: a skill's shape on the ground, built by RangeShapes off its SkillDef.
+var _shape: MeshInstance3D
+var _shape_def: SkillDef
+const SHAPE_COLOUR := Color(1.0, 0.82, 0.35, 0.45)
 
 
 # How much of the arrow is the head, and how wide the two parts are.
@@ -36,6 +40,8 @@ func _ready() -> void:
 	_reach = _ring(0.06)
 	_landing = _ring(0.1)
 	_arrow = _flat_mesh()
+	_shape = RangeShapes.make_mesh(SHAPE_COLOUR, RENDER_LAYER)
+	add_child(_shape)
 	hide_all()
 
 
@@ -84,6 +90,9 @@ func hide_all() -> void:
 		_landing.visible = false
 	if _arrow != null:
 		_arrow.visible = false
+	if _shape != null:
+		_shape.visible = false
+	_shape_def = null
 	_clamped = false
 
 
@@ -93,6 +102,8 @@ func show_aim(from: Vector3, reach: float, landing: Vector3, clamped: bool) -> v
 	if _reach == null or _landing == null:
 		return
 	_arrow.visible = false
+	_shape.visible = false
+	_shape_def = null
 	_clamped = clamped
 	# A ring sitting exactly on the floor z-fights with it.
 	_reach.global_position = Vector3(from.x, from.y - foot_drop + 0.03, from.z)
@@ -113,6 +124,8 @@ func show_arrow(from: Vector3, to: Vector3, clamped: bool) -> void:
 		return
 	_reach.visible = false
 	_landing.visible = false
+	_shape.visible = false
+	_shape_def = null
 	_clamped = clamped
 	var flat := Vector3(to.x - from.x, 0.0, to.z - from.z)
 	var length := flat.length()
@@ -144,8 +157,44 @@ func show_arrow(from: Vector3, to: Vector3, clamped: bool) -> void:
 	_arrow.visible = true
 
 
+# C-0: a skill's range as the shape its SkillDef names, on the ground at the
+# feet, turned to the heading. Rebuilt every frame while the key is armed, the
+# way the rings follow the cursor. A def with no shape shows nothing.
+func show_skill_shape(from: Vector3, heading: Vector3, def: SkillDef) -> void:
+	if _shape == null:
+		return
+	_reach.visible = false
+	_landing.visible = false
+	_arrow.visible = false
+	_clamped = false
+	if def == null or not def.shows_range():
+		_shape.visible = false
+		_shape_def = null
+		return
+	RangeShapes.write(_shape.mesh as ImmediateMesh, def, 1.0)
+	_shape.global_position = Vector3(from.x, from.y - foot_drop + 0.04, from.z)
+	_shape.global_rotation = Vector3(0.0, RangeShapes.yaw_for(heading), 0.0)
+	_shape.visible = true
+	_shape_def = def
+
+
+# What the shape is showing, for a check: the def's shape kind, or NONE.
+func shape_kind() -> int:
+	if _shape == null or not _shape.visible or _shape_def == null:
+		return SkillDef.RangeShape.NONE
+	return _shape_def.range_shape
+
+
+func shape_extent() -> float:
+	if _shape == null or not _shape.visible:
+		return 0.0
+	return RangeShapes.extent_of(_shape_def)
+
+
 func is_showing() -> bool:
 	if _landing != null and _landing.visible:
+		return true
+	if _shape != null and _shape.visible:
 		return true
 	return _arrow != null and _arrow.visible
 

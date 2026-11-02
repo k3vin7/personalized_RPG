@@ -275,12 +275,10 @@ func _refresh_indicator() -> void:
 			bool(dash["clamped"]))
 		return
 	if _armed == Armed.SKILL:
-		# M-1: the reach as a ring, and where along the heading it ends.
+		# C-0: the skill's own shape on the ground, turned to the heading. It
+		# was a ring of the reach until now; the shape is the SkillDef's.
 		var def := player.skills.slot_def(player.skills.armed_slot()) if player.skills != null else null
-		var reach := def.value("reach") if def != null else 1.0
-		var heading := shove_direction()
-		_indicator.show_aim(player.global_position, reach,
-			player.global_position + heading * reach, false)
+		_indicator.show_skill_shape(player.global_position, shove_direction(), def)
 		return
 	var plan := jump_plan(cursor_jump_target())
 	_indicator.show_aim(player.global_position, player.leap_max_range(),

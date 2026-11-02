@@ -139,10 +139,33 @@ var climb: PlayerClimb
 var grab: PlayerGrab
 # M-1: the eight slots and the cast flow. Local, like the three above.
 var skills: PlayerSkills
-# M-1: the procedural show of a cast -- a lean, and a box that is the strike.
+# M-1: the procedural show of a cast -- a lean, and (C-0) a bar that swings.
 var _skill_lean_deg := 0.0
-var _strike_box: MeshInstance3D
-var _strike_left := 0.0
+# C-0: the swing. A pivot on the body at the skill's strike height; the held
+# weapon hangs off it (so a sword swings), and a limb bar stands in when the
+# hands are bare. The pivot turns through the SkillDef's arc over its
+# duration, and the trail is a ribbon of where the bar has just been. Drawn in
+# _process on every peer -- a remote body replays the phase it is sent.
+var _swing_pivot: Node3D
+var _limb_bar: MeshInstance3D
+var _trail: MeshInstance3D
+var _trail_samples: Array[Dictionary] = []
+var _swing_def: SkillDef
+var _swing_t := 0.0
+var _swing_active := false
+var swings_started := 0
+# C-0: hitstop, in render frames: the swing and the trail hold still.
+var _hitstop_frames_left := 0
+var hitstops_applied := 0
+var last_hitstop_frames := 0
+# C-0: the hit flash, in seconds of white.
+var _flash_left := 0.0
+var flashes_applied := 0
+# C-0: the HP this screen last saw on this body, for the replica's feedback.
+var _seen_hp := -1.0
+const TRAIL_MAX_SAMPLES := 24
+const TRAIL_FADE := 0.18
+const LIMB_BAR_THICKNESS := 0.14
 # M-4: the race the capsule is currently sized for, and the pieces resized.
 var _body_race := -1
 var _body_shape: CapsuleShape3D
@@ -302,6 +325,13 @@ func _ready() -> void:
 		get_tree().current_scene.add_child(panel)
 		panel.setup(self)
 
+		# C-0: the hit feedback set, this screen's. Drawn only.
+		var feedback := HitFeedback.new()
+		feedback.name = "HitFeedback"
+		get_tree().current_scene.add_child(feedback)
+		feedback.setup(self)
+		add_owned_view(feedback)
+
 		# The camera, the bars and the panel hang off the scene rather than off
 		# this body, because the body's parent is the spawner's path and
 		# anything living there is treated as a replicated player. Nothing else
@@ -312,6 +342,7 @@ func _ready() -> void:
 		_owned_views.assign([camera, bars, panel])
 		tree_exiting.connect(_free_views)
 	set_physics_process(true)
+	set_process(true)
 
 
 # Anything the local view builds and nobody else owns. The body owns their
@@ -553,6 +584,7 @@ func _sync_stats() -> void:
 
 func _physics_process(delta: float) -> void:
 	_sync_stats()
+	_watch_hp()
 	if stats != null and stats.race != _body_race:
 		_apply_body_size()
 	# M-5: the weapon follows the server's word on every peer, the owner too.
@@ -586,10 +618,6 @@ func _physics_process(delta: float) -> void:
 			_stun_left -= delta
 			if _stun_left <= 0.0:
 				change_state(State.IDLE)
-		if _strike_left > 0.0:
-			_strike_left -= delta
-			if _strike_left <= 0.0 and _strike_box != null:
-				_strike_box.visible = false
 		if state == State.DOWNED:
 			if _down_left > 0.0:
 				_down_left -= delta
@@ -630,10 +658,6 @@ func _physics_process(delta: float) -> void:
 			remote_phases_seen += 1
 			last_remote_phase_delay = Time.get_unix_time_from_system() - sync_skill_at
 		show_skill_phase(Skills.get_def(sync_skill_id) if sync_skill_id != "" else null, sync_skill_phase)
-	if _strike_left > 0.0:
-		_strike_left -= delta
-		if _strike_left <= 0.0 and _strike_box != null:
-			_strike_box.visible = false
 	if _teleport_blind_left > 0.0:
 		_teleport_blind_left -= delta
 		if _teleport_blind_left <= 0.0:
@@ -848,9 +872,10 @@ func _apply_weapon(kind: int) -> void:
 		return
 	_weapon_node = WeaponKinds.build_mesh(kind)
 	_weapon_node.name = "HeldWeapon"
-	# At the hand, pointing the way the body faces.
+	# At the hand, pointing the way the body faces. C-0: under the swing pivot,
+	# so a weapon skill's arc turns the weapon itself.
 	_weapon_node.position = Vector3(0.34, 0.1, -0.1)
-	_visual.add_child(_weapon_node)
+	_swing_pivot.add_child(_weapon_node)
 
 
 # Square on to the wall, facing into it, with no easing: the body is placed on
@@ -928,6 +953,14 @@ func apply_force_event(event: Dictionary) -> void:
 	var down := float(event.get("down_apply", 0.0))
 	if down > 0.0:
 		_apply_down(down)
+	# C-0: the hit as this body's own screen shows it. The server stamped the
+	# point; the skill names whether it is a big one. Drawn only.
+	if HitFeedback.instance != null:
+		var skill := String(event.get("skill", ""))
+		var def := Skills.get_def(skill) if skill != "" else null
+		var big := launched or (def != null and def.feedback_big)
+		var point: Vector3 = event.get("hit_point", global_position)
+		HitFeedback.instance.on_hit(self, point, float(event.get("damage", 0.0)), big, false, true, skill)
 	print("PLAYGROUND_FORCE peer=%s power=%.2f verdict=%s airborne=%s hp=%.0f vel=(%.2f, %.2f, %.2f) y=%.2f" % [
 		name, change.length(), "launched" if launched else "slid",
 		state == State.AIRBORNE, hp,
@@ -1084,16 +1117,34 @@ func _build_body() -> void:
 	_shadow.material_override = blob_material
 	add_child(_shadow)
 
-	# M-1: the strike, shown as a box pushed out of the body for a moment. Size
-	# and height come off the SkillDef when it is shown; hidden otherwise.
-	_strike_box = MeshInstance3D.new()
-	_strike_box.name = "StrikeBox"
-	_strike_box.mesh = BoxMesh.new()
-	var strike_material := StandardMaterial3D.new()
-	strike_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_strike_box.material_override = strike_material
-	_strike_box.visible = false
-	_visual.add_child(_strike_box)
+	# C-0: the swing pivot and the limb bar on it. The pivot rests at the
+	# body's centre with no turn; a strike puts it at the skill's height and
+	# turns it. The held weapon is parented here too (see _apply_weapon).
+	_swing_pivot = Node3D.new()
+	_swing_pivot.name = "SwingPivot"
+	_visual.add_child(_swing_pivot)
+	_limb_bar = MeshInstance3D.new()
+	_limb_bar.name = "LimbBar"
+	_limb_bar.mesh = BoxMesh.new()
+	var bar_material := StandardMaterial3D.new()
+	bar_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_limb_bar.material_override = bar_material
+	_limb_bar.visible = false
+	_swing_pivot.add_child(_limb_bar)
+	# The trail: a ribbon in world space of where the bar has just been.
+	_trail = MeshInstance3D.new()
+	_trail.name = "SwingTrail"
+	_trail.top_level = true
+	_trail.mesh = ImmediateMesh.new()
+	_trail.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var trail_material := StandardMaterial3D.new()
+	trail_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	trail_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	trail_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	trail_material.vertex_color_use_as_albedo = true
+	_trail.material_override = trail_material
+	_trail.visible = false
+	add_child(_trail)
 
 	_label = Label3D.new()
 	_label.position = Vector3(0.0, 1.45, 0.0)
@@ -1176,8 +1227,6 @@ func show_skill_phase(def: SkillDef, phase: String) -> void:
 		sync_skill_at = Time.get_unix_time_from_system()
 	if def == null or phase == "":
 		_skill_lean_deg = 0.0
-		if _strike_box != null:
-			_strike_box.visible = false
 		_apply_predicted_pose()
 		return
 	match phase:
@@ -1187,14 +1236,188 @@ func show_skill_phase(def: SkillDef, phase: String) -> void:
 			_skill_lean_deg = def.recovery_lean_deg
 		"strike":
 			_skill_lean_deg = def.windup_lean_deg * 0.5
-			if _strike_box != null:
-				var box := _strike_box.mesh as BoxMesh
-				box.size = Vector3(0.25, 0.25, def.strike_extent)
-				_strike_box.position = Vector3(0.0, def.strike_height * body_scale(), -(radius() + def.strike_extent * 0.5))
-				(_strike_box.material_override as StandardMaterial3D).albedo_color = def.colour
-				_strike_box.visible = true
-				_strike_left = PlayerSkills.STRIKE_SHOW
+			_start_swing(def)
 	_apply_predicted_pose()
+
+
+# ------------------------------------------------------------ C-0: the swing
+
+func _start_swing(def: SkillDef) -> void:
+	if _swing_pivot == null or def == null:
+		return
+	_swing_def = def
+	_swing_t = 0.0
+	_swing_active = true
+	swings_started += 1
+	_trail_samples.clear()
+	_swing_pivot.position = Vector3(0.0, def.strike_height * body_scale(), 0.0)
+	# A bare skill shows a limb; a weapon skill turns the weapon in the hand.
+	var bare := def.hands == SkillDef.Hands.BARE or _weapon_node == null
+	if _limb_bar != null:
+		_limb_bar.visible = bare
+		if bare:
+			var box := _limb_bar.mesh as BoxMesh
+			box.size = Vector3(LIMB_BAR_THICKNESS, LIMB_BAR_THICKNESS, def.strike_extent)
+			_limb_bar.position = Vector3(0.0, 0.0, -(radius() + def.strike_extent * 0.5))
+			(_limb_bar.material_override as StandardMaterial3D).albedo_color = def.colour
+	_pose_swing(0.0)
+
+
+func _end_swing() -> void:
+	_swing_active = false
+	_swing_def = null
+	if _limb_bar != null:
+		_limb_bar.visible = false
+	if _swing_pivot != null:
+		_swing_pivot.rotation = Vector3.ZERO
+		_swing_pivot.position = Vector3.ZERO
+
+
+# Where the pivot is at progress p (0..1): turned through the arc, or pushed
+# out along the heading for a thrust.
+func _pose_swing(p: float) -> void:
+	if _swing_def == null or _swing_pivot == null:
+		return
+	var def := _swing_def
+	var eased := 1.0 - (1.0 - p) * (1.0 - p)
+	if absf(def.arc_sweep_deg) < 0.01:
+		# A thrust: out along -Z (the body's forward), and part of the way back.
+		var push := def.strike_extent * 0.6 * sin(eased * PI)
+		_swing_pivot.rotation = Vector3.ZERO
+		_swing_pivot.position = Vector3(0.0, def.strike_height * body_scale(), -push)
+		return
+	var angle := deg_to_rad(def.arc_start_deg + def.arc_sweep_deg * eased)
+	if def.arc_plane == SkillDef.ArcPlane.HORIZONTAL:
+		_swing_pivot.rotation = Vector3(0.0, angle, 0.0)
+	else:
+		_swing_pivot.rotation = Vector3(angle, 0.0, 0.0)
+
+
+# The bar's two ends in the world, for the trail.
+func _bar_ends() -> Array[Vector3]:
+	var extent := _swing_def.strike_extent if _swing_def != null else 0.8
+	var near := radius()
+	var ends: Array[Vector3] = [
+		_swing_pivot.to_global(Vector3(0.0, 0.0, -near)),
+		_swing_pivot.to_global(Vector3(0.0, 0.0, -(near + extent)))]
+	return ends
+
+
+func _process(delta: float) -> void:
+	if _flash_left > 0.0:
+		_flash_left = maxf(0.0, _flash_left - delta)
+		if _flash_left == 0.0:
+			_apply_state_colour()
+	if _hitstop_frames_left > 0:
+		# Held still: the swing does not advance and the trail does not fade.
+		_hitstop_frames_left -= 1
+		return
+	if _swing_active and _swing_def != null:
+		_swing_t += delta
+		var duration := _swing_def.swing_time()
+		var p := clampf(_swing_t / maxf(duration, 0.001), 0.0, 1.0)
+		_pose_swing(p)
+		if _swing_def.trail:
+			var ends := _bar_ends()
+			_trail_samples.append({"base": ends[0], "tip": ends[1], "at": _swing_t})
+			if _trail_samples.size() > TRAIL_MAX_SAMPLES:
+				_trail_samples.remove_at(0)
+		if _swing_t >= duration:
+			_end_swing()
+	elif not _trail_samples.is_empty():
+		# The swing is over; the ribbon fades out behind it.
+		_swing_t += delta
+	_draw_trail()
+
+
+func _draw_trail() -> void:
+	if _trail == null:
+		return
+	var mesh := _trail.mesh as ImmediateMesh
+	mesh.clear_surfaces()
+	if _trail_samples.size() < 2:
+		_trail.visible = false
+		if not _swing_active and not _trail_samples.is_empty():
+			_trail_samples.clear()
+		return
+	var now := _swing_t
+	var colour := _swing_def.colour if _swing_def != null else Color("ffd166")
+	# Gathered first: a surface with no vertices is an error, not an empty one.
+	var quads: Array = []
+	for index in range(_trail_samples.size() - 1):
+		var a: Dictionary = _trail_samples[index]
+		var b: Dictionary = _trail_samples[index + 1]
+		var age := now - float(b["at"])
+		var alpha := clampf(1.0 - age / TRAIL_FADE, 0.0, 1.0) * 0.7
+		if alpha <= 0.0:
+			continue
+		quads.append([Color(colour.r, colour.g, colour.b, alpha), a["base"], a["tip"], b["tip"], b["base"]])
+	var any := not quads.is_empty()
+	if any:
+		mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+		for quad: Array in quads:
+			mesh.surface_set_color(quad[0] as Color)
+			for vertex in [quad[1], quad[2], quad[3], quad[1], quad[3], quad[4]]:
+				mesh.surface_add_vertex(vertex as Vector3)
+		mesh.surface_end()
+	_trail.visible = any
+	if not any and not _swing_active:
+		_trail_samples.clear()
+
+
+# C-0: hold the swing still for this many render frames. The hit feedback set
+# calls this on the body that struck and on the body that was struck.
+func hitstop(frames: int) -> void:
+	if frames <= 0:
+		return
+	_hitstop_frames_left = maxi(_hitstop_frames_left, frames)
+	last_hitstop_frames = frames
+	hitstops_applied += 1
+
+
+# C-0: white for a moment. Drawn only; the colour comes back on its own.
+func flash_hit(seconds: float) -> void:
+	if seconds <= 0.0:
+		return
+	_flash_left = maxf(_flash_left, seconds)
+	flashes_applied += 1
+	_apply_state_colour()
+
+
+func flash_left() -> float:
+	return _flash_left
+
+
+func hitstop_frames_left() -> int:
+	return _hitstop_frames_left
+
+
+func swing_active() -> bool:
+	return _swing_active
+
+
+# 0..1 through the current swing, or -1 when none is showing.
+func swing_progress() -> float:
+	if not _swing_active or _swing_def == null:
+		return -1.0
+	return clampf(_swing_t / maxf(_swing_def.swing_time(), 0.001), 0.0, 1.0)
+
+
+func trail_sample_count() -> int:
+	return _trail_samples.size()
+
+
+# C-0: a replica (and the owner, whose HP is the server's too) losing HP is a
+# hit seen from this screen. The force event, when this screen gets one, says
+# the same thing first; HitFeedback keeps one of the two.
+func _watch_hp() -> void:
+	if _seen_hp < 0.0:
+		_seen_hp = hp
+		return
+	if hp < _seen_hp - 0.01 and HitFeedback.instance != null:
+		var point := global_position + Vector3.UP * (0.3 * body_scale())
+		HitFeedback.instance.on_hit(self, point, _seen_hp - hp, false, false, is_local(), "hp")
+	_seen_hp = hp
 
 
 func _apply_state_colour() -> void:
@@ -1203,6 +1426,9 @@ func _apply_state_colour() -> void:
 		if predicted_action != -1:
 			# Brighter while a press is waiting on its answer.
 			colour = colour.lerp(Color.WHITE, 0.35)
+		if _flash_left > 0.0:
+			# C-0: the hit flash, over everything else for a moment.
+			colour = colour.lerp(Color.WHITE, 0.85)
 		_material.albedo_color = colour
 	if _label != null:
 		_label.text = "%s · %s" % [name, State.keys()[state]]

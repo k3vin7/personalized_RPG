@@ -204,6 +204,8 @@ var strikes_cancelled := 0
 var catches := 0
 var last_catch := {}
 var last_refusal := ""
+# C-0: how many hit notices have gone out to attackers.
+var hits_notified := 0
 # How far a body's centre may be from the strike's height and still be hit: a
 # body's own half height, and the reach of a leg or an arm beyond it. A body
 # that has jumped clear is out of it; one just off the ground is not.
@@ -764,6 +766,8 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 			# adds the push to it, so where in its arc the push lands stops
 			# mattering.
 			event["spring"] = true
+		event["skill"] = "shove"
+		event["hit_y"] = actor.global_position.y + Skills.get_def("shove").strike_height * actor.body_scale()
 		send_force(body, event)
 		hits += 1
 		if launched:
@@ -1273,7 +1277,69 @@ func send_force(target: Node, event: Dictionary) -> void:
 		# Stage G: and who sent it, so the fall that follows knows whether a
 		# party member is the reason this body is in the air.
 		_note_flight_source(target as Player, event)
+	# C-0: where the blow landed, for the pictures on both screens. Stamped
+	# before the event leaves so the target's own feedback and the attacker's
+	# notice below point at the same spot.
+	event["hit_point"] = _hit_point_for(target, event)
 	ForceSystem.send(target, event)
+	_notify_hit(target, event)
+
+
+# C-0: the contact point of a blow: the target's surface on the side the push
+# came from, at the strike's height (or the body's centre line).
+func _hit_point_for(target: Node3D, event: Dictionary) -> Vector3:
+	var direction: Vector3 = event.get("direction", Vector3.ZERO)
+	var flat := Vector3(direction.x, 0.0, direction.z)
+	var point := target.global_position
+	if flat.length_squared() > 0.0001:
+		point -= flat.normalized() * body_radius(target)
+	if event.has("hit_y"):
+		point.y = float(event["hit_y"])
+	return point
+
+
+# C-0: the attacker is told its blow landed. Drawn only -- hitstop, a flash
+# on the target, a number -- and the message carries nothing the attacker's
+# machine may rule with. The host attacker is told in place; a client over
+# the wire. Recoil (a push the body asked for), throws (the rock leaving the
+# hand) and the catch's empty stun carry no hit.
+func _notify_hit(target: Node3D, event: Dictionary) -> void:
+	var kind := int(event.get("kind", -1))
+	if kind == ForceSystem.Kind.RECOIL or kind == ForceSystem.Kind.THROW or kind == ForceSystem.Kind.DEBUG:
+		return
+	var damage := float(event.get("damage", 0.0))
+	if damage <= 0.0 and float(event.get("base_power", 0.0)) <= 0.0:
+		return
+	var source := int(event.get("source_peer", 0))
+	if source <= 0:
+		return
+	var attacker := actor_for(source)
+	if attacker == null or attacker == target:
+		return
+	var big := bool(event.get("knock_launched", false))
+	var skill := String(event.get("skill", ""))
+	if skill != "":
+		var def := Skills.get_def(skill)
+		big = big or (def != null and def.feedback_big)
+	var point: Vector3 = event.get("hit_point", target.global_position)
+	hits_notified += 1
+	if attacker.is_local():
+		if HitFeedback.instance != null:
+			HitFeedback.instance.on_hit(target, point, damage, big, true, target is Player and (target as Player).is_local(), skill)
+	else:
+		hit_feedback.rpc_id(source, target.get_path(), point, damage, big, skill)
+
+
+# Server -> the attacker. A picture and nothing else.
+@rpc("any_peer", "call_remote", "reliable")
+func hit_feedback(target_path: NodePath, point: Vector3, damage: float, big: bool, skill: String) -> void:
+	if not result_is_server_sent("hit_feedback", multiplayer.get_remote_sender_id()):
+		return
+	var target := get_node_or_null(target_path) as Node3D
+	if target == null or HitFeedback.instance == null or not point.is_finite():
+		return
+	var on_me := target is Player and (target as Player).is_local()
+	HitFeedback.instance.on_hit(target, point, maxf(damage, 0.0), big, true, on_me, skill)
 
 
 # 4-chapter damage table. A team mate is any other player while the playground
@@ -2004,6 +2070,7 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3) -> Variant:
 			def.value("damage"),
 			0.0)
 		event["skill"] = def.id
+		event["hit_y"] = strike_y
 		# M-2: the knockdown is asked for here and ruled in _rule_hurt, like
 		# the stun: only a body on the ground goes down; in the air the push is
 		# all it gets. A body already down is put down again, for the full time.

@@ -81,6 +81,15 @@ const FIELD_LABELS := {
 	"strength": "근력",
 	"race_weight": "몸무게",
 	"gear_weight": "장비 무게",
+	# C-0: the hit feedback set (this screen only).
+	"hit_feedback_enabled": "타격 피드백 켜기",
+	"hitstop_frames": "히트스탑 (프레임)",
+	"hit_flash_time": "피격 플래시 (초)",
+	"hit_particle_count": "타격 파티클 개수",
+	"hit_sound_enabled": "사운드 훅 켜기",
+	"camera_shake_amp": "카메라 흔들림 세기 (m)",
+	"camera_shake_time": "카메라 흔들림 시간 (초)",
+	"damage_number_time": "피해 숫자 표시 시간 (초)",
 }
 
 var player: Player
@@ -348,13 +357,19 @@ func _build_ui() -> void:
 		var def := Skills.get_def(id)
 		if def == null:
 			continue
-		for field in ["windup_lean_deg", "recovery_lean_deg", "strike_extent", "strike_height"]:
+		# C-0: the swing's arc joins the lean and the bar.
+		for field in ["windup_lean_deg", "recovery_lean_deg", "strike_extent", "strike_height",
+				"arc_start_deg", "arc_sweep_deg", "arc_duration"]:
 			var current := float(def.get(field))
 			var limits := numeric_limits(field, current)
 			if field == "strike_height":
 				limits = Vector2(-1.0, 1.5)
+			elif field.begins_with("arc_") and field.ends_with("_deg"):
+				limits = Vector2(-180.0, 180.0)
 			elif field.ends_with("_deg"):
 				limits = Vector2(-45.0, 45.0)
+			elif field == "arc_duration":
+				limits = Vector2(0.0, 1.0)
 			visuals.add_child(_slider(
 				"%s.%s" % [id, field],
 				current,

@@ -13,6 +13,13 @@ var target: Node3D
 var camera: Camera3D
 
 var _offset := Vector3.ZERO
+# C-0: the shake. The follow is kept apart from the jitter so the lerp never
+# chases its own shake: _smoothed is where the camera would be without it.
+var _smoothed := Vector3.INF
+var _shake_left := 0.0
+var _shake_time := 0.0
+var _shake_amp := 0.0
+var shakes_started := 0
 
 
 func _ready() -> void:
@@ -56,7 +63,10 @@ func _process(delta: float) -> void:
 	# recentres when it stops, which is the follow lag showing itself honestly
 	# rather than as a change of angle.
 	var wanted := target.global_position + _offset
-	global_position = global_position.lerp(wanted, 1.0 - exp(-follow_smoothing * delta))
+	if _smoothed == Vector3.INF:
+		_smoothed = global_position
+	_smoothed = _smoothed.lerp(wanted, 1.0 - exp(-follow_smoothing * delta))
+	global_position = _smoothed + _shake_offset(delta)
 
 
 # Horizontal, normalised. Used by wall face classification.
@@ -66,3 +76,27 @@ func get_camera_flat_forward() -> Vector3:
 	if forward.length_squared() < 0.0001:
 		return Vector3.FORWARD
 	return forward.normalized()
+
+
+# C-0: a decaying random jitter on top of the follow, for a big hit. Local
+# only, drawn only; the view's angle never changes, which is the rule the
+# quarter view keeps.
+func shake(amplitude: float, seconds: float) -> void:
+	if amplitude <= 0.0 or seconds <= 0.0:
+		return
+	_shake_amp = amplitude
+	_shake_time = seconds
+	_shake_left = seconds
+	shakes_started += 1
+
+
+func is_shaking() -> bool:
+	return _shake_left > 0.0
+
+
+func _shake_offset(delta: float) -> Vector3:
+	if _shake_left <= 0.0:
+		return Vector3.ZERO
+	_shake_left = maxf(0.0, _shake_left - delta)
+	var strength := _shake_amp * (_shake_left / maxf(_shake_time, 0.001))
+	return Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), 0.0) * strength

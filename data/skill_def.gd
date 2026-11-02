@@ -33,6 +33,32 @@ enum InputMode {
 	HOLD_RELEASE,
 }
 
+# C-0: the shape drawn on the ground when the key arms this skill (smart key
+# off), and the shape a scarecrow's telegraph fills in during its windup. The
+# ruling does not read this; it is a picture of the numbers above. NONE is
+# "no range to show" -- the parry, the shield raise, and anything held.
+enum RangeShape {
+	NONE,
+	# A bar out of the body: reach long, width across, with a pointed end.
+	# The thrust and the shield throw.
+	LINE,
+	# A plain rectangle: reach deep, width across. The shove, the shield bash,
+	# the overhead cut (narrow), the punch and the kick.
+	RECT,
+	# A horizontal sector of radius reach, shape_angle_deg wide. The side cut.
+	FAN,
+	# A disc of circle_radius, centred reach ahead. The shield slam.
+	CIRCLE,
+}
+
+# C-0: which way the strike bar sweeps. Horizontal is a yaw sweep (a side
+# cut); vertical is a pitch sweep (an overhead cut, a kick). A sweep of zero
+# is a thrust along the heading either way.
+enum ArcPlane {
+	HORIZONTAL,
+	VERTICAL,
+}
+
 @export var id: String = ""
 @export var label: String = ""
 @export var hands: Hands = Hands.BARE
@@ -74,13 +100,45 @@ enum InputMode {
 
 @export_group("Display")
 # The procedural show: how far the capsule leans into the windup and back out
-# of the recovery, and the box that is the strike -- how far it reaches and
+# of the recovery, and the bar that is the strike -- how far it reaches and
 # how high it sits. No rigs, no clips.
 @export var windup_lean_deg: float = 14.0
 @export var recovery_lean_deg: float = -6.0
 @export var strike_extent: float = 0.8
 @export var strike_height: float = 0.3
 @export var colour: Color = Color("ffd166")
+
+@export_group("Range display")
+# C-0. What the key shows before the left button casts. reach and width above
+# size a LINE or a RECT; the FAN takes shape_angle_deg; the CIRCLE takes
+# circle_radius.
+@export var range_shape: RangeShape = RangeShape.RECT
+@export var shape_angle_deg: float = 120.0
+@export var circle_radius: float = 1.0
+# A scarecrow (and, in C-2, a monster) casting this draws the same shape in
+# red on the ground and fills it over the windup, so the impact can be read
+# off the ground. A player's own casts show nothing to others.
+@export var telegraph: bool = false
+
+@export_group("Swing")
+# C-0: the strike bar's arc. The pivot sits at strike_height on the body and
+# the bar (the held weapon, or a limb for a bare skill) hangs strike_extent off
+# it; over arc_duration seconds the pivot turns from arc_start_deg through
+# arc_sweep_deg in arc_plane, leaving a trail. Horizontal: positive is to the
+# body's left. Vertical: positive is up. A sweep of zero is a thrust, which
+# pushes the bar out along the heading instead of turning it. arc_duration 0
+# means PlayerSkills.STRIKE_SHOW. The sword's four get their numbers in C-1b;
+# the bare four and the scarecrow's slam carry theirs here.
+@export var arc_plane: ArcPlane = ArcPlane.HORIZONTAL
+@export var arc_start_deg: float = 0.0
+@export var arc_sweep_deg: float = 0.0
+@export var arc_duration: float = 0.0
+@export var trail: bool = true
+
+@export_group("Feedback")
+# C-0: a hit by this skill shakes the camera as well as the rest of the hit
+# feedback set. Big swings only; the tolerance verdict (launched) also shakes.
+@export var feedback_big: bool = false
 
 # SkillDef field -> Tuning.server suffix. The table's names predate this file.
 const TUNING_SUFFIX := {
@@ -127,3 +185,13 @@ func value(field: String) -> float:
 
 func server_intent() -> int:
 	return intent if intent >= 0 else ServerAuthority.Intent.SKILL
+
+
+# C-0: how long the strike bar's swing is shown.
+func swing_time() -> float:
+	return arc_duration if arc_duration > 0.0 else PlayerSkills.STRIKE_SHOW
+
+
+# C-0: whether the key shows a shape on the ground before the cast.
+func shows_range() -> bool:
+	return range_shape != RangeShape.NONE and input_mode == InputMode.PRESS_CAST

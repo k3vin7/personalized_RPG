@@ -63,6 +63,21 @@ var _attack_timer := 0.0
 var _phase_left := 0.0
 var attack_phase := ""
 var attacks_made := 0
+# C-0: the telegraph. The slam's shape in red on the ground in front, filled
+# in over the windup, on every screen: the phase travels in push_state and
+# each peer runs the fill off its own clock from the moment it saw the phase.
+# Drawn only; the impact is the judge's booking.
+var _telegraph_outline: MeshInstance3D
+var _telegraph_fill: MeshInstance3D
+var _telegraph_started := 0.0
+var _telegraph_fill_value := 0.0
+var telegraphs_shown := 0
+const TELEGRAPH_LAYER := 1 << 18
+const TELEGRAPH_OUTLINE_COLOUR := Color(1.0, 0.2, 0.15, 0.3)
+const TELEGRAPH_FILL_COLOUR := Color(1.0, 0.25, 0.2, 0.65)
+# C-0: the hit flash.
+var _flash_left := 0.0
+var flashes_applied := 0
 
 
 func setup(at_position: Vector3, dummy_name: String, of_race := NO_RACE) -> void:
@@ -128,8 +143,19 @@ func _ready() -> void:
 	_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_label.no_depth_test = true
 	add_child(_label)
+	_telegraph_outline = RangeShapes.make_mesh(TELEGRAPH_OUTLINE_COLOUR, TELEGRAPH_LAYER)
+	_telegraph_outline.name = "TelegraphOutline"
+	_telegraph_outline.top_level = true
+	_telegraph_outline.visible = false
+	add_child(_telegraph_outline)
+	_telegraph_fill = RangeShapes.make_mesh(TELEGRAPH_FILL_COLOUR, TELEGRAPH_LAYER)
+	_telegraph_fill.name = "TelegraphFill"
+	_telegraph_fill.top_level = true
+	_telegraph_fill.visible = false
+	add_child(_telegraph_fill)
 	_refresh()
 	set_physics_process(true)
+	set_process(true)
 
 
 # The single entry point's landing place. A dummy is not an ally, so a push from
@@ -158,6 +184,12 @@ func apply_force_event(event: Dictionary) -> void:
 	hp = maxf(0.0, hp - float(event.get("damage", 0.0)))
 	_settle_left = RETURN_DELAY
 	_refresh()
+	# C-0: the hit, on the screen that simulates this scarecrow (the host's).
+	if HitFeedback.instance != null:
+		var skill := String(event.get("skill", ""))
+		var def := Skills.get_def(skill) if skill != "" else null
+		var big := launched or (def != null and def.feedback_big)
+		HitFeedback.instance.on_hit(self, event.get("hit_point", global_position), float(event.get("damage", 0.0)), big, false, false, skill)
 	print("PLAYGROUND_DUMMY_HIT name=%s hp=%.0f push=%.2f launched=%s tolerance=%.2f" % [
 		name, hp, velocity.length(), launched, float(event.get("knock_tolerance", 0.0))])
 
@@ -313,8 +345,69 @@ func apply_catch_stun(seconds: float) -> void:
 
 
 func _set_attack_phase(phase: String) -> void:
+	var was := attack_phase
 	attack_phase = phase
+	if phase == "windup" and was != "windup":
+		_telegraph_started = float(Time.get_ticks_msec()) / 1000.0
+		_telegraph_fill_value = 0.0
+		telegraphs_shown += 1
+	# Drawn now, not at the next render frame: the phase changes in a physics
+	# step and the picture has to be there for anyone reading it in that step.
+	_draw_telegraph()
 	_refresh()
+
+
+# C-0: the telegraph and the flash, every render frame on every peer.
+func _process(delta: float) -> void:
+	if _flash_left > 0.0:
+		_flash_left = maxf(0.0, _flash_left - delta)
+		if _flash_left == 0.0:
+			_refresh()
+	_draw_telegraph()
+
+
+func _draw_telegraph() -> void:
+	if _telegraph_outline == null or _telegraph_fill == null:
+		return
+	var def := Skills.get_def("dummy_slam")
+	if attack_phase != "windup" or def == null or not def.telegraph:
+		_telegraph_outline.visible = false
+		_telegraph_fill.visible = false
+		return
+	var elapsed := float(Time.get_ticks_msec()) / 1000.0 - _telegraph_started
+	_telegraph_fill_value = clampf(elapsed / maxf(def.impact_time(), 0.001), 0.0, 1.0)
+	var at := Vector3(global_position.x, global_position.y - HALF_HEIGHT + 0.04, global_position.z)
+	var yaw := RangeShapes.yaw_for(attack_direction())
+	RangeShapes.write(_telegraph_outline.mesh as ImmediateMesh, def, 1.0)
+	_telegraph_outline.global_position = at
+	_telegraph_outline.global_rotation = Vector3(0.0, yaw, 0.0)
+	_telegraph_outline.visible = true
+	RangeShapes.write(_telegraph_fill.mesh as ImmediateMesh, def, _telegraph_fill_value)
+	_telegraph_fill.global_position = at + Vector3.UP * 0.01
+	_telegraph_fill.global_rotation = Vector3(0.0, yaw, 0.0)
+	_telegraph_fill.visible = _telegraph_fill_value > 0.0
+
+
+func telegraph_visible() -> bool:
+	return _telegraph_outline != null and _telegraph_outline.visible
+
+
+# 0..1 of the windup, as this screen draws it.
+func telegraph_fill() -> float:
+	return _telegraph_fill_value if telegraph_visible() else 0.0
+
+
+# C-0: white for a moment. Drawn only.
+func flash_hit(seconds: float) -> void:
+	if seconds <= 0.0:
+		return
+	_flash_left = maxf(_flash_left, seconds)
+	flashes_applied += 1
+	_refresh()
+
+
+func flash_left() -> float:
+	return _flash_left
 
 
 # Which way the strike goes: the way the scarecrow faces.
@@ -327,6 +420,9 @@ func attack_direction() -> Vector3:
 @rpc("authority", "call_remote", "unreliable_ordered")
 func push_state(at_position: Vector3, at_hp: float, at_phase := "") -> void:
 	sync_position = at_position
+	# C-0: HP going down on a replica is a hit seen from this screen.
+	if _has_state and at_hp < sync_hp - 0.01 and HitFeedback.instance != null:
+		HitFeedback.instance.on_hit(self, at_position + Vector3.UP * 0.3, sync_hp - at_hp, false, false, false, "hp")
 	sync_hp = at_hp
 	if at_phase != attack_phase:
 		_set_attack_phase(at_phase)
@@ -374,4 +470,6 @@ func _refresh() -> void:
 				colour = colour.darkened(0.35)
 			"stunned":
 				colour = Color("6fa8dc")
+		if _flash_left > 0.0:
+			colour = colour.lerp(Color.WHITE, 0.85)
 		_material.albedo_color = colour
