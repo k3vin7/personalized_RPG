@@ -1129,6 +1129,18 @@ func begin_predicted(kind: int) -> void:
 	_apply_state_colour()
 
 
+# A picture that is being held rather than waited on: the throw pose while
+# the key stays down. Started like a press, and kept from timing out for as
+# long as this is called every step.
+func hold_predicted(kind: int) -> void:
+	if not is_local():
+		return
+	if predicted_action != kind:
+		begin_predicted(kind)
+		return
+	_predicted_left = PREDICT_SHOW
+
+
 # The answer arrived, or the server refused, or nothing came at all.
 func clear_predicted() -> void:
 	if predicted_action == -1:

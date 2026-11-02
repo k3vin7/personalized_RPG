@@ -27,8 +27,11 @@ extends Resource
 # The one key: let go before the threshold and it is a put-down, hold past it
 # and it is a throw whose charge runs to throw_charge_max. The charge itself
 # travels in the intent, so these two only map a hold time onto it.
-@export var throw_hold_threshold: float = 1.0
-@export var throw_charge_max: float = 1.5
+# 0.5 / 1.0 (was 1.0 / 1.5, 2026-11-02): half a second decides, the next half
+# second fills the charge, and a key held longer stays at full charge in the
+# throw pose until it is let go.
+@export var throw_hold_threshold: float = 0.5
+@export var throw_charge_max: float = 1.0
 # The dash key, as a physical keycode. Default C; any key from the debug
 # panel, the way the slot keys are. Written into the InputMap's "dash" action
 # by PlayerMovement.apply_dash_binding().

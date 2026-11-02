@@ -115,12 +115,15 @@ func grab() -> bool:
 # The charge runs from the threshold to throw_charge_max and scales how far an
 # arc can reach, or how hard a line is thrown. Moving while charging is fine --
 # nothing here forbids anything.
+# No pose on the press: under the threshold this is a put-down, and a body
+# that winds up for a throw it then does not make looks wrong. The throw pose
+# starts the moment the hold becomes a throw (the physics step below) and is
+# held, past full charge, until the key comes up.
 func press_throw() -> void:
 	if not is_holding():
 		return
 	_charge_left = 0.0
 	_charging = true
-	player.begin_predicted(ServerAuthority.Intent.THROW)
 
 
 func release_throw_key() -> void:
@@ -253,6 +256,10 @@ func _physics_process(delta: float) -> void:
 		_charge_left += delta
 		player.stamina = maxf(0.0, player.stamina
 			- Tuning.server.stamina_charge_per_sec * delta)
+		if _charge_left >= Tuning.values.throw_hold_threshold:
+			# A throw now, whatever the charge ends up: show it, and keep
+			# showing it for as long as the key is down.
+			player.hold_predicted(ServerAuthority.Intent.THROW)
 	elif is_instance_valid(held):
 		player.stamina = maxf(0.0, player.stamina
 			- Tuning.server.stamina_hold_per_sec * delta)
