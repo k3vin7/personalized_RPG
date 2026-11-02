@@ -31,6 +31,9 @@ var _readout: Label
 # M-1: which slot is waiting for its next key, and the buttons that show them.
 var _rebind_slot := -1
 var _slot_buttons: Array[Button] = []
+# The dash key, rebound the same way: the button asks, the next key answers.
+var _rebind_dash := false
+var _dash_button: Button
 var _arc: MeshInstance3D
 var _arc_enabled := true
 
@@ -45,12 +48,23 @@ func setup(owner_player: Player) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _rebind_dash and event is InputEventKey and event.is_pressed() and not event.is_echo():
+		if is_instance_valid(player) and player.movement != null:
+			player.movement.rebind_dash((event as InputEventKey).physical_keycode)
+		_rebind_dash = false
+		_refresh_dash_button()
+		# The key may have come off a slot.
+		_refresh_slot_buttons()
+		get_viewport().set_input_as_handled()
+		return
 	# M-1: the next key pressed goes on the slot that asked for it.
 	if _rebind_slot >= 0 and event is InputEventKey and event.is_pressed() and not event.is_echo():
 		if is_instance_valid(player) and player.skills != null:
 			player.skills.rebind(_rebind_slot, (event as InputEventKey).physical_keycode)
 		_rebind_slot = -1
 		_refresh_slot_buttons()
+		# The key may have come off the dash.
+		_refresh_dash_button()
 		get_viewport().set_input_as_handled()
 		return
 	if event.is_action_pressed("debug_panel"):
@@ -172,6 +186,14 @@ func _build_ui() -> void:
 		_slot_buttons.append(button)
 	_refresh_slot_buttons()
 
+	_dash_button = Button.new()
+	_dash_button.name = "DashKey"
+	_dash_button.pressed.connect(func() -> void:
+		_rebind_dash = true
+		_refresh_dash_button())
+	column.add_child(_dash_button)
+	_refresh_dash_button()
+
 	# M-1: the procedural show of each skill, as this machine draws it.
 	column.add_child(_heading("기술 표시 (로컬 리소스)"))
 	for id in Skills.all_ids():
@@ -195,6 +217,9 @@ func _build_ui() -> void:
 	# What stays on this machine: how a press is read, what is drawn.
 	column.add_child(_heading("로컬 튜닝 (각자)"))
 	for name_text in Tuning.field_names(Tuning.values):
+		# Keycodes are not sliders: the dash key has its button above.
+		if name_text == "dash_key":
+			continue
 		var value: Variant = Tuning.values.get(name_text)
 		if typeof(value) == TYPE_BOOL:
 			column.add_child(_check(name_text, value, func(on: bool) -> void:
@@ -225,6 +250,15 @@ func _refresh_slot_buttons() -> void:
 		else:
 			_slot_buttons[index].text = "슬롯 %d (%s): %s  — 키 변경" % [
 				index + 1, what, player.skills.key_label(index)]
+
+
+func _refresh_dash_button() -> void:
+	if _dash_button == null or not is_instance_valid(player) or player.movement == null:
+		return
+	if _rebind_dash:
+		_dash_button.text = "돌진: 키를 누르세요…"
+	else:
+		_dash_button.text = "돌진: %s  — 키 변경" % player.movement.dash_key_label()
 
 
 func numeric_limits(field: String, value: float) -> Vector2:

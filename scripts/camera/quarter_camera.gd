@@ -27,9 +27,17 @@ func _ready() -> void:
 	# rotation: re-aiming at the character every frame would swing the angle
 	# with the follow lag, so the view would tilt whenever you started moving
 	# and settle back when you stopped.
-	var pitch := deg_to_rad(PITCH_DEGREES)
+	set_pitch(PITCH_DEGREES)
+
+
+# The tilt, in degrees from the ground: smaller lies the view further down.
+# Set once by _ready() with the game's value; a test scene may pick its own.
+func set_pitch(degrees: float) -> void:
+	var pitch := deg_to_rad(degrees)
 	_offset = Vector3(0.0, sin(pitch), cos(pitch)) * DISTANCE
 	rotation = Vector3(-pitch, 0.0, 0.0)
+	if is_instance_valid(target):
+		global_position = target.global_position + _offset
 
 
 func set_target(value: Node3D) -> void:

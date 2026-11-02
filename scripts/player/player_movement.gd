@@ -94,7 +94,56 @@ func setup(owner_player: Player) -> void:
 	_indicator.name = "AimIndicator"
 	player.get_tree().current_scene.add_child(_indicator)
 	player.add_owned_view(_indicator)
+	apply_dash_binding()
 	set_physics_process(true)
+
+
+# ------------------------------------------------------------- the dash key
+
+const DASH_ACTION := "dash"
+
+
+func dash_key_label() -> String:
+	var key := int(Tuning.values.dash_key)
+	return OS.get_keycode_string(key) if key != 0 else PlayerSkills.EMPTY_KEY_LABEL
+
+
+# Writes this peer's dash key into the InputMap. Called at setup and after a
+# rebind; the action itself is in project.godot with the default.
+func apply_dash_binding() -> void:
+	if not InputMap.has_action(DASH_ACTION):
+		InputMap.add_action(DASH_ACTION)
+	InputMap.action_erase_events(DASH_ACTION)
+	# 0 is "a slot took the key": the action stays, with nothing on it.
+	if int(Tuning.values.dash_key) == 0:
+		return
+	var key := InputEventKey.new()
+	key.physical_keycode = int(Tuning.values.dash_key) as Key
+	InputMap.action_add_event(DASH_ACTION, key)
+
+
+# Any key for the dash. Stored in LocalTuning, so it is this peer's alone.
+# One key, one meaning: a slot that held this key is emptied (last wins).
+func rebind_dash(physical_keycode: int) -> void:
+	if physical_keycode == 0:
+		return
+	if player.skills != null:
+		player.skills.release_key(physical_keycode)
+	Tuning.values.dash_key = physical_keycode
+	apply_dash_binding()
+	Tuning.notify_changed()
+	print("PLAYGROUND_DASH_KEY key=%s" % OS.get_keycode_string(physical_keycode))
+
+
+# Empties the dash if it holds this key, so a slot can take it. Returns
+# whether it did. Does not notify: the caller's own write does.
+func release_key(physical_keycode: int) -> bool:
+	if int(Tuning.values.dash_key) != physical_keycode:
+		return false
+	Tuning.values.dash_key = 0
+	apply_dash_binding()
+	print("PLAYGROUND_KEY_RELEASED from=dash key=%s" % OS.get_keycode_string(physical_keycode))
+	return true
 
 
 func cancel_target() -> void:

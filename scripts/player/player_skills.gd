@@ -19,6 +19,8 @@ extends Node
 const SLOT_COUNT := 8
 # The slot's InputMap action, by index.
 const ACTION_PREFIX := "slot_"
+# What the panel shows for a slot (or the dash) whose key was taken away.
+const EMPTY_KEY_LABEL := "—"
 # How long the strike box is shown.
 const STRIKE_SHOW := 0.12
 
@@ -109,7 +111,8 @@ func key_for(index: int) -> int:
 
 
 func key_label(index: int) -> String:
-	return OS.get_keycode_string(key_for(index))
+	var key := key_for(index)
+	return OS.get_keycode_string(key) if key != 0 else EMPTY_KEY_LABEL
 
 
 # Writes this peer's bindings into the InputMap. Called at setup and after a
@@ -120,15 +123,24 @@ func apply_bindings() -> void:
 		if not InputMap.has_action(action):
 			InputMap.add_action(action)
 		InputMap.action_erase_events(action)
+		# 0 is an emptied slot (its key went to the dash or another slot):
+		# the action stays, with nothing on it.
+		if key_for(index) == 0:
+			continue
 		var key := InputEventKey.new()
 		key.physical_keycode = key_for(index) as Key
 		InputMap.action_add_event(action, key)
 
 
 # Any key for any slot. Stored in LocalTuning, so it is this peer's alone.
+# One key, one meaning: the last assignment wins, and whatever held the key
+# before (another slot, or the dash) is emptied rather than left to fire too.
 func rebind(index: int, physical_keycode: int) -> void:
 	if index < 0 or index >= SLOT_COUNT or physical_keycode == 0:
 		return
+	release_key(physical_keycode)
+	if player.movement != null:
+		player.movement.release_key(physical_keycode)
 	var keys: PackedInt32Array = Tuning.values.slot_keys
 	if keys.size() < SLOT_COUNT:
 		keys.resize(SLOT_COUNT)
@@ -137,6 +149,22 @@ func rebind(index: int, physical_keycode: int) -> void:
 	apply_bindings()
 	Tuning.notify_changed()
 	print("PLAYGROUND_SLOT_KEY slot=%d key=%s" % [index + 1, OS.get_keycode_string(physical_keycode)])
+
+
+# Empties every slot that holds this key, so the caller can take it. Returns
+# how many were emptied. Does not notify: the caller's own write does.
+func release_key(physical_keycode: int) -> int:
+	var keys: PackedInt32Array = Tuning.values.slot_keys
+	var released := 0
+	for index in keys.size():
+		if keys[index] == physical_keycode:
+			keys[index] = 0
+			released += 1
+			print("PLAYGROUND_KEY_RELEASED from=slot_%d key=%s" % [index + 1, OS.get_keycode_string(physical_keycode)])
+	if released > 0:
+		Tuning.values.slot_keys = keys
+		apply_bindings()
+	return released
 
 
 func _unhandled_input(event: InputEvent) -> void:

@@ -7,13 +7,18 @@ extends Node3D
 # by the player itself in Player._ready() when it is local.
 #
 # Command line (after "--"): --shot=<png path> saves the viewport and quits,
-# --shot-at=<seconds> says when (default 3.0).
+# --shot-at=<seconds> says when (default 3.0). --dash-key=<physical keycode>
+# rebinds the dash to that key after the spawn and presses the old key, then
+# the new one, so the log shows which of the two still dashes.
 
 const SPAWN_POINT := Vector3(0.0, 2.0, 5.0)
 const AGENT_RADIUS := 0.45
 const CELL_SIZE := 0.25
 # The navigation bake runs in a thread; the readout waits on the real one.
 const SHOT_DELAY_DEFAULT := 3.0
+
+# The game's own tilt by default; override in the inspector to try another.
+@export var camera_pitch_degrees: float = QuarterCamera.PITCH_DEGREES
 
 @onready var _region: NavigationRegion3D = $NavRegion
 @onready var _readout: Label = $Hud/Readout
@@ -24,6 +29,10 @@ var _elapsed := 0.0
 var _shot_path := ""
 var _shot_at := SHOT_DELAY_DEFAULT
 var _shot_done := false
+var _dash_key_check := 0
+var _dash_check_step := 0
+var _dash_check_at := 0.0
+var _dash_old_key := 0
 
 
 func _enter_tree() -> void:
@@ -71,6 +80,8 @@ func _parse_cmdline() -> void:
 			_shot_path = argument.trim_prefix("--shot=")
 		elif argument.begins_with("--shot-at="):
 			_shot_at = float(argument.trim_prefix("--shot-at="))
+		elif argument.begins_with("--dash-key="):
+			_dash_key_check = int(argument.trim_prefix("--dash-key="))
 
 
 # Same recipe as playground.gd: the blockout is a child of the region, so the
@@ -98,6 +109,8 @@ func _on_bake_finished() -> void:
 	var points: Array[Vector3] = [SPAWN_POINT]
 	Net.register_playground(_players_root, points, _spawner)
 	var local := _local_player()
+	if local != null and local.camera != null:
+		local.camera.set_pitch(camera_pitch_degrees)
 	print("BLOCKOUT_TEST_SPAWN local=%s peer=%d has_peer=%s at=%s" % [
 		local != null, multiplayer.get_unique_id(), multiplayer.has_multiplayer_peer(),
 		local.global_position if local != null else Vector3.INF])
@@ -156,9 +169,55 @@ func _process(delta: float) -> void:
 		var p := local.global_position
 		_readout.text = "pos ( %.2f, %.2f, %.2f )  %s\nt = %.1f s   [T] reset" % [
 			p.x, p.y, p.z, Player.State.keys()[local.state], _elapsed]
+	if _dash_key_check != 0 and local != null and local.movement != null:
+		_dash_key_step(local)
 	if _shot_path != "" and not _shot_done and _elapsed >= _shot_at and local != null:
 		_shot_done = true
 		_take_shot(local)
+
+
+# Old key at 1.0 s, read at 1.4 s; new key at 1.6 s, read at 2.0 s. Each press
+# goes through Input, so the InputMap decides what it means. With the smart
+# key off (the default) the dash key arms the dash rather than starting it, so
+# what is read is movement.armed_action(): NONE for the old key, DASH for the
+# new one.
+func _dash_key_step(local: Player) -> void:
+	match _dash_check_step:
+		0:
+			if _elapsed < 1.0:
+				return
+			_dash_old_key = int(Tuning.values.dash_key)
+			local.movement.rebind_dash(_dash_key_check)
+			_press(_dash_old_key)
+			_dash_check_at = _elapsed
+			_dash_check_step = 1
+		1:
+			if _elapsed < _dash_check_at + 0.4:
+				return
+			print("BLOCKOUT_TEST_DASH_KEY old=%s armed=%s" % [
+				OS.get_keycode_string(_dash_old_key),
+				PlayerMovement.Armed.keys()[local.movement.armed_action()]])
+			_press(_dash_key_check)
+			_dash_check_at = _elapsed
+			_dash_check_step = 2
+		2:
+			if _elapsed < _dash_check_at + 0.4:
+				return
+			print("BLOCKOUT_TEST_DASH_KEY new=%s armed=%s" % [
+				OS.get_keycode_string(_dash_key_check),
+				PlayerMovement.Armed.keys()[local.movement.armed_action()]])
+			_dash_check_step = 3
+
+
+func _press(physical_keycode: int) -> void:
+	var down := InputEventKey.new()
+	down.physical_keycode = physical_keycode as Key
+	down.pressed = true
+	Input.parse_input_event(down)
+	var up := InputEventKey.new()
+	up.physical_keycode = physical_keycode as Key
+	up.pressed = false
+	Input.parse_input_event(up)
 
 
 func _take_shot(local: Player) -> void:

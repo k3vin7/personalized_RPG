@@ -29,6 +29,10 @@ extends Resource
 # travels in the intent, so these two only map a hold time onto it.
 @export var throw_hold_threshold: float = 1.0
 @export var throw_charge_max: float = 1.5
+# The dash key, as a physical keycode. Default C; any key from the debug
+# panel, the way the slot keys are. Written into the InputMap's "dash" action
+# by PlayerMovement.apply_dash_binding().
+@export var dash_key: int = 67
 
 @export_group("Slots")
 # M-1: the eight slot keys, as physical keycodes, in slot order. Defaults
