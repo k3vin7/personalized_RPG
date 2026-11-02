@@ -57,6 +57,17 @@ func _ready() -> void:
 		dummy.setup(Vector3(-2.0 + float(index) * 4.0, 1.0, 2.0), "Dummy_%d" % index)
 		add_child(dummy)
 	_sign("허수아비 (E로 밀기)", Vector3(0.0, 2.6, 2.0), Color("ffe9b0"))
+	# Four more, one per race, with the race's weight and strength: a party
+	# member to shove, lift and throw without a second machine. North of the
+	# spawn, between OccluderA and the plaza's north edge, clear of the
+	# harness lanes at x = 0 / 1.5 and the high platform from x = 11.
+	var race_x := 3.5
+	for kind in Races.all_kinds():
+		var scarecrow := Dummy.new()
+		scarecrow.setup(Vector3(race_x, 1.0, 13.5), "Dummy_%s" % Races.Kind.keys()[kind].to_lower(), kind)
+		add_child(scarecrow)
+		race_x += 2.0
+	_sign("종족 허수아비 (종족 무게·근력)", Vector3(6.5, 2.6, 13.5), Color("ffe9b0"))
 
 	# Six rocks now. The light three are the old ones, kept so nothing that
 	# measured against them has to be re-measured; the heavy three are H-1's,
@@ -193,6 +204,12 @@ func _run_smoke() -> void:
 		# Lives through the host-disconnect scene change to verify cleanup.
 		get_tree().root.add_child(checks)
 		checks.run(self)
+		return
+	if Net.auto_only == "RD":
+		var rd := preload("res://scripts/tests/rd_checks.gd").new()
+		rd.name = "RdChecks"
+		get_tree().root.add_child(rd)
+		rd.run(self)
 		return
 	if Net.auto_only == "DK":
 		var dk := preload("res://scripts/tests/dk_checks.gd").new()
@@ -1200,7 +1217,7 @@ func _run_audit(local: Player) -> void:
 	print("PLAYGROUND_AUDIT_SHARED hold_grace judge=%.2f | state_interval=%.2f teleport_step=%.2f teleport_blind=%.2f (SyncRules, one place) | dummy_weight=%.1f" % [
 		ServerAuthority.HOLD_GRACE,
 		SyncRules.STATE_INTERVAL, SyncRules.TELEPORT_STEP, SyncRules.TELEPORT_BLIND,
-		ServerAuthority.DUMMY_WEIGHT])
+		Dummy.WEIGHT])
 
 	# Everything that can be stood on, pushed or thrown, with what it collides
 	# with. A pair that appears in neither mask passes through.

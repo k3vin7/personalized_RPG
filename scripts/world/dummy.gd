@@ -10,11 +10,16 @@ const RETURN_DELAY := 2.0
 const RETURN_SPEED := 2.0
 const MAX_HP := 60.0
 
-# The one place a scarecrow's weight is written. It used to be here as
+# The one place a plain scarecrow's weight is written. It used to be here as
 # MAX_HP * 0.2 for the push and again in ServerAuthority as DUMMY_WEIGHT = 12.0
 # for the lift limit: two expressions in two files that happened to agree, which
-# is the shape CLAUDE.md's eighth note warns about. The lift limit reads this.
+# is the shape CLAUDE.md's eighth note warns about. The lift limit reads
+# weight(), which is this for a plain scarecrow and the race's body weight for
+# a race scarecrow.
 const WEIGHT := 12.0
+# A scarecrow with no race: 12 kg, no strength of its own (so no knockback
+# tolerance and no weight behind its strike). The two in front of the spawn.
+const NO_RACE := -1
 # The capsule, in one place: the judge's height band and radius for a scarecrow
 # and the spot it is released to both read these.
 const RADIUS := 0.4
@@ -28,6 +33,14 @@ const HALF_HEIGHT := 0.9
 
 var home := Vector3.ZERO
 var hp := MAX_HP
+# A race scarecrow stands in for a party member of that race: the race's own
+# weight and strength from the race data (the server's numbers), so the lift
+# limit, the knockback tolerance and the weight behind its slam all read the
+# same table a player of that race would. The same formulas, no exception.
+var race_kind := NO_RACE
+# The last verdict this scarecrow was handed, for the harness to read.
+var last_launched := true
+var last_tolerance := 0.0
 # A read-only copy of a row in ServerAuthority's hold table. A scarecrow joins
 # the table in B-c so that one table covers every kind of body; being picked up
 # is enabled in stage E, where can_grab() stops refusing it.
@@ -52,9 +65,28 @@ var attack_phase := ""
 var attacks_made := 0
 
 
-func setup(at_position: Vector3, dummy_name: String) -> void:
+func setup(at_position: Vector3, dummy_name: String, of_race := NO_RACE) -> void:
 	position = at_position
 	name = dummy_name
+	race_kind = of_race if Races.is_known(of_race) else NO_RACE
+
+
+func has_race() -> bool:
+	return race_kind != NO_RACE
+
+
+# What the lift limit and the push divide by.
+func weight() -> float:
+	return Races.data_for(race_kind).body_weight if has_race() else WEIGHT
+
+
+# What buys the knockback tolerance, and what is behind the slam.
+func strength() -> float:
+	return Races.data_for(race_kind).strength if has_race() else 0.0
+
+
+func race_label() -> String:
+	return Races.label_for(race_kind) if has_race() else "허수아비"
 
 
 func _enter_tree() -> void:
@@ -108,15 +140,26 @@ func apply_force_event(event: Dictionary) -> void:
 	# Stage D: in the air the push is added, not written over. A scarecrow was
 	# the one body that still overwrote, so a second shove while it was flying
 	# replaced the first one instead of bending its arc.
-	var change := ForceSystem.change_for(event, WEIGHT)
+	var change := ForceSystem.change_for(event, weight())
+	# v4's knockback verdict, ruled by the server (the same door a player's
+	# push goes through) and carried in the event. Absent means nobody ruled.
+	var launched := bool(event.get("knock_launched", true))
+	last_launched = launched
+	last_tolerance = float(event.get("knock_tolerance", 0.0))
+	if not launched:
+		# Within tolerance: it holds its ground. Only the horizontal is kept.
+		change.y = 0.0
 	if is_on_floor():
 		velocity = change
+		if launched and velocity.y < Tuning.server.launch_min_up_speed:
+			velocity.y = Tuning.server.launch_min_up_speed
 	else:
 		velocity += change
 	hp = maxf(0.0, hp - float(event.get("damage", 0.0)))
 	_settle_left = RETURN_DELAY
 	_refresh()
-	print("PLAYGROUND_DUMMY_HIT name=%s hp=%.0f push=%.2f" % [name, hp, velocity.length()])
+	print("PLAYGROUND_DUMMY_HIT name=%s hp=%.0f push=%.2f launched=%s tolerance=%.2f" % [
+		name, hp, velocity.length(), launched, float(event.get("knock_tolerance", 0.0))])
 
 
 func set_hold_display(peer: int) -> void:
@@ -180,6 +223,21 @@ func _physics_process(delta: float) -> void:
 		if not is_equal_approx(hp, sync_hp):
 			hp = sync_hp
 			_refresh()
+		return
+
+	if global_position.y < Tuning.server.kill_plane_y:
+		# Shoved off the plaza. Nothing respawns a scarecrow, so it comes
+		# back to its mark the way a rock does, blind for a moment so the
+		# snap does not fling whatever stands there.
+		global_position = home
+		velocity = Vector3.ZERO
+		sync_position = home
+		_blind_left = SyncRules.TELEPORT_BLIND
+		collision_layer = 0
+		hp = MAX_HP
+		_settle_left = 0.0
+		_refresh()
+		print("PLAYGROUND_DUMMY_RETURNED name=%s" % name)
 		return
 
 	if not is_on_floor():
@@ -303,6 +361,8 @@ func _peer_player(peer_id: int) -> Player:
 func _refresh() -> void:
 	if _label != null:
 		_label.text = "%d / %d" % [roundi(hp), roundi(MAX_HP)]
+		if has_race():
+			_label.text = "%s %.0fkg 근력%.0f\n%s" % [race_label(), weight(), strength(), _label.text]
 		if attack_phase == "windup":
 			_label.text += "\n!"
 	if _material != null:

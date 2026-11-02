@@ -100,7 +100,6 @@ const INTENT_RANGE_SLACK := 1.5
 # A scarecrow has no stats resource of its own.
 # Read off the scarecrow rather than written again here: the push and the lift
 # limit have to be weighing the same body.
-const DUMMY_WEIGHT := Dummy.WEIGHT
 
 # How far a reported fall may differ from the one the server watched before the
 # server stops believing it. A client's own peak is the better number -- it is
@@ -1039,7 +1038,7 @@ func weight_of(target: Node3D) -> float:
 	if target is Player:
 		return (target as Player).stats.total_weight()
 	if target is Dummy:
-		return DUMMY_WEIGHT
+		return (target as Dummy).weight()
 	return INF
 
 
@@ -1253,6 +1252,8 @@ func send_force(target: Node, event: Dictionary) -> void:
 	var launched := true
 	if target is Player:
 		launched = _rule_knockback(target as Player, event)
+	elif target is Dummy:
+		launched = _rule_dummy_knockback(target as Dummy, event)
 	var holder_peer := holder_of(target)
 	if holder_peer != 0 and launched:
 		_end_hold(holder_peer, "target_pushed")
@@ -1314,6 +1315,23 @@ func _rule_hurt(target: Player, event: Dictionary) -> void:
 	var stun := float(event.get("stun_time", 0.0))
 	if stun > 0.0 and (not ally or Tuning.server.ally_ground_stun):
 		event["stun_apply"] = stun
+
+
+# The same verdict for a scarecrow, through the same formula: its weight and
+# strength are its race's (a plain one has none, so it is always launched, as
+# it always was). Not in last_knock: that table is keyed by peer.
+func _rule_dummy_knockback(target: Dummy, event: Dictionary) -> bool:
+	var verdict := ForceSystem.judge_knockback(
+		event,
+		target.weight(),
+		target.strength(),
+		race_tolerance_mult(target.race_kind) if target.has_race() else 1.0,
+		target.is_on_floor())
+	event["knock_h_speed"] = float(verdict["h_speed"])
+	event["knock_tolerance"] = float(verdict["tolerance"])
+	event["knock_launched"] = bool(verdict["launched"])
+	event["knock_judged"] = bool(verdict["judged"])
+	return bool(verdict["launched"])
 
 
 # v4's tolerance comparison. The one place it is decided, on the server, with
@@ -1922,11 +1940,15 @@ func _try_catch(actor: Player, target: Node3D) -> bool:
 # shove's, with the SkillDef's reach, width, damage and push. M-2 fills in the
 # heights and the knockdown.
 func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3) -> Variant:
-	# M-7: a scarecrow strikes too. It has no peer, no strength of its own
-	# behind the push, no party and the human's body size.
+	# M-7: a scarecrow strikes too. It has no peer, no party and the human's
+	# body size; behind its push is its race's strength, or none for a plain one.
 	var caster := actor as Player
 	var peer := caster.get_multiplayer_authority() if caster != null else 0
-	var caster_strength := caster.stats.strength if caster != null else 0.0
+	var caster_strength := 0.0
+	if caster != null:
+		caster_strength = caster.stats.strength
+	elif actor is Dummy:
+		caster_strength = (actor as Dummy).strength()
 	var caster_scale := caster.body_scale() if caster != null else 1.0
 	var reach := def.value("reach")
 	var half_width := def.value("width") * 0.5
