@@ -1,0 +1,26 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/world/blockout_test.gd" id="1"]
+[ext_resource type="PackedScene" path="res://maps/blockout_Finimes.tscn" id="2"]
+
+[node name="BlockoutTest" type="Node3D"]
+script = ExtResource("1")
+
+[node name="NavRegion" type="NavigationRegion3D" parent="."]
+
+[node name="Blockout" parent="NavRegion" instance=ExtResource("2")]
+
+[node name="Hud" type="CanvasLayer" parent="."]
+
+[node name="Readout" type="Label" parent="Hud"]
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -420.0
+offset_top = 12.0
+offset_right = -12.0
+offset_bottom = 80.0
+grow_horizontal = 0
+horizontal_alignment = 2
+text = "pos ( 0.00, 0.00, 0.00 )
+t = 0.0 s"
