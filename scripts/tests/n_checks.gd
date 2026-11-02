@@ -237,6 +237,14 @@ func _correction_checks() -> void:
 
 	# The cheat. The client runs at three times its walk by writing its own
 	# position; the server puts it back and the client stops when it is.
+	# The host steps out of the lane first: the honest moves above leave it
+	# at about x = 1 on z = 11, which is the line the sprint runs along, and
+	# a sprint that stops against a body is not a sprint the server corrects.
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = HOME + Vector3(6.0, 0.0, 4.0)
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target())
 	client_park.rpc_id(_client_peer(), CLIENT_HOME)
 	await _wait(0.8)
 	var mate := _judge.actor_for(_client_peer())

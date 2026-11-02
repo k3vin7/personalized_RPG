@@ -6,7 +6,8 @@ extends Node
 # ledge a body can jump onto at three strengths, which is what climb faces have
 # to be placed against.
 
-const RING_CENTRE := Vector3(-8.0, 0.0, 6.0)
+# The playground's own constant, not a copy: the ring moved once already.
+const RING_CENTRE := Playground.CLIMB_RING_CENTRE
 const RING_RADIUS := 6.0
 const HOME := Vector3(0.0, 0.9, 11.0)
 

@@ -15,8 +15,10 @@ extends Node
 # With --shot=<png> on a windowed host, the F1 panel is opened and the screen
 # saved, so the panel's layout can be looked at from a log run.
 
-const HOME := Vector3(6.5, 0.9, 16.5)
+# In the arena (Regions.ARENA): the row's first mark and its z.
+const HOME := Regions.ARENA + Vector3(6.5, 0.9, 16.5)
 const CLIENT_HOME := Vector3(0.0, 0.9, 11.0)
+const ROW_X := 3.5 + Regions.ARENA.x
 const ROW_Z := 13.5
 const STAND_BACK := Vector3(0.0, 0.0, 1.2)
 const TRACK_SECONDS := 2.5
@@ -133,7 +135,7 @@ func run(world: Node3D) -> void:
 
 
 func _standing_checks() -> void:
-	var expected_x := 3.5
+	var expected_x := ROW_X
 	for kind in Races.all_kinds():
 		var dummy := _dummy(kind)
 		var data := Races.data_for(kind)

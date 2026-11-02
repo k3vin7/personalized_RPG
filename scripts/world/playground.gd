@@ -52,22 +52,27 @@ func _ready() -> void:
 	_build_occluders()
 	_build_time_boundary()
 
+	# The arena, east (Regions.ARENA): every scarecrow lives there, on open
+	# ground with nothing else in it, so a shove, a lift or a throw at one is
+	# never a question of what else was standing in the lane.
 	for index in 2:
 		var dummy := Dummy.new()
-		dummy.setup(Vector3(-2.0 + float(index) * 4.0, 1.0, 2.0), "Dummy_%d" % index)
+		dummy.setup(Regions.ARENA + Vector3(-2.0 + float(index) * 4.0, 1.0, 2.0), "Dummy_%d" % index)
 		add_child(dummy)
-	_sign("허수아비 (E로 밀기)", Vector3(0.0, 2.6, 2.0), Color("ffe9b0"))
+	_sign("허수아비 (E로 밀기)", Regions.ARENA + Vector3(0.0, 2.6, 2.0), Color("ffe9b0"))
 	# Four more, one per race, with the race's weight and strength: a party
-	# member to shove, lift and throw without a second machine. North of the
-	# spawn, between OccluderA and the plaza's north edge, clear of the
-	# harness lanes at x = 0 / 1.5 and the high platform from x = 11.
+	# member to shove, lift and throw without a second machine. A row along
+	# the arena's north half.
 	var race_x := 3.5
 	for kind in Races.all_kinds():
 		var scarecrow := Dummy.new()
-		scarecrow.setup(Vector3(race_x, 1.0, 13.5), "Dummy_%s" % Races.Kind.keys()[kind].to_lower(), kind)
+		scarecrow.setup(Regions.ARENA + Vector3(race_x, 1.0, 13.5), "Dummy_%s" % Races.Kind.keys()[kind].to_lower(), kind)
 		add_child(scarecrow)
 		race_x += 2.0
-	_sign("종족 허수아비 (종족 무게·근력)", Vector3(6.5, 2.6, 13.5), Color("ffe9b0"))
+	_sign("종족 허수아비 (종족 무게·근력)", Regions.ARENA + Vector3(6.5, 2.6, 13.5), Color("ffe9b0"))
+	_sign("결투장", Regions.ARENA + Vector3(0.0, 4.0, 8.0), Color("ffd6a0"))
+	_sign("결투장 →", Vector3(18.0, 2.2, 2.0), Color("ffd6a0"))
+	_sign("← 장애물 지형", Vector3(-18.0, 2.2, 14.0), Color("d9f3ff"))
 
 	# Six rocks now. The light three are the old ones, kept so nothing that
 	# measured against them has to be re-measured; the heavy three are H-1's,
@@ -324,6 +329,8 @@ func _run_smoke() -> void:
 		if multiplayer.is_server():
 			if Net.auto_only == "audit":
 				await _run_audit(local)
+			elif Net.auto_only == "view":
+				await _run_view_shot(local)
 			elif Net.auto_only == "8":
 				await _run_stage8_checks(local)
 			elif Net.auto_only == "7":
@@ -377,9 +384,9 @@ func _run_smoke() -> void:
 	# for behaviour, so what is checked is that it leaves the plaza and that
 	# falling resolves itself rather than wedging the body somewhere.
 	_harness_placed(local)
-	local.global_position = Vector3(-15.0, 1.0, 0.0)
+	local.global_position = Regions.OBSTACLE + Vector3(-15.0, 1.0, 0.0)
 	await get_tree().create_timer(0.6).timeout
-	local.movement.set_target(Vector3(-15.0, 0.0, -6.0))
+	local.movement.set_target(Regions.OBSTACLE + Vector3(-15.0, 0.0, -6.0))
 	await get_tree().create_timer(3.0).timeout
 	print("PLAYGROUND_SMOKE_GAP peer=%d walked_off=%s y=%.2f state=%s" % [
 		multiplayer.get_unique_id(), local.global_position.z < -2.0,
@@ -636,7 +643,7 @@ func _run_stage4_checks(local: Player) -> void:
 	# A smooth wall refuses.
 	var smooth := get_node_or_null("NavigationRegion3D/SmoothWall") as CollisionObject3D
 	print("PLAYGROUND_STAGE4_SMOOTH attached=%s" % [
-		local.climb.attach(smooth, Vector3(16.0, 2.0, 2.3), Vector3(0.0, 0.0, 1.0)) if smooth != null else "no_wall"])
+		local.climb.attach(smooth, Regions.OBSTACLE + Vector3(16.0, 2.0, 2.3), Vector3(0.0, 0.0, 1.0)) if smooth != null else "no_wall"])
 
 	# Climbing to the top steps onto it.
 	var top := await _attach_to(local, front_face, Vector3(0.0, 0.0, 1.0), front_face + Vector3(0.0, -0.5, 2.0))
@@ -850,7 +857,7 @@ func _distance_to_a_spawn(local: Player) -> float:
 
 func _run_stage2_checks(local: Player) -> void:
 	# What is actually standing at the step positions?
-	for probe in [Vector3(-6.0, 5.0, 14.0), Vector3(-1.5, 5.0, 14.0)]:
+	for probe in [Regions.OBSTACLE + Vector3(-6.0, 5.0, 14.0), Regions.OBSTACLE + Vector3(-1.5, 5.0, 14.0)]:
 		var query := PhysicsRayQueryParameters3D.create(probe, probe + Vector3.DOWN * 8.0, 0xFFFFFFFF)
 		var hit := get_world_3d().direct_space_state.intersect_ray(query)
 		var collider := hit.get("collider") as Node3D if not hit.is_empty() else null
@@ -889,8 +896,8 @@ func _run_stage2_checks(local: Player) -> void:
 		# that sideways heading and misses.
 		var landed := await _jump_on_the_run(
 			local,
-			Vector3(step["x"], 1.0, 7.0),
-			Vector3(step["x"], 0.0, 11.5),
+			Regions.OBSTACLE + Vector3(step["x"], 1.0, 7.0),
+			Regions.OBSTACLE + Vector3(step["x"], 0.0, 11.5),
 			12.5,
 			2.3)
 		print("PLAYGROUND_STAGE2_STEP height=%.1f landed_y=%.2f on_top=%s" % [
@@ -898,8 +905,8 @@ func _run_stage2_checks(local: Player) -> void:
 
 	# With a nav bridge the far side is a valid destination, so ordering a move
 	# there walks the body out over the gap and drops it.
-	await _settle(local, Vector3(-5.0, 1.0, 2.0))
-	local.movement.set_target(Vector3(-5.0, 0.0, -8.0))
+	await _settle(local, Regions.OBSTACLE + Vector3(-5.0, 1.0, 2.0))
+	local.movement.set_target(Regions.OBSTACLE + Vector3(-5.0, 0.0, -8.0))
 	await get_tree().create_timer(3.0).timeout
 	print("PLAYGROUND_STAGE2_WALKOFF y=%.2f z=%.2f state=%s" % [
 		local.global_position.y, local.global_position.z, Player.State.keys()[local.state]])
@@ -917,8 +924,8 @@ func _run_stage2_checks(local: Player) -> void:
 		var far_z: float = -2.0 - float(gap["width"]) - 2.0
 		var landed := await _jump_on_the_run(
 			local,
-			Vector3(gap["x"], 1.0, 4.0),
-			Vector3(gap["x"], 0.0, far_z),
+			Regions.OBSTACLE + Vector3(gap["x"], 1.0, 4.0),
+			Regions.OBSTACLE + Vector3(gap["x"], 0.0, far_z),
 			-2.0,
 			0.5)
 		print("PLAYGROUND_STAGE2_GAP width=%.0f landed=(%.2f, %.2f) crossed=%s" % [
@@ -1196,6 +1203,28 @@ func _run_stage8_throw(local: Player, face_z: float) -> void:
 # every character fell at the tuned 22, and a player and a dummy each left the
 # other out of their mask, so they passed through one another. Both read fine
 # in isolation. So they get measured instead, in one table, every run.
+# A look at one place, for the log: --view-at=<x>,<z> parks the local body
+# there, --shot=<png> saves what the screen shows and quits. Host only, and
+# only worth anything in a window.
+func _run_view_shot(local: Player) -> void:
+	var at := Vector3(0.0, 1.0, 8.0)
+	var shot := ""
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--view-at="):
+			var parts := argument.trim_prefix("--view-at=").split(",")
+			if parts.size() == 2:
+				at = Vector3(parts[0].to_float(), 1.0, parts[1].to_float())
+		elif argument.begins_with("--shot="):
+			shot = argument.trim_prefix("--shot=")
+	await _settle(local, at)
+	await get_tree().create_timer(1.5).timeout
+	if shot != "":
+		await RenderingServer.frame_post_draw
+		var error := get_viewport().get_texture().get_image().save_png(shot)
+		print("PLAYGROUND_VIEW_SHOT at=(%.1f, %.1f) path=%s error=%d" % [at.x, at.z, shot, error])
+	get_tree().quit()
+
+
 func _run_audit(local: Player) -> void:
 	print("PLAYGROUND_AUDIT_GRAVITY tuned=%.2f project=%.2f" % [
 		Tuning.server.gravity,
@@ -1902,8 +1931,15 @@ func _build_lighting() -> void:
 func _build_ground() -> void:
 	# 40 x 20 plaza. Its +x edge is the cliff: nothing below it until the kill
 	# plane, which is what the respawn test needs.
-	_box("Plaza", Vector3(0.0, -0.5, 8.0), Vector3(40.0, 1.0, 20.0), Color("777d84"), WORLD_LAYER)
-	_box("HighPlatform", Vector3(14.0, 2.5, 14.0), Vector3(6.0, 5.0, 6.0), Color("6d747b"), WORLD_LAYER)
+	# Three slabs in a row (Regions): the hub in the middle, the obstacle
+	# course west, the arena east, joined by two bridges. The hub's +x edge
+	# north of the east bridge is still the cliff.
+	_box("Plaza", Regions.HUB + Regions.PLAZA_CENTRE, Regions.PLAZA_SIZE, Color("777d84"), WORLD_LAYER)
+	_box("ObstaclePlaza", Regions.OBSTACLE + Regions.PLAZA_CENTRE, Regions.PLAZA_SIZE, Color("777d84"), WORLD_LAYER)
+	_box("ArenaPlaza", Regions.ARENA + Regions.PLAZA_CENTRE, Regions.PLAZA_SIZE, Color("7d8289"), WORLD_LAYER)
+	_box("WestBridge", Regions.WEST_BRIDGE_CENTRE, Regions.WEST_BRIDGE_SIZE, Color("6d747b"), WORLD_LAYER)
+	_box("EastBridge", Regions.EAST_BRIDGE_CENTRE, Regions.EAST_BRIDGE_SIZE, Color("6d747b"), WORLD_LAYER)
+	_box("HighPlatform", Regions.OBSTACLE + Vector3(14.0, 2.5, 14.0), Vector3(6.0, 5.0, 6.0), Color("6d747b"), WORLD_LAYER)
 
 
 func _build_stairs() -> void:
@@ -1922,7 +1958,7 @@ func _build_stairs() -> void:
 		# in front of it to jump started inside a wall. The ring reaches z 12.3
 		# and the plaza ends at 18, so a 3 deep row centred on 16.5 fits with
 		# nothing in it.
-		var at := Vector3(-16.0 + float(index) * 3.5, height * 0.5, 16.5)
+		var at := Regions.OBSTACLE + Vector3(-16.0 + float(index) * 3.5, height * 0.5, 16.5)
 		_box(
 			"Step_%.1f" % height,
 			at,
@@ -1940,7 +1976,7 @@ func _build_gaps() -> void:
 	var lanes := [-15.0, -5.0, 5.0, 15.0]
 	for index in widths.size():
 		var width: float = widths[index]
-		var lane: float = lanes[index]
+		var lane: float = lanes[index] + Regions.OBSTACLE.x
 		var gap_start := -2.0
 		var far_edge := gap_start - width
 		_box(
@@ -1963,7 +1999,8 @@ func _build_gaps() -> void:
 		_sign("GAP %.0fm" % width, Vector3(lane, 1.6, gap_start + 1.0), Color("d9f3ff"))
 
 
-const CLIMB_RING_CENTRE := Vector3(-8.0, 0.0, 6.0)
+# In the obstacle course: local (-8, 0, 6) off that region's origin.
+const CLIMB_RING_CENTRE := Regions.OBSTACLE + Vector3(-8.0, 0.0, 6.0)
 const CLIMB_RING_RADIUS := 6.0
 # 90 and 270 degrees are left out on purpose: a face pointing across the view
 # cannot be aimed at properly, and since the camera never rotates it is the
@@ -2003,8 +2040,8 @@ func _build_walls() -> void:
 	_sign("CLIMB RING (%d벽, 전면 등반, 90/270은 옆면)" % CLIMB_RING_ANGLES.size(),
 		CLIMB_RING_CENTRE + Vector3.UP * 8.0, Color("c8ffc8"))
 	# Smooth wall: looks similar, cannot be climbed.
-	_box("SmoothWall", Vector3(16.0, 2.0, 2.0), Vector3(6.0, 4.0, 0.6), Color("555b62"), WALL_LAYER)
-	_sign("SMOOTH (등반 불가)", Vector3(16.0, 5.0, 2.0), Color.WHITE)
+	_box("SmoothWall", Regions.OBSTACLE + Vector3(16.0, 2.0, 2.0), Vector3(6.0, 4.0, 0.6), Color("555b62"), WALL_LAYER)
+	_sign("SMOOTH (등반 불가)", Regions.OBSTACLE + Vector3(16.0, 5.0, 2.0), Color.WHITE)
 
 
 func _build_time_boundary() -> void:
@@ -2028,9 +2065,9 @@ func _build_occluders() -> void:
 	# Between the camera and the plaza, so walking behind one fades it. Kept
 	# east of the step row: a wall across the approach would stop the run up a
 	# step before it started, now that walls are part of the navigation bake.
-	_box("OccluderA", Vector3(7.0, 2.5, 10.0), Vector3(8.0, 5.0, 0.6), Color("4b535c"), WALL_LAYER, true)
-	_box("OccluderB", Vector3(16.0, 2.5, 6.0), Vector3(8.0, 5.0, 0.6), Color("4b535c"), WALL_LAYER, true)
-	_sign("OCCLUSION", Vector3(7.0, 6.0, 10.0), Color.WHITE)
+	_box("OccluderA", Regions.OBSTACLE + Vector3(7.0, 2.5, 10.0), Vector3(8.0, 5.0, 0.6), Color("4b535c"), WALL_LAYER, true)
+	_box("OccluderB", Regions.OBSTACLE + Vector3(16.0, 2.5, 6.0), Vector3(8.0, 5.0, 0.6), Color("4b535c"), WALL_LAYER, true)
+	_sign("OCCLUSION", Regions.OBSTACLE + Vector3(7.0, 6.0, 10.0), Color.WHITE)
 
 
 func _box(

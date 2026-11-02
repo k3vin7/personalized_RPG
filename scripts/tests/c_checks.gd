@@ -9,9 +9,10 @@ extends Node
 
 const HOME := Vector3(0.0, 0.9, 11.0)
 # The 2 m gap's lane. gap_start is z = -2, so the far block starts at z = -4.
-const GAP_LANE_X := -15.0
-const GAP_NEAR := Vector3(-15.0, 0.9, 1.0)
-const GAP_TARGET := Vector3(-15.0, 0.0, -5.0)
+# The 2 m gap, in the obstacle course (Regions.OBSTACLE).
+const GAP_LANE_X := -15.0 + Regions.OBSTACLE.x
+const GAP_NEAR := Vector3(GAP_LANE_X, 0.9, 1.0)
+const GAP_TARGET := Vector3(GAP_LANE_X, 0.0, -5.0)
 # PlayerMovement.COYOTE_TIME plus a little: a press inside that window is a
 # jump, not a catch.
 const COYOTE_WAIT := 0.2
@@ -690,7 +691,7 @@ func _shadow_checks() -> void:
 func _gap_width_checks() -> void:
 	var lanes := {2.0: -15.0, 3.0: -5.0, 4.0: 5.0, 5.0: 15.0}
 	for width in [2.0, 3.0, 4.0, 5.0]:
-		var lane: float = lanes[width]
+		var lane: float = lanes[width] + Regions.OBSTACLE.x
 		# The near lip is z = -2; stand a little back from it.
 		var start := Vector3(lane, 0.9, -1.2)
 		# The far block starts at -2 - width; aim just onto it.

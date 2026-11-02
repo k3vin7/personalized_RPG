@@ -6,10 +6,11 @@ extends Node3D
 # Debug boundaries are independently generated from data/world_boundaries.tres.
 
 # The seam line on the ground: its midpoint, with the face standing at this z.
-const SEAM := Vector3(-30.0, 0.0, 2.0)
+# Off the obstacle course's west edge (Regions.OBSTACLE): local (-30, 0, 2).
+const SEAM := Regions.OBSTACLE + Vector3(-30.0, 0.0, 2.0)
 const WIDTH := 20.0
 const TOP_Y := 3.0
-# Grass reaches from the seam back to the plaza's west edge, so the two are one
+# Grass reaches from the seam back to the course's west edge, so the two are one
 # continuous walking surface at y = 0.
 const GRASS_DEPTH := 16.0
 const SAND_DEPTH := 12.0

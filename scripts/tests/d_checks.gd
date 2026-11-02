@@ -8,8 +8,9 @@ extends Node
 const HOME := Vector3(0.0, 0.9, 11.0)
 const LANE := Vector3(-13.0, 0.9, 9.0)
 # The 5 m gap: lane x = 15, near lip z = -2, far block from z = -7.
-const GAP5_LANE := 15.0
-const GAP5_START := Vector3(15.0, 0.9, -1.2)
+# The 5 m gap, in the obstacle course (Regions.OBSTACLE).
+const GAP5_LANE := 15.0 + Regions.OBSTACLE.x
+const GAP5_START := Vector3(GAP5_LANE, 0.9, -1.2)
 const GAP5_FAR := -7.0
 
 var _world: Node3D

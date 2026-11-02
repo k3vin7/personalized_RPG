@@ -12,11 +12,9 @@ const CHARGE_WAIT := 0.1
 const TRACK_SECONDS := 2.5
 const THROW_RANGE := 5.0
 # Where the thrower stands relative to the scarecrow's home, and which way it
-# throws. Both are harness geometry, not game rules: the host's lane from
-# Dummy_1 runs north up the plaza; the client's from Dummy_0 cannot, because
-# ClimbWall_90 stands at x = -2 from z = 4.5 on, and a stand to the west of
-# Dummy_0 is inside ClimbWall_135. So the client stands east and throws
-# north-north-east, between Dummy_1 and the walls.
+# throws. Both are harness geometry, not game rules. The lanes were laid out
+# around the climb ring when the scarecrows stood in the hub; the scarecrows
+# are in the arena now (Regions.ARENA), open ground, and the lanes still fit.
 const HOST_STAND := Vector3(-1.0, 0.0, 0.0)
 const HOST_LANE := Vector3(0.0, 0.0, 1.0)
 const CLIENT_STAND := Vector3(1.0, 0.0, 0.0)

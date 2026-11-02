@@ -598,11 +598,15 @@ func _walk_for(home: Vector3, seconds: float, reset := true) -> float:
 func _rock_versus_player_check() -> void:
 	var rock := _world.get_node("Rock_0") as Rock
 	var victim := _judge.actor_for(_client_peer())
+	# The victim stands east of the thrower, so the hit sends them east along
+	# the hub. They used to stand south, and the knock carried them over the
+	# hub's south edge onto the 2 m gap's far block -- which is in the obstacle
+	# course now (Regions), so that lane is a drop into the void.
 	_judge.forgive_move(_client_peer(), "", 30)
-	client_park.rpc_id(_client_peer(), Vector3(-16.0, 0.9, 3.0))
+	client_park.rpc_id(_client_peer(), Vector3(-13.0, 0.9, 3.0))
 	await _wait_stage("parked")
 	await _wait(0.8)
-	await _park_self(Vector3(-16.0, 0.9, 6.0))
+	await _park_self(Vector3(-16.0, 0.9, 3.0))
 	expect(await _take(rock), "took_the_rock_to_throw_at_someone")
 	var hp_before := victim.hp
 	var stood := victim.global_position
