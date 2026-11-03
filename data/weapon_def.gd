@@ -14,6 +14,10 @@ extends Resource
 # The slider: Tuning.server.<attack_field>. Empty means attack_power_value.
 @export var attack_field: String = ""
 @export var attack_power_value: float = 1.0
+# C-1b: the four skills this weapon puts in the main hand's slots, in slot
+# order. Empty for a weapon whose skills are a later stage's (bow, spear,
+# staff) and for bare hands (Skills.BARE_IDS fills those).
+@export var skill_ids: PackedStringArray = PackedStringArray()
 
 
 func attack_power() -> float:

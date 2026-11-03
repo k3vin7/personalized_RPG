@@ -8,10 +8,11 @@ extends CharacterBody3D
 const LAYER := Layers.DUMMY
 const RETURN_DELAY := 2.0
 const RETURN_SPEED := 2.0
-const MAX_HP := 60.0
+# C-1b: the HP is Tuning.server.dummy_max_hp (was a constant 60); max_hp()
+# below reads it, so a slider change takes effect at the next refill.
 
 # The one place a plain scarecrow's weight is written. It used to be here as
-# MAX_HP * 0.2 for the push and again in ServerAuthority as DUMMY_WEIGHT = 12.0
+# the old max_hp() (60) * 0.2 for the push and again in ServerAuthority as DUMMY_WEIGHT = 12.0
 # for the lift limit: two expressions in two files that happened to agree, which
 # is the shape CLAUDE.md's eighth note warns about. The lift limit reads
 # weight(), which is this for a plain scarecrow and the race's body weight for
@@ -32,7 +33,7 @@ const HALF_HEIGHT := 0.9
 # way. Same numbers the rock uses, for the same reason.
 
 var home := Vector3.ZERO
-var hp := MAX_HP
+var hp := 0.0
 # A race scarecrow stands in for a party member of that race: the race's own
 # weight and strength from the race data (the server's numbers), so the lift
 # limit, the knockback tolerance and the weight behind its slam all read the
@@ -46,7 +47,7 @@ var last_tolerance := 0.0
 # is enabled in stage E, where can_grab() stops refusing it.
 var holder_peer := 0
 var sync_position := Vector3.ZERO
-var sync_hp := MAX_HP
+var sync_hp := 0.0
 # C-1a: the last few hits' ids and amounts, written by the server's
 # apply_hit and carried in push_state, so a replica draws the hits it was
 # told about and not a guess off the HP. A ring: two hits in one state
@@ -118,9 +119,15 @@ func _enter_tree() -> void:
 	set_multiplayer_authority(1)
 
 
+func max_hp() -> float:
+	return Tuning.server.dummy_max_hp
+
+
 func _ready() -> void:
 	home = global_position
 	sync_position = global_position
+	hp = max_hp()
+	sync_hp = hp
 	add_to_group(ServerAuthority.HOLDABLE_GROUP)
 	collision_layer = LAYER
 	# Was terrain only, which is why a player walked straight through a
@@ -291,7 +298,7 @@ func _physics_process(delta: float) -> void:
 		sync_position = home
 		_blind_left = SyncRules.TELEPORT_BLIND
 		collision_layer = 0
-		hp = MAX_HP
+		hp = max_hp()
 		_settle_left = 0.0
 		_refresh()
 		print("PLAYGROUND_DUMMY_RETURNED name=%s" % name)
@@ -316,8 +323,8 @@ func _physics_process(delta: float) -> void:
 		if to_home.length() > 0.2:
 			velocity.x = to_home.normalized().x * RETURN_SPEED
 			velocity.z = to_home.normalized().z * RETURN_SPEED
-		elif hp < MAX_HP:
-			hp = MAX_HP
+		elif hp < max_hp():
+			hp = max_hp()
 			_refresh()
 
 	move_and_slide()
@@ -492,13 +499,13 @@ func _peer_player(peer_id: int) -> Player:
 
 func _refresh() -> void:
 	if _label != null:
-		_label.text = "%d / %d" % [roundi(hp), roundi(MAX_HP)]
+		_label.text = "%d / %d" % [roundi(hp), roundi(max_hp())]
 		if has_race():
 			_label.text = "%s %.0fkg 근력%.0f\n%s" % [race_label(), weight(), strength(), _label.text]
 		if attack_phase == "windup":
 			_label.text += "\n!"
 	if _material != null:
-		var colour := Color("c9b48a").lerp(Color("ff7b6b"), 1.0 - hp / MAX_HP)
+		var colour := Color("c9b48a").lerp(Color("ff7b6b"), 1.0 - hp / max_hp())
 		match attack_phase:
 			"windup":
 				colour = Color("ff4d3d")

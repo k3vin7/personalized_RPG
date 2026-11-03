@@ -1104,15 +1104,20 @@ func _rule_throw(actor: Player, payload: Dictionary) -> Variant:
 	# source_strength 0 so the one force door takes the speed as given: the
 	# strength is already in the solve above, and applying it twice would send
 	# every throw past the cursor it was aimed at. C-1a: a line throw's damage
-	# to the thrown body is apply_hit's, like every other.
-	apply_hit(actor, target, null, {
-		"kind": ForceSystem.Kind.THROW,
-		"direction": velocity / speed,
-		"power": speed,
-		"source_strength": 0.0,
-		"ally": true,
-		"raw_damage": Tuning.server.shove_damage * charge if line else 0.0,
-	})
+	# to the thrown body is apply_hit's, like every other. C-1b: only a body
+	# with HP (a person, a scarecrow) is hit; a rock is just sent.
+	if target is Player or target is Dummy:
+		apply_hit(actor, target, null, {
+			"kind": ForceSystem.Kind.THROW,
+			"direction": velocity / speed,
+			"power": speed,
+			"source_strength": 0.0,
+			"ally": true,
+			"raw_damage": Tuning.server.shove_damage * charge if line else 0.0,
+		})
+	else:
+		send_force(target, ForceSystem.make_event(
+			ForceSystem.Kind.THROW, velocity / speed, speed, 0.0, peer, true, 0.0, 0.0))
 	if target is Rock:
 		(target as Rock).note_thrown(peer)
 	print("PLAYGROUND_THROW by=%s target=%s line=%s charge=%.2f speed=%.2f" % [
@@ -1931,6 +1936,8 @@ func _check_move(player: Player, delta: float) -> void:
 	var moved := player.global_position - from
 	watch["left"] = MOVE_SAMPLE
 	watch["at"] = player.global_position
+	# C-1b: the speed this sample saw, for the thrust's bonus (observed_h_speed).
+	watch["h_speed"] = Vector2(moved.x, moved.z).length() / maxf(elapsed, 0.001)
 	var skip := int(watch.get("forgive", 0)) > 0
 	if skip:
 		watch["forgive"] = int(watch["forgive"]) - 1
@@ -2057,6 +2064,19 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=state_%s" % [
 			actor.name, def.id, Player.State.keys()[actor.state]])
 		return null
+	# C-1b: a weapon's skill needs that weapon in the hand, by the server's
+	# own word on what the peer is carrying.
+	if def.weapon_id != "bare":
+		var needed := Weapons.get_def(def.weapon_id)
+		if needed == null or weapon_of(peer) != needed.kind:
+			print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=no_weapon" % [actor.name, def.id])
+			return null
+	# C-1b: the stamina column. A pool at 0 refuses the cast at the intent;
+	# the cost itself comes off the owner's pool (stamina is the owner's
+	# number, as the dash's cost is), and this is the server's check of it.
+	if def.value("stamina_cost") > 0.0 and actor.stamina <= 0.0:
+		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=no_stamina" % [actor.name, def.id])
+		return null
 	var direction := _direction_of(payload)
 	# M-7: the intent arrives at the start of the windup, so the recovery lock
 	# and the cooldown run from the impact, not from now.
@@ -2070,20 +2090,153 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 			return _rule_shove(actor, direction)
 		"grab":
 			return _rule_grab(actor, _target_for(payload))
-	schedule_strike(actor, def, direction)
+		"parry":
+			return _rule_parry(actor, def, direction)
+	# C-1b: the speed bonus (the thrust's) is read now, at the intent, off the
+	# speed the server saw this body moving at, and rides to the ruling.
+	var mult := 1.0
+	var bonus := def.value("speed_bonus")
+	if bonus > 0.0:
+		var seen := observed_h_speed(actor)
+		mult = 1.0 + bonus * seen / maxf(Tuning.server.base_move_speed, 0.01)
+		print("PLAYGROUND_SPEED_BONUS by=%s skill=%s h_speed=%.2f base=%.2f mult=%.3f" % [
+			actor.name, def.id, seen, Tuning.server.base_move_speed, mult])
+	schedule_strike(actor, def, direction, mult)
 	return true
+
+
+# C-1b: the horizontal speed the server holds this body to be moving at: its
+# own velocity for the host's body, the last move-watch sample (MOVE_SAMPLE
+# of replicated position) for a remote one.
+func observed_h_speed(actor: Player) -> float:
+	if actor.is_local():
+		return Vector2(actor.velocity.x, actor.velocity.z).length()
+	var watch: Dictionary = _move_watch.get(actor.get_multiplayer_authority(), {})
+	return float(watch.get("h_speed", 0.0))
+
+
+# ------------------------------------------------------------- C-1b: the parry
+# The parry is a window, not a strike. The press opens it (no windup); for
+# parry_window after that, a strike that would land on this body from inside
+# the parry's fan is turned: the body takes nothing, the attacker is held
+# still (the catch's path, the STUNNED state) until its own recovery would
+# have ended, and the parrier's recovery ends at once. A window that closes
+# with nothing turned is a failed parry, and its recovery stands.
+var _parries := {}
+var parries := 0
+var parries_failed := 0
+var last_parry := {}
+
+
+func _rule_parry(actor: Player, def: SkillDef, direction: Vector3) -> Variant:
+	var peer := actor.get_multiplayer_authority()
+	var now := Time.get_ticks_msec()
+	_parries[peer] = {
+		"def": def,
+		"direction": direction,
+		"at": now,
+		"until": now + int(Tuning.server.parry_window * 1000.0),
+	}
+	print("PLAYGROUND_PARRY_OPEN by=%s window=%.2f" % [actor.name, Tuning.server.parry_window])
+	return true
+
+
+func parry_open(peer: int) -> bool:
+	return _parries.has(peer) and Time.get_ticks_msec() <= int(_parries[peer]["until"])
+
+
+# Called by the strike ruling for every body it is about to hit: whether this
+# target's open parry turns this attacker's blow.
+func _parry_turns(target: Player, attacker: Node3D, attack: SkillDef) -> bool:
+	var peer := target.get_multiplayer_authority()
+	if not _parries.has(peer) or target.sync_dead:
+		return false
+	var record: Dictionary = _parries[peer]
+	var now := Time.get_ticks_msec()
+	if now > int(record["until"]):
+		return false
+	var def: SkillDef = record["def"]
+	var forward: Vector3 = record["direction"]
+	forward.y = 0.0
+	if forward.length_squared() < 0.0001:
+		return false
+	forward = forward.normalized()
+	var side := Vector3(-forward.z, 0.0, forward.x)
+	var offset := attacker.global_position - target.global_position
+	offset.y = 0.0
+	var along := offset.dot(forward)
+	var across := absf(offset.dot(side))
+	var angle := rad_to_deg(atan2(across, along))
+	if offset.length() > def.value("reach") + body_radius(attacker) or angle > def.value("shape_angle_deg") * 0.5:
+		print("PLAYGROUND_PARRY_MISSED by=%s attacker=%s distance=%.2f angle=%.0f" % [
+			target.name, attacker.name, offset.length(), angle])
+		return false
+	_parries.erase(peer)
+	parries += 1
+	var stun := attack.value("recovery")
+	last_parry = {"by": peer, "attacker": attacker.name, "skill": attack.id, "stun": stun,
+		"after": float(now - int(record["at"])) / 1000.0}
+	if attacker is Player:
+		var toward := attacker.global_position - target.global_position
+		toward.y = 0.0
+		if toward.length_squared() < 0.0001:
+			toward = Vector3.FORWARD
+		var event := ForceSystem.make_event(
+			ForceSystem.Kind.KNOCKBACK, toward.normalized(), 0.0, 0.0, peer, false, 0.0, 0.0)
+		event["catch_stun"] = stun
+		send_force(attacker, event)
+	elif attacker is Dummy:
+		(attacker as Dummy).apply_catch_stun(stun)
+	# The parrier is out of its recovery now, on the server's clock and on
+	# its own machine.
+	_skill_lock[peer] = now
+	_tell_parry(target, true)
+	print("PLAYGROUND_PARRY by=%s attacker=%s skill=%s after=%.3fs stun=%.2f" % [
+		target.name, attacker.name, attack.id, last_parry["after"], stun])
+	return true
+
+
+func _expire_parries() -> void:
+	var now := Time.get_ticks_msec()
+	for peer: int in _parries.keys():
+		if now > int(_parries[peer]["until"]):
+			_parries.erase(peer)
+			parries_failed += 1
+			var actor := actor_for(peer)
+			print("PLAYGROUND_PARRY_EXPIRED by=%s" % (actor.name if actor != null else str(peer)))
+
+
+func _tell_parry(target: Player, success: bool) -> void:
+	if target.is_local():
+		if target.skills != null:
+			target.skills.on_parry_result(success)
+	else:
+		parry_result.rpc_id(target.get_multiplayer_authority(), success)
+
+
+# Server -> the parrier. Ends the recovery picture early on a success; no
+# authority of its own.
+@rpc("any_peer", "call_remote", "reliable")
+func parry_result(success: bool) -> void:
+	if not result_is_server_sent("parry_result", multiplayer.get_remote_sender_id()):
+		return
+	var actor := actor_for(multiplayer.get_unique_id())
+	if actor != null and actor.is_local() and actor.skills != null:
+		actor.skills.on_parry_result(success)
 
 
 # M-7: a strike is booked, not ruled, when its intent arrives: the ruling runs
 # at the impact time, and until then it can be caught (or, in the combat stage,
 # parried) or cancelled by what happens to its caster. One per body.
-func schedule_strike(actor: Node3D, def: SkillDef, direction: Vector3) -> void:
+func schedule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0) -> void:
 	var now := Time.get_ticks_msec()
 	_pending_strikes[actor] = {
 		"def": def,
 		"direction": direction,
 		"at": now + int(def.impact_time() * 1000.0),
 		"since": now,
+		# C-1b: the damage multiplier decided at the intent (the speed bonus).
+		"mult": mult,
 	}
 	print("PLAYGROUND_STRIKE_SCHEDULED by=%s skill=%s in=%.2fs" % [actor.name, def.id, def.impact_time()])
 
@@ -2123,7 +2276,7 @@ func _run_pending_strikes() -> void:
 				continue
 		if now >= int(record["at"]):
 			_pending_strikes.erase(actor)
-			_rule_strike(actor, def, record["direction"])
+			_rule_strike(actor, def, record["direction"], float(record.get("mult", 1.0)))
 
 
 # M-7: the catch. A grab aimed at a body whose strike is booked and inside its
@@ -2183,7 +2336,7 @@ func _try_catch(actor: Player, target: Node3D) -> bool:
 # M-1: the generic strike -- a rectangle in front of the heading, like the
 # shove's, with the SkillDef's reach, width, damage and push. M-2 fills in the
 # heights and the knockdown.
-func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3) -> Variant:
+func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0) -> Variant:
 	# M-7: a scarecrow strikes too. It has no peer, no party and the human's
 	# body size; behind its push is its race's strength, or none for a plain one.
 	var caster := actor as Player
@@ -2217,8 +2370,15 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3) -> Variant:
 	# body does not cross that height is not hit. A body on a knee-high step is
 	# still punched; one a ledge up is not kicked.
 	var strike_y := actor.global_position.y + def.strike_height * caster_scale
+	# C-1b: a FAN is a horizontal sector of the reach, shape_angle_deg wide;
+	# a vertical_angle_deg is a vertical fan in place of the flat height band.
+	var fan := def.range_shape == SkillDef.RangeShape.FAN
+	var half_angle := def.value("shape_angle_deg") * 0.5
+	var vertical_half := def.value("vertical_angle_deg") * 0.5
 	var hits := 0
 	var downed := 0
+	var parried := 0
+	var skipped_airborne := 0
 	for collision in actor.get_world_3d().direct_space_state.intersect_shape(params, 8):
 		var body := collision.get("collider") as Node3D
 		if body == null or body == actor:
@@ -2228,13 +2388,33 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3) -> Variant:
 		var along := offset.dot(forward)
 		var across := absf(offset.dot(side))
 		var target_radius := body_radius(body)
-		if along <= -target_radius or along > reach + target_radius:
-			continue
-		if across > half_width + target_radius:
-			continue
-		if absf(body.global_position.y - strike_y) > strike_band(body):
+		if fan:
+			if along <= -target_radius or offset.length() > reach + target_radius:
+				continue
+			if rad_to_deg(atan2(across, along)) > half_angle:
+				continue
+		else:
+			if along <= -target_radius or along > reach + target_radius:
+				continue
+			if across > half_width + target_radius:
+				continue
+		if vertical_half > 0.0:
+			var rise := absf(body.global_position.y - strike_y)
+			if rise > tan(deg_to_rad(vertical_half)) * maxf(along, 0.3) + body_half_height(body):
+				continue
+		elif absf(body.global_position.y - strike_y) > strike_band(body):
 			continue
 		if body is Rock and holder_of(body) != 0:
+			continue
+		# C-1b: the side cut leaves a body off the ground alone.
+		if def.skip_airborne and is_airborne(body):
+			skipped_airborne += 1
+			print("PLAYGROUND_STRIKE_SKIPPED_AIRBORNE by=%s skill=%s target=%s" % [actor.name, def.id, body.name])
+			continue
+		# C-1b: an open parry on the target turns the blow; the attacker is
+		# dealt with inside, and nothing lands here.
+		if body is Player and _parry_turns(body as Player, actor, def):
+			parried += 1
 			continue
 		var is_ally := body is Player and caster != null and Tuning.server.same_party
 		var push := (forward + Vector3.UP * Tuning.server.shove_up_bias).normalized()
@@ -2243,6 +2423,7 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3) -> Variant:
 			"source_strength": caster_strength,
 			"ally": is_ally,
 			"hit_y": strike_y,
+			"mult": mult,
 		}
 		# M-2: the knockdown is asked for here and ruled in _rule_hurt, like
 		# the stun: only a body on the ground goes down; in the air the push is
@@ -2255,9 +2436,29 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3) -> Variant:
 		if float(hit.get("down_apply", 0.0)) > 0.0:
 			downed += 1
 	last_strike = {"skill": def.id, "hits": hits, "downed": downed, "by": actor.name,
+		"parried": parried, "skipped_airborne": skipped_airborne, "mult": mult,
 		"at_unix": Time.get_unix_time_from_system()}
-	print("PLAYGROUND_SKILL by=%s skill=%s hits=%d downed=%d" % [actor.name, def.id, hits, downed])
+	print("PLAYGROUND_SKILL by=%s skill=%s hits=%d downed=%d parried=%d skipped_airborne=%d mult=%.3f" % [
+		actor.name, def.id, hits, downed, parried, skipped_airborne, mult])
 	return hits
+
+
+# C-1b: off the ground, as the server sees it: a player's replicated state,
+# a scarecrow's own floor contact.
+func is_airborne(body: Node3D) -> bool:
+	if body is Player:
+		return (body as Player).state == Player.State.AIRBORNE
+	if body is Dummy:
+		return not (body as Dummy).is_on_floor()
+	return false
+
+
+func body_half_height(body: Node3D) -> float:
+	if body is Player:
+		return (body as Player).half_height()
+	if body is Dummy:
+		return Dummy.HALF_HEIGHT
+	return Player.BODY_HALF_HEIGHT
 
 
 # N-2: the dash notice. Never refused -- the dash has already happened on the
@@ -2336,6 +2537,7 @@ func _physics_process(delta: float) -> void:
 	_enforce_holds(delta)
 	_place_held_people(delta)
 	_run_pending_strikes()
+	_expire_parries()
 	_watch_vitals(delta)
 	# N-1: any write to the server's table reaches the replicas within a step,
 	# whoever made it. The heartbeat below repairs a dropped push.

@@ -43,7 +43,9 @@ static func write(mesh: ImmediateMesh, def: SkillDef, scale: float = 1.0) -> voi
 					Vector3(0.0, 0.0, -(reach + LINE_TIP * scale))]:
 				mesh.surface_add_vertex(vertex)
 		SkillDef.RangeShape.FAN:
-			var half_angle := deg_to_rad(def.shape_angle_deg * 0.5)
+			# C-1b: through value(), so a slider-backed fan (the side cut's
+			# side_cut_angle) draws the width the server rules with.
+			var half_angle := deg_to_rad(def.value("shape_angle_deg") * 0.5)
 			for index in FAN_SEGMENTS:
 				var a := -half_angle + 2.0 * half_angle * float(index) / float(FAN_SEGMENTS)
 				var b := -half_angle + 2.0 * half_angle * float(index + 1) / float(FAN_SEGMENTS)

@@ -12,6 +12,12 @@ const PATHS := {
 	"kick": "res://data/skills/kick.tres",
 	# M-7: the scarecrow's one attack, a stand-in for a boss swing.
 	"dummy_slam": "res://data/skills/dummy_slam.tres",
+	# C-1b: the sword's four. Which weapon holds them is the WeaponDef's
+	# (skill_ids), not a list here.
+	"thrust": "res://data/skills/thrust.tres",
+	"side_cut": "res://data/skills/side_cut.tres",
+	"overhead_cut": "res://data/skills/overhead_cut.tres",
+	"parry": "res://data/skills/parry.tres",
 }
 
 # What an empty hand can do, in slot order.

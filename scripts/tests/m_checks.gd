@@ -135,8 +135,11 @@ func _fill_checks() -> void:
 		"bare_hands_fill_the_first_four_and_the_rest_stand_empty")
 	await tick_request(func() -> void: _local.set_weapon(WeaponKinds.Kind.SWORD))
 	note("sword: slots %s" % [_ids(0, 8)])
-	expect(_ids(0, 4) == ["", "", "", ""] and _ids(4, 8) == Skills.BARE_IDS,
-		"a_one_hand_weapon_leaves_its_four_empty_and_moves_the_bare_four_to_the_off_hand")
+	# C-1b: the sword's four (its WeaponDef's skill_ids) take the main hand;
+	# M-1 had them empty until the combat stage.
+	var sword_ids: Array = Array(Weapons.get_def("sword").skill_ids)
+	expect(_ids(0, 4) == sword_ids and _ids(4, 8) == Skills.BARE_IDS,
+		"a_one_hand_weapon_puts_its_four_in_the_main_hand_and_the_bare_four_in_the_off_hand")
 	await tick_request(func() -> void: _local.set_weapon(WeaponKinds.Kind.SHIELD))
 	note("shield: slots %s" % [_ids(0, 8)])
 	expect(_ids(0, 4) == Skills.BARE_IDS and _ids(4, 8) == ["", "", "", ""],

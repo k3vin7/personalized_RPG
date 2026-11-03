@@ -39,6 +39,7 @@ const GROUP_LABELS := {
 	"Skills": "기술 · 허수아비 공격",
 	"Survival": "낙하 · 낙사 · 리스폰",
 	"Combat": "전투 튜닝 (서버 승인) — 무기 공격력 · 방어력 · 치명타",
+	"Sword": "검 4기술 (서버 승인) — 찌르기 · 횡베기 · 종베기 · 흘리기",
 }
 # A Korean name beside the field names that come up in the work order and the
 # feel questions. The field name stays: it is what the documents call it.
@@ -69,6 +70,13 @@ const FIELD_LABELS := {
 	"kick_stamina": "발차기 스태미나",
 	"shove_stamina": "밀치기 스태미나",
 	"grab_stamina": "들기 중 초당 스태미나",
+	"dummy_max_hp": "허수아비 HP",
+	"thrust_speed_bonus": "찌르기 속도 보정 계수",
+	"side_cut_angle": "횡베기 부채꼴 각도",
+	"overhead_cut_width": "종베기 칼날 폭",
+	"overhead_cut_vertical_angle": "종베기 수직 각도",
+	"parry_window": "흘리기 판정 창",
+	"parry_recovery": "흘리기 실패 후딜",
 	"shove_power": "밀치기 힘",
 	"grab_range": "잡기 거리",
 	"lift_per_strength": "근력당 들 수 있는 kg",

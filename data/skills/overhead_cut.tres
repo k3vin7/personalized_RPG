@@ -1,0 +1,27 @@
+[gd_resource type="Resource" script_class="SkillDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/skill_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "overhead_cut"
+label = "종베기"
+hands = 1
+intent = -1
+outcome = 0
+usable_while_holding = false
+tuning_prefix = "overhead_cut"
+weapon_id = "sword"
+vertical_angle_deg = 40.0
+windup_lean_deg = 18.0
+recovery_lean_deg = -8.0
+strike_extent = 1.1
+strike_height = 0.6
+colour = Color(0.8745, 0.9020, 0.9373, 1)
+range_shape = 2
+arc_plane = 1
+arc_start_deg = 80.0
+arc_sweep_deg = -110.0
+arc_duration = 0.2
+trail = true
+feedback_big = true

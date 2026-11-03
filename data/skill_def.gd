@@ -96,6 +96,18 @@ enum ArcPlane {
 @export var stun_on_hit: float = 0.0
 @export var attack_tag: AttackTag = AttackTag.PHYSICAL
 @export var holy: bool = false
+# C-1b: a body off the ground (a jump, a launch) is not hit by this skill.
+# The side cut's rule; everything else reaches a body in the air that is
+# inside its height band.
+@export var skip_airborne: bool = false
+# C-1b: a vertical fan this wide (degrees) replaces the flat height band: a
+# target whose centre is within half of it above or below the strike's pivot,
+# over the distance to it, plus its own half height, is hit. 0 keeps the
+# band. The overhead cut's.
+@export var vertical_angle_deg: float = 0.0
+# C-1b: damage x (1 + this x the caster's horizontal speed at the intent,
+# as the server saw it, / base_move_speed). The thrust's; 0 for the rest.
+@export var speed_bonus: float = 0.0
 # M-7: when the ruling lands, measured from the cast. 0 means "at the end of
 # the windup", which is every strike today; a bow or a boss swing can put it
 # elsewhere. The catch window closes at this moment.
@@ -172,6 +184,9 @@ const TUNING_SUFFIX := {
 	"catch_window": "catch_window",
 	"catch_force": "catch_force",
 	"stamina_cost": "stamina",
+	"shape_angle_deg": "angle",
+	"vertical_angle_deg": "vertical_angle",
+	"speed_bonus": "speed_bonus",
 }
 
 

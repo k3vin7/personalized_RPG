@@ -516,6 +516,12 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			dummy_attack_catch_force = value
+# C-1b: a scarecrow's HP. Was a constant 60; 300 so a stage can measure a
+# run of sword blows (the thrust's speed bonus) before the mark refills.
+@export var dummy_max_hp: float = 300.0:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_max_hp = value
 # M-2: how long a knocked-down body lies, and how long standing up takes.
 # No input through either; pushes still land.
 @export var down_time: float = 1.0:
@@ -526,6 +532,157 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			getup_time = value
+
+@export_group("Sword")
+# C-1b: the sword's four, the tracker's '기술 표' rows as sliders (every
+# number there is a temporary blue cell). A SkillDef with tuning_prefix
+# "thrust" reads thrust_windup, _recovery, _cooldown, _range, _width,
+# _damage (the coefficient on weapon_attack_sword), _power, _stamina,
+# _angle (a fan's width) and _vertical_angle (a vertical fan's).
+@export var thrust_windup: float = 0.15:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_windup = value
+@export var thrust_recovery: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_recovery = value
+@export var thrust_cooldown: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_cooldown = value
+@export var thrust_range: float = 2.2:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_range = value
+@export var thrust_width: float = 0.5:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_width = value
+@export var thrust_damage: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_damage = value
+@export var thrust_power: float = 3.0:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_power = value
+@export var thrust_stamina: float = 8.0:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_stamina = value
+# The thrust's speed bonus: damage x (1 + this x horizontal speed at the
+# intent / base_move_speed), the speed as the server saw it.
+@export var thrust_speed_bonus: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_speed_bonus = value
+@export var side_cut_windup: float = 0.2:
+	set(value):
+		if Tuning.may_write(self):
+			side_cut_windup = value
+@export var side_cut_recovery: float = 0.35:
+	set(value):
+		if Tuning.may_write(self):
+			side_cut_recovery = value
+@export var side_cut_cooldown: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			side_cut_cooldown = value
+@export var side_cut_range: float = 1.8:
+	set(value):
+		if Tuning.may_write(self):
+			side_cut_range = value
+# The '폭' column: a horizontal fan this wide, in degrees.
+@export var side_cut_angle: float = 120.0:
+	set(value):
+		if Tuning.may_write(self):
+			side_cut_angle = value
+@export var side_cut_damage: float = 1.2:
+	set(value):
+		if Tuning.may_write(self):
+			side_cut_damage = value
+@export var side_cut_power: float = 4.0:
+	set(value):
+		if Tuning.may_write(self):
+			side_cut_power = value
+@export var side_cut_stamina: float = 10.0:
+	set(value):
+		if Tuning.may_write(self):
+			side_cut_stamina = value
+@export var overhead_cut_windup: float = 0.25:
+	set(value):
+		if Tuning.may_write(self):
+			overhead_cut_windup = value
+@export var overhead_cut_recovery: float = 0.4:
+	set(value):
+		if Tuning.may_write(self):
+			overhead_cut_recovery = value
+@export var overhead_cut_cooldown: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			overhead_cut_cooldown = value
+@export var overhead_cut_range: float = 1.8:
+	set(value):
+		if Tuning.may_write(self):
+			overhead_cut_range = value
+# The blade's thickness across the heading, for the narrow rectangle on the
+# ground and the sideways tolerance of the hit. Not in the table (its '폭' is
+# the vertical angle below); 0.4 chosen here.
+@export var overhead_cut_width: float = 0.4:
+	set(value):
+		if Tuning.may_write(self):
+			overhead_cut_width = value
+# The '폭' column: a vertical fan this wide. A target whose centre is inside
+# it (plus its own half height) is hit, on the ground or in the air.
+@export var overhead_cut_vertical_angle: float = 40.0:
+	set(value):
+		if Tuning.may_write(self):
+			overhead_cut_vertical_angle = value
+@export var overhead_cut_damage: float = 1.4:
+	set(value):
+		if Tuning.may_write(self):
+			overhead_cut_damage = value
+@export var overhead_cut_power: float = 3.0:
+	set(value):
+		if Tuning.may_write(self):
+			overhead_cut_power = value
+@export var overhead_cut_stamina: float = 10.0:
+	set(value):
+		if Tuning.may_write(self):
+			overhead_cut_stamina = value
+# The parry: no windup, the recovery is what a failed one costs, the window
+# is how long after the press an attack landing on this body is turned. The
+# attacker is stunned until its own recovery would have ended. Agility is
+# not connected to the window yet (the design says so).
+@export var parry_windup: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			parry_windup = value
+@export var parry_recovery: float = 0.4:
+	set(value):
+		if Tuning.may_write(self):
+			parry_recovery = value
+@export var parry_cooldown: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			parry_cooldown = value
+@export var parry_range: float = 1.2:
+	set(value):
+		if Tuning.may_write(self):
+			parry_range = value
+@export var parry_angle: float = 90.0:
+	set(value):
+		if Tuning.may_write(self):
+			parry_angle = value
+@export var parry_stamina: float = 6.0:
+	set(value):
+		if Tuning.may_write(self):
+			parry_stamina = value
+@export var parry_window: float = 0.25:
+	set(value):
+		if Tuning.may_write(self):
+			parry_window = value
 
 @export_group("Survival")
 @export var fall_damage_min_height: float = 4.0:

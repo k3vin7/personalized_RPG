@@ -33,6 +33,16 @@ static func all_ids() -> Array:
 	return PATHS.keys()
 
 
+# C-1b: the WeaponDef behind a WeaponKinds.Kind, for the slot layout. None
+# for a kind no def names (bow, spear, staff until their stages).
+static func def_for_kind(kind: int) -> WeaponDef:
+	for id in PATHS:
+		var def := get_def(id)
+		if def != null and def.kind == kind and kind != WeaponKinds.Kind.NONE:
+			return def
+	return null
+
+
 # The attack power a skill multiplies its coefficient by. An unknown weapon
 # reads as bare hands (1), never as nothing.
 static func attack_power_for(id: String) -> float:

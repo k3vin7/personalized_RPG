@@ -43,6 +43,10 @@ var presses_ignored := 0
 # ended on this machine, for the latency notes.
 var last_cast_unix := 0.0
 var last_fire_unix := 0.0
+# C-1b: what the casts have cost, and the parries the server answered.
+var stamina_spent := 0.0
+var parries_won := 0
+var parries_lost := 0
 # M-7: whether the cast in progress already sent its intent (at the start of
 # the windup) so _fire() does not send it again.
 var _sent_at_start := false
@@ -69,11 +73,17 @@ func fill_slots() -> void:
 	var one_hand_weapon := weapon != WeaponKinds.Kind.NONE and weapon != WeaponKinds.Kind.SHIELD
 	# No weapon, or only a shield in the off hand: the main hand is bare, so the
 	# bare four take the first four and the rest stand empty (shield skills are
-	# the combat stage's). A one-hand weapon: its four attacks are the combat
-	# stage's too, so they stand empty, and the bare four fill the off hand.
+	# C-1c's). A one-hand weapon: its WeaponDef's skill_ids take the first
+	# four (C-1b: the sword's; a weapon with none yet leaves them empty), and
+	# the bare four fill the off hand.
 	var first := 4 if one_hand_weapon else 0
 	for offset in bare.size():
 		slots[first + offset] = bare[offset]
+	if one_hand_weapon:
+		var def := Weapons.def_for_kind(weapon)
+		if def != null:
+			for offset in mini(def.skill_ids.size(), 4):
+				slots[offset] = Skills.get_def(def.skill_ids[offset])
 
 
 func slot_def(index: int) -> SkillDef:
@@ -214,7 +224,9 @@ func press_slot(index: int) -> bool:
 		return false
 	if def.input_mode == SkillDef.InputMode.HOLD_RELEASE:
 		return _hold_press(def)
-	if Tuning.values.smart_key_enabled:
+	# C-1b: a skill with no range to show (the parry, the shield raise) casts
+	# on the press whatever the smart key says: there is nothing to aim.
+	if Tuning.values.smart_key_enabled or not def.shows_range():
 		return cast_slot(index)
 	arm(index)
 	return true
@@ -279,12 +291,23 @@ func cast_slot(index: int) -> bool:
 	if def == null or slot_locked(index) or slot_on_cooldown(index) or is_busy() or not player.is_grounded_state():
 		presses_ignored += 1
 		return false
+	# C-1b: the stamina column. An empty pool refuses the cast (the server
+	# refuses the intent the same way); otherwise the cost comes off now, the
+	# way the dash's does, from the owner's own pool.
+	var cost := def.value("stamina_cost")
+	if cost > 0.0 and player.stamina <= 0.0:
+		presses_ignored += 1
+		print("PLAYGROUND_SLOT_IGNORED slot=%d why=no_stamina" % [index + 1])
+		return false
 	if player.movement != null:
 		player.movement.cancel_target()
 		player.movement.cancel_armed()
 	_cast_def = def
 	_cast_slot = index
 	casts_started += 1
+	if cost > 0.0:
+		player.stamina = maxf(0.0, player.stamina - cost)
+		stamina_spent += cost
 	# Shown on the frame of the press, taken back if the server says no.
 	player.begin_predicted(def.server_intent())
 	# M-7: a strike's intent goes out now, at the start of the windup, aimed
@@ -356,6 +379,17 @@ func _finish() -> void:
 		player.change_state(Player.State.IDLE)
 	elif player.state == Player.State.CASTING:
 		player.change_state(Player.State.IDLE)
+
+
+# C-1b: the server's word on a parry. A success ends the recovery now (the
+# recovery was the failed parry's cost); a failure changes nothing.
+func on_parry_result(success: bool) -> void:
+	if success:
+		parries_won += 1
+		if _cast_def != null and _cast_def.id == "parry" and player.state == Player.State.RECOVERING:
+			_finish()
+	else:
+		parries_lost += 1
 
 
 # The body was taken out of the cast by something else: a stun, a grab, a
