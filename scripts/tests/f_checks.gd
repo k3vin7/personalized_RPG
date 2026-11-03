@@ -238,6 +238,9 @@ func _click_rule_checks() -> void:
 		_local.global_position.y = 0.9
 		_local.velocity = Vector3.ZERO)
 	await _wait(0.5)
+	# The smart key is on by default now; this check is the two-step path.
+	var smart: bool = Tuning.values.smart_key_enabled
+	Tuning.values.smart_key_enabled = false
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(wall_face)
 		# Pressed the way the key is pressed, then cast: with the smart key off
@@ -246,6 +249,7 @@ func _click_rule_checks() -> void:
 		_local.movement.press_jump()
 		_local.movement.cast_armed())
 	await _beat(1.6)
+	Tuning.values.smart_key_enabled = smart
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(Vector3.INF)
 		_distance = _local.movement.climb_request_distance()

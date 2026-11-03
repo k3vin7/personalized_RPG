@@ -121,8 +121,8 @@ func _key_checks() -> void:
 	var slot2_was := _local.skills.key_for(1)
 	note("defaults: dash=%s slot1=%s slot2=%s" % [
 		_local.movement.dash_key_label(), _local.skills.key_label(0), _local.skills.key_label(1)])
-	expect(dash_was == KEY_C and slot1_was == KEY_Q, "dash_defaults_to_c_and_slot_1_to_q")
-	expect(await _armed_by(KEY_C) == "DASH", "the_default_dash_key_arms_the_dash")
+	expect(dash_was == KEY_SHIFT and slot1_was == KEY_Q, "dash_defaults_to_shift_and_slot_1_to_q")
+	expect(await _armed_by(KEY_SHIFT) == "DASH", "the_default_dash_key_arms_the_dash")
 	expect(await _armed_by(KEY_Q) == "SKILL", "the_default_slot_1_key_arms_the_slot")
 
 	# 1) The dash takes Q: slot 1 is emptied.
@@ -132,7 +132,7 @@ func _key_checks() -> void:
 	expect(_events("dash") == 1 and _events("slot_1") == 0, "the_input_map_shows_q_on_the_dash_only")
 	expect(_local.skills.key_label(0) == PlayerSkills.EMPTY_KEY_LABEL, "the_emptied_slot_shows_as_empty")
 	expect(await _armed_by(KEY_Q) == "DASH", "q_now_arms_the_dash")
-	expect(await _armed_by(KEY_C) == "NONE", "the_old_dash_key_does_nothing")
+	expect(await _armed_by(KEY_SHIFT) == "NONE", "the_old_dash_key_does_nothing")
 
 	# 2) Slot 1 takes Q back: the dash is emptied.
 	_local.skills.rebind(0, KEY_Q)
@@ -141,9 +141,9 @@ func _key_checks() -> void:
 	expect(_events("dash") == 0 and _events("slot_1") == 1, "the_input_map_shows_q_on_slot_1_only")
 	expect(_local.movement.dash_key_label() == PlayerSkills.EMPTY_KEY_LABEL, "the_emptied_dash_shows_as_empty")
 	expect(await _armed_by(KEY_Q) == "SKILL", "q_arms_the_slot_again")
-	expect(await _armed_by(KEY_C) == "NONE", "c_is_still_nothing_while_the_dash_is_empty")
+	expect(await _armed_by(KEY_SHIFT) == "NONE", "shift_is_still_nothing_while_the_dash_is_empty")
 
-	# 3) The dash gets its own key again; slot 1 keeps Q.
+	# 3) The dash gets its own key again (C, a free key); slot 1 keeps Q.
 	_local.movement.rebind_dash(KEY_C)
 	expect(_local.skills.key_for(0) == KEY_Q, "giving_the_dash_c_leaves_slot_1_alone")
 	expect(await _armed_by(KEY_C) == "DASH", "c_arms_the_dash_again")

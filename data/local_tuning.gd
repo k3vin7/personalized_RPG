@@ -10,8 +10,9 @@ extends Resource
 @export_group("Controls")
 # 5-chapter smart key, shared by the jump and the dash (and whatever gets a
 # cursor target later). Off: the key shows the range and the landing spot and
-# the left button casts. On: the key casts at once.
-@export var smart_key_enabled: bool = false
+# the left button casts. On: the key casts at once. On by default
+# (2026-11-03, was off).
+@export var smart_key_enabled: bool = true
 # The jump goes where the cursor points. Turn it off for the documented rule,
 # where the jump keeps the heading it was already travelling on.
 @export var jump_aims_at_cursor: bool = true
@@ -32,10 +33,10 @@ extends Resource
 # throw pose until it is let go.
 @export var throw_hold_threshold: float = 0.5
 @export var throw_charge_max: float = 1.0
-# The dash key, as a physical keycode. Default C; any key from the debug
-# panel, the way the slot keys are. Written into the InputMap's "dash" action
-# by PlayerMovement.apply_dash_binding().
-@export var dash_key: int = 67
+# The dash key, as a physical keycode. Default Shift (2026-11-03, was C);
+# any key from the debug panel, the way the slot keys are. Written into the
+# InputMap's "dash" action by PlayerMovement.apply_dash_binding().
+@export var dash_key: int = KEY_SHIFT
 
 @export_group("Slots")
 # M-1: the eight slot keys, as physical keycodes, in slot order. Defaults
