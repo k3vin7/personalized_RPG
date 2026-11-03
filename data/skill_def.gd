@@ -185,6 +185,10 @@ enum ArcPlane {
 @export var arc_sweep_deg: float = 0.0
 @export var arc_duration: float = 0.0
 @export var trail: bool = true
+# The held weapon is drawn this many times its length for the swing (the
+# trail follows), and its own length again after. 1 is the weapon as it
+# is. The overhead cut's 1.3 (2026-11-03).
+@export var weapon_length_mult: float = 1.0
 
 @export_group("Feedback")
 # C-0: a hit by this skill shakes the camera as well as the rest of the hit

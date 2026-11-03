@@ -1310,6 +1310,8 @@ func _start_swing(def: SkillDef) -> void:
 	_swing_pivot.position = Vector3(0.0, def.strike_height * body_scale(), 0.0)
 	# A bare skill shows a limb; a weapon skill turns the weapon in the hand.
 	var bare := def.hands == SkillDef.Hands.BARE or _weapon_node == null
+	if not bare:
+		_weapon_node.scale = Vector3(1.0, 1.0, def.weapon_length_mult)
 	if _limb_bar != null:
 		_limb_bar.visible = bare
 		if bare:
@@ -1323,6 +1325,8 @@ func _start_swing(def: SkillDef) -> void:
 func _end_swing() -> void:
 	_swing_active = false
 	_swing_def = null
+	if is_instance_valid(_weapon_node):
+		_weapon_node.scale = Vector3.ONE
 	if _limb_bar != null:
 		_limb_bar.visible = false
 	if _swing_pivot != null:
@@ -1353,6 +1357,8 @@ func _pose_swing(p: float) -> void:
 # The bar's two ends in the world, for the trail.
 func _bar_ends() -> Array[Vector3]:
 	var extent := _swing_def.strike_extent if _swing_def != null else 0.8
+	if _swing_def != null and _swing_def.hands != SkillDef.Hands.BARE and is_instance_valid(_weapon_node):
+		extent *= _swing_def.weapon_length_mult
 	var near := radius()
 	var ends: Array[Vector3] = [
 		_swing_pivot.to_global(Vector3(0.0, 0.0, -near)),

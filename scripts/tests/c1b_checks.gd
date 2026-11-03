@@ -158,6 +158,7 @@ func run(world: Node3D) -> void:
 	await _airborne_checks()
 	await _speed_checks()
 	await _parry_checks()
+	await _motion_checks()
 	await _stamina_checks()
 	await _two_peer_checks()
 	Tuning.values.smart_key_enabled = smart
@@ -560,6 +561,90 @@ func _stamina_checks() -> void:
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
 
 
+# ------------------------------------------------- 7b: the overhead cut's swing
+
+# Reads `body`'s overhead-cut swing off this screen for up to `seconds`: the
+# pivot's pitch at its highest and lowest, the blade's length multiplier
+# during the swing and once it is over.
+func _swing_seen(body: Player, seconds: float) -> Dictionary:
+	var seen := {"frames": 0, "pitch_max": -999.0, "pitch_min": 999.0, "scale_during": 0.0, "scale_after": 0.0}
+	var waited := 0.0
+	while waited < seconds:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		if body._swing_active and body._swing_def != null and body._swing_def.id == "overhead_cut":
+			seen["frames"] = int(seen["frames"]) + 1
+			var pitch := rad_to_deg(body._swing_pivot.rotation.x)
+			seen["pitch_max"] = maxf(float(seen["pitch_max"]), pitch)
+			seen["pitch_min"] = minf(float(seen["pitch_min"]), pitch)
+			seen["scale_during"] = body._weapon_node.scale.z if is_instance_valid(body._weapon_node) else 0.0
+		elif int(seen["frames"]) > 0:
+			seen["scale_after"] = body._weapon_node.scale.z if is_instance_valid(body._weapon_node) else 0.0
+			break
+	return seen
+
+
+# Casts the overhead cut at `aim` and reads it off this screen.
+func _overhead_motion(aim: Vector3) -> Dictionary:
+	await _take_sword()
+	await tick_request(func() -> void:
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target()
+		_local.movement.set_aim_override(aim))
+	await _wait(0.3)
+	var pressed := {"cast": false}
+	Net.queue_physics(func() -> void: pressed["cast"] = _local.skills.press_slot(2))
+	var seen := await _swing_seen(_local, 1.5)
+	seen["cast"] = pressed["cast"]
+	await _wait_idle()
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	return seen
+
+
+func _swing_is_wide(seen: Dictionary) -> bool:
+	# The first frame read may be a render frame or two into the sweep (the
+	# swing advances per render frame), so "from overhead" is read as > 60.
+	return int(seen.get("frames", 0)) >= 10 and float(seen.get("pitch_max", 0.0)) > 60.0 \
+		and float(seen.get("pitch_min", 0.0)) < -27.0 \
+		and absf(float(seen.get("scale_during", 0.0)) - 1.3) < 0.001 \
+		and absf(float(seen.get("scale_after", 0.0)) - 1.0) < 0.001
+
+
+func _motion_checks() -> void:
+	var over := Skills.get_def("overhead_cut")
+	note("overhead cut data: arc %.0f -> %.0f deg over %.2f s, blade x%.2f" % [
+		over.arc_start_deg, over.arc_start_deg + over.arc_sweep_deg, over.swing_time(), over.weapon_length_mult])
+	expect(absf(over.arc_start_deg - 90.0) < 0.01 and absf(over.arc_sweep_deg + 120.0) < 0.01
+		and absf(over.weapon_length_mult - 1.3) < 0.001,
+		"the_overhead_cut_starts_overhead_sweeps_120_degrees_with_a_1_3_blade")
+	var dummy := _dummy()
+	await _stand_before(dummy, 2.5)
+	var own := await _overhead_motion(dummy.home)
+	note("overhead cut on this screen: %s" % [own])
+	expect(bool(own["cast"]) and _swing_is_wide(own), "the_blade_comes_from_above_the_head_down_past_horizontal_1_3_long_then_its_own_length")
+	# The other screen: the client casts at the host from 3 m (past the reach),
+	# this screen reads the replica while the client reads its own.
+	var mate := _mate()
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = HOME
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target())
+	client_park.rpc_id(_client_peer(), HOME + Vector3(0.0, 0.0, -3.0))
+	await _wait(0.9)
+	_reports.erase("motion")
+	client_overhead_motion.rpc_id(_client_peer(), HOME)
+	var replica := await _swing_seen(mate, 3.0)
+	var theirs: Dictionary = _reports.get("motion", {}) if await _wait_report("motion") else {}
+	note("overhead cut by the client: its screen %s | replica here %s" % [theirs, replica])
+	expect(bool(theirs.get("cast", false)) and _swing_is_wide(theirs), "the_clients_own_screen_swings_the_same")
+	expect(_swing_is_wide(replica), "and_this_screen_shows_the_clients_swing_the_same")
+	_reports.erase("weapon")
+	client_take_weapon.rpc_id(_client_peer(), WeaponKinds.Kind.NONE)
+	await _wait_report("weapon")
+	await _wait(0.3)
+
+
 # ------------------------------------------------- 8: the other peer
 
 func _two_peer_checks() -> void:
@@ -592,6 +677,9 @@ func _two_peer_checks() -> void:
 	var hp_before := _local.hp
 	var applied := _judge.hits_applied
 	_reports.erase("cast")
+	# Since it joined the client may have cast before this (the overhead cut
+	# of the motion check), so the column is checked as a delta.
+	var client_spent := _judge.stamina_spent_by(_client_peer())
 	client_cast_at.rpc_id(_client_peer(), HOME, 0)
 	var saw_swing := false
 	var saw_phase := ""
@@ -614,7 +702,7 @@ func _two_peer_checks() -> void:
 		var cast: Dictionary = _reports["cast"]
 		note("the client's own count: %s" % [cast])
 		expect(float(cast.get("spent", 0.0)) > thrust.value("stamina_cost") - 1.5
-			and absf(_judge.stamina_spent_by(_client_peer()) - thrust.value("stamina_cost")) < 0.001,
+			and absf(_judge.stamina_spent_by(_client_peer()) - client_spent - thrust.value("stamina_cost")) < 0.001,
 			"the_client_paid_the_stamina_column_on_the_server_and_saw_it")
 	# The client parries the host's thrust: the host is held for the thrust's
 	# recovery, the client takes nothing.
@@ -699,6 +787,17 @@ func client_take_weapon(kind: int) -> void:
 		waited += get_physics_process_delta_time()
 	await _wait(0.2)
 	report.rpc_id(1, "weapon", _local.weapon)
+
+
+# Server -> client: cast the overhead cut at `aim`, report the swing as this
+# screen drew it.
+@rpc("authority", "call_remote", "reliable")
+func client_overhead_motion(aim: Vector3) -> void:
+	var was: bool = Tuning.values.smart_key_enabled
+	Tuning.values.smart_key_enabled = true
+	var seen := await _overhead_motion(aim)
+	Tuning.values.smart_key_enabled = was
+	report.rpc_id(1, "motion", seen)
 
 
 # Server -> client: cast `slot` at a point; report what it cost.
