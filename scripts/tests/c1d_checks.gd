@@ -82,14 +82,7 @@ func _dummy() -> Dummy:
 
 
 func _wait_dummy_home(dummy: Dummy) -> void:
-	var waited := 0.0
-	while waited < 8.0 and (dummy.global_position.distance_to(dummy.home) > 0.3 or not dummy.is_on_floor()):
-		await get_tree().physics_frame
-		waited += get_physics_process_delta_time()
-	waited = 0.0
-	while waited < 3.5 and dummy.hp < dummy.max_hp() - 0.01:
-		await get_tree().physics_frame
-		waited += get_physics_process_delta_time()
+	await Harness.dummy_home(dummy, _judge, _local, _mate(), get_tree(), note)
 
 
 func _stand_at(dummy: Dummy, distance: float) -> void:
@@ -449,8 +442,9 @@ func report(key: String, value: Variant) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func client_park(point: Vector3) -> void:
+	placed()
+	await Harness.forgive_lead(get_tree())
 	await tick_request(func() -> void:
-		placed()
 		_local.global_position = point
 		_local.velocity = Vector3.ZERO
 		_local.movement.cancel_target()

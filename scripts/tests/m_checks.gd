@@ -756,8 +756,9 @@ func report(key: String, value: Variant) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func client_park(point: Vector3) -> void:
+	placed()
+	await Harness.forgive_lead(get_tree())
 	await tick_request(func() -> void:
-		placed()
 		_local.global_position = point
 		_local.velocity = Vector3.ZERO
 		_local.movement.cancel_target()
@@ -766,8 +767,9 @@ func client_park(point: Vector3) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func client_lift(height: float) -> void:
+	placed()
+	await Harness.forgive_lead(get_tree())
 	await tick_request(func() -> void:
-		placed()
 		_local.global_position += Vector3.UP * height
 		_local.velocity = Vector3.ZERO
 		_local.floor_snap_length = 0.0

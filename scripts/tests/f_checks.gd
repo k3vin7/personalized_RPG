@@ -359,6 +359,16 @@ func _faded_face_check() -> void:
 
 func _two_peer_check() -> void:
 	var mate := _judge.actor_for(_client_peer())
+	# The host's body is still at the foot of wall 0 from the faded-face
+	# check, and the client is about to be placed on that same face: its
+	# replica snapping in sweeps the host's body (measured: 13.24 m/s, one
+	# move warning). Out of the way first.
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = HOME
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target())
+	await _wait(0.3)
 	_judge.forgive_move(_client_peer(), "", 30)
 	client_climb.rpc_id(_client_peer(), 0.0)
 	expect(await _wait_stage("climbing"), "the_client_climbed")
@@ -506,8 +516,9 @@ func client_climb(degrees: float) -> void:
 	var outward := Vector3(sin(yaw), 0.0, cos(yaw))
 	var face := RING_CENTRE + outward * (RING_RADIUS + 0.3) + Vector3.UP * 1.5
 	var wall := _world.find_child("ClimbWall_%d" % roundi(degrees), true, false) as StaticBody3D
+	placed()
+	await Harness.forgive_lead(get_tree())
 	await tick_request(func() -> void:
-		placed()
 		_local.global_position = face + outward * (Player.BODY_RADIUS + 0.2)
 		_local.velocity = Vector3.ZERO
 		_local.stamina = _local.stats.max_stamina

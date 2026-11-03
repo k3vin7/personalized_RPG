@@ -82,21 +82,8 @@ func _dummy() -> Dummy:
 	return _world.get_node("Dummy_1") as Dummy
 
 
-# A pushed scarecrow walks back to its mark after RETURN_DELAY; the next
-# measurement waits for it to be there and on the ground.
 func _wait_dummy_home(dummy: Dummy) -> void:
-	var waited := 0.0
-	while waited < 8.0 and (dummy.global_position.distance_to(dummy.home) > 0.3 or not dummy.is_on_floor()):
-		await get_tree().physics_frame
-		waited += get_physics_process_delta_time()
-	if dummy.global_position.distance_to(dummy.home) > 0.3:
-		note("scarecrow %s is %.2f m off its mark after %.1f s" % [dummy.name, dummy.global_position.distance_to(dummy.home), waited])
-	# And refilled (C-1c lesson): the mark refills RETURN_DELAY after the
-	# last hit, and a measurement straddling it reads damage minus refill.
-	waited = 0.0
-	while waited < 3.5 and dummy.hp < dummy.max_hp() - 0.01:
-		await get_tree().physics_frame
-		waited += get_physics_process_delta_time()
+	await Harness.dummy_home(dummy, _judge, _local, _mate(), get_tree(), note)
 
 
 # Stand `distance` south of the scarecrow (its back), facing it.
@@ -683,8 +670,9 @@ func report(key: String, value: Variant) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func client_park(point: Vector3) -> void:
+	placed()
+	await Harness.forgive_lead(get_tree())
 	await tick_request(func() -> void:
-		placed()
 		_local.global_position = point
 		_local.velocity = Vector3.ZERO
 		_local.movement.cancel_target()

@@ -311,6 +311,7 @@ func _combo_rate_checks() -> void:
 	var arrivals := PackedFloat32Array()
 	var claims := PackedFloat32Array()
 	var no_claim := 0
+	var tries_seen: Array = []
 	for attempt in COMBO_TRIES:
 		await tick_request(func() -> void:
 			_judge.server_set_hp(_local, _local.stats.max_hp)
@@ -335,6 +336,12 @@ func _combo_rate_checks() -> void:
 			# the cooldown, the pool -- so there was nothing to judge).
 			no_claim += 1
 		arrivals.append(float(combo.get("arrival", -1.0)) if _judge.combos_granted + _judge.combos_refused > g + r else -1.0)
+		# The client's side of the try arrives a round trip after its press.
+		var seen := 0.0
+		while not _reports.has("combo") and seen < 2.0:
+			await get_tree().physics_frame
+			seen += get_physics_process_delta_time()
+		tries_seen.append(_reports.get("combo", {}))
 		claims.append(float(combo.get("claimed", -1.0)) if _judge.combos_granted + _judge.combos_refused > g + r else -1.0)
 		# Past the dash cooldown before the next try, so every try dashes.
 		await _wait(maxf(Tuning.server.dash_cooldown, 1.2) + 0.5)
@@ -342,6 +349,8 @@ func _combo_rate_checks() -> void:
 	var total_r := _judge.combos_refused - refused
 	note("honest combos (gap 0.10, %d tries): granted %d, refused %d %s, not claimed %d | claimed %s | arrival %s" % [
 		COMBO_TRIES, total_g, total_r, reasons, no_claim, claims, arrivals])
+	for k in tries_seen.size():
+		note("combo try %d, the client's side: %s" % [k + 1, tries_seen[k]])
 	print("C1E_COMBO_RATE tries=%d granted=%d refused=%d no_claim=%d" % [COMBO_TRIES, total_g, total_r, no_claim])
 	expect(total_g + total_r + no_claim == COMBO_TRIES, "every_honest_combo_try_is_accounted_for")
 	await _wait_idle()
@@ -363,8 +372,9 @@ func report(key: String, value: Variant) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func client_park(point: Vector3) -> void:
+	placed()
+	await Harness.forgive_lead(get_tree())
 	await tick_request(func() -> void:
-		placed()
 		_local.global_position = point
 		_local.velocity = Vector3.ZERO
 		_local.movement.cancel_target()
@@ -404,12 +414,35 @@ func client_cast_at(aim: Vector3, slot: int) -> void:
 func client_dash_combo(aim: Vector3, slot: int, gap: float) -> void:
 	var was: bool = Tuning.values.smart_key_enabled
 	Tuning.values.smart_key_enabled = true
+	var claimed := _local.skills.combos_claimed
+	var ignored := _local.skills.presses_ignored
+	# A dictionary, because a lambda cannot write a captured local (C-1d).
+	var seen := {"started": false, "at_press": -1.0, "state": ""}
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(aim)
-		_local.movement.request_dash())
+		seen["started"] = _local.movement.request_dash())
+	var dashing := _local.movement.is_dashing()
+	# The wall clock between physics frames while waiting: a late frame here
+	# pushes the press past the window, and the try is then not claimed.
+	var worst_frame := 0.0
+	var last_frame := Time.get_ticks_msec()
 	while _local.movement.seconds_since_dash() < gap:
 		await get_tree().physics_frame
-	await tick_request(func() -> void: _local.skills.press_slot(slot))
+		var now := Time.get_ticks_msec()
+		worst_frame = maxf(worst_frame, float(now - last_frame) / 1000.0)
+		last_frame = now
+	var at_exit := _local.movement.seconds_since_dash()
+	await tick_request(func() -> void:
+		seen["at_press"] = _local.movement.seconds_since_dash()
+		seen["state"] = Player.State.keys()[_local.state]
+		_local.skills.press_slot(slot))
+	var try_seen := {"started": seen["started"], "dashing": dashing, "at_exit": snappedf(at_exit, 0.001),
+		"at_press": snappedf(float(seen["at_press"]), 0.001), "state": seen["state"],
+		"worst_frame": snappedf(worst_frame, 0.001),
+		"sent": _local.skills.combos_claimed - claimed, "ignored": _local.skills.presses_ignored - ignored,
+		"stamina": snappedf(_local.stamina, 0.1)}
+	print("C1E_COMBO_TRY peer=%d %s" % [_peer_id, try_seen])
+	report.rpc_id(1, "combo", try_seen)
 	await _wait(1.0)
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
 	Tuning.values.smart_key_enabled = was
