@@ -2,15 +2,151 @@
 
 [node name="Blockout" type="Node3D" unique_id=809797687]
 
-[node name="Floor" type="CSGBox3D" parent="." unique_id=811246740]
+[node name="floor_1" type="CSGBox3D" parent="." unique_id=811246740]
 use_collision = true
 size = Vector3(30, 1, 30)
+
+[node name="south" type="CSGCombiner3D" parent="." unique_id=227497094]
+use_collision = true
+
+[node name="west is not alpha" type="CSGBox3D" parent="south" unique_id=2073599645]
+transform = Transform3D(-0.5, 0, -0.866025, 0, 1, 0, 0.866025, 0, -0.5, -147.5, 11.5, 146.5)
+use_collision = true
+size = Vector3(95, 22, 1)
+
+[node name="CSGCombiner3D" type="CSGCombiner3D" parent="south" unique_id=524490918]
+
+[node name="cliff_1" type="CSGBox3D" parent="south/CSGCombiner3D" unique_id=318435834]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -105, 11.5, 122.5)
+use_collision = true
+size = Vector3(88, 22, 1)
+
+[node name="cliff_2" type="CSGBox3D" parent="south/CSGCombiner3D" unique_id=2072811625]
+transform = Transform3D(-0.866025, 0, -0.5, 0, 1, 0, 0.5, 0, -0.866025, -37.5, 11.5, 108)
+use_collision = true
+size = Vector3(59, 22, 1)
+
+[node name="cliff_3" type="CSGBox3D" parent="south/CSGCombiner3D" unique_id=1461079254]
+transform = Transform3D(-0.866025, 0, 0.5, 0, 1, 0, -0.5, 0, -0.866025, 39, 11.5, 109)
+use_collision = true
+size = Vector3(59, 22, 1)
+
+[node name="cliff_4" type="CSGBox3D" parent="south/CSGCombiner3D" unique_id=1041790007]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 14, 11.5, 54.5)
+use_collision = true
+size = Vector3(81.5, 22, 1)
+
+[node name="cliff_5" type="CSGBox3D" parent="south/CSGCombiner3D" unique_id=1418279496]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -14, 11.5, 54.5)
+use_collision = true
+size = Vector3(81, 22, 1)
+
+[node name="cliff_6" type="CSGBox3D" parent="south/CSGCombiner3D" unique_id=1870400768]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 107.5, 11.5, 122.5)
+use_collision = true
+size = Vector3(91.5, 22, 1)
+
+[node name="cliff_7" type="CSGBox3D" parent="south/CSGCombiner3D" unique_id=944533531]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, -160.5, 11.5, 214.5)
+use_collision = true
+size = Vector3(97, 22, 1)
+
+[node name="cliff_8" type="CSGBox3D" parent="south/CSGCombiner3D" unique_id=255553752]
+transform = Transform3D(0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, 0.707107, -121, 11.5, 297)
+use_collision = true
+size = Vector3(129, 22, 1)
+
+[node name="cliff_9" type="CSGBox3D" parent="south/CSGCombiner3D" unique_id=1412000443]
+transform = Transform3D(0.866025, 0, 0.5, 0, 1, 0, -0.5, 0, 0.866025, 193.5, 11.5, 153.5)
+use_collision = true
+size = Vector3(95, 22, 1)
+
+[node name="cliff_10" type="CSGBox3D" parent="south/CSGCombiner3D" unique_id=548496702]
+transform = Transform3D(0.866025, 0, 0.5, 0, 1, 0, -0.5, 0, 0.866025, 171.5, 11.5, 110)
+use_collision = true
+size = Vector3(56, 22, 1)
+
+[node name="cliff_11" type="CSGBox3D" parent="south/CSGCombiner3D" unique_id=991277933]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 153.5, 11.5, 219.5)
+use_collision = true
+size = Vector3(87, 22, 1)
+
+[node name="cliff_12" type="CSGBox3D" parent="south/CSGCombiner3D" unique_id=25018843]
+transform = Transform3D(-0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, -0.707107, 111, 11.5, 297)
+use_collision = true
+size = Vector3(129, 22, 1)
+
+[node name="cliff_13" type="CSGBox3D" parent="south/CSGCombiner3D" unique_id=1539634867]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1, 8.5, 340.5)
+use_collision = true
+size = Vector3(154, 22, 1)
+
+[node name="south rd" type="CSGBox3D" parent="south" unique_id=270020763]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 55)
+use_collision = true
+size = Vector3(30, 1, 80)
+
+[node name="south field" type="CSGCombiner3D" parent="south" unique_id=1995656517]
+
+[node name="floor_3" type="CSGBox3D" parent="south/south field" unique_id=201377887]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 107)
+use_collision = true
+size = Vector3(128, 1, 24)
+
+[node name="floor_4" type="CSGBox3D" parent="south/south field" unique_id=723314574]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 147)
+use_collision = true
+size = Vector3(270, 1, 56)
+
+[node name="south-west rd" type="CSGCombiner3D" parent="south/south field" unique_id=2005150031]
+
+[node name="floor_9" type="CSGBox3D" parent="south/south field/south-west rd" unique_id=1592388899]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -177, 0, 147)
+use_collision = true
+size = Vector3(86, 1, 56)
+
+[node name="floor_11" type="CSGBox3D" parent="south/south field/south-west rd" unique_id=1241716095]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -170, 0, 108)
+use_collision = true
+size = Vector3(44, 1, 22)
+
+[node name="south-east rd" type="CSGCombiner3D" parent="south/south field" unique_id=563528492]
+
+[node name="floor_12" type="CSGBox3D" parent="south/south field/south-east rd" unique_id=1018813217]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 171, 0, 108)
+use_collision = true
+size = Vector3(44, 1, 22)
+
+[node name="floor_10" type="CSGBox3D" parent="south/south field/south-east rd" unique_id=178768614]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 199.5, 0, 147)
+use_collision = true
+size = Vector3(127, 1, 56)
+
+[node name="floor_5" type="CSGBox3D" parent="south/south field" unique_id=63428769]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 203)
+use_collision = true
+size = Vector3(332, 1, 56)
+
+[node name="floor_6" type="CSGBox3D" parent="south/south field" unique_id=255115610]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, 354.5)
+use_collision = true
+size = Vector3(128, 1, 24)
+
+[node name="floor_7" type="CSGBox3D" parent="south/south field" unique_id=31024756]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 1, 0, 314.5)
+use_collision = true
+size = Vector3(270, 1, 56)
+
+[node name="floor_8" type="CSGBox3D" parent="south/south field" unique_id=1929925195]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 1, 0, 258.5)
+use_collision = true
+size = Vector3(332, 1, 56)
 
 [node name="fountain" type="CSGCombiner3D" parent="." unique_id=477996351]
 use_collision = true
 
 [node name="CSGCylinder3D" type="CSGCylinder3D" parent="fountain" unique_id=2104494988]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
 use_collision = true
 radius = 3.0
 height = 0.2
@@ -22,25 +158,156 @@ use_collision = true
 radius = 0.4
 height = 3.0
 
-[node name="east" type="CSGBox3D" parent="." unique_id=1240788522]
-transform = Transform3D(-4.371139e-08, 0, -1, 0, 1, 0, 1, 0, -4.371139e-08, 14, 2, 0)
+[node name="east" type="CSGCombiner3D" parent="." unique_id=1032969705]
+use_collision = true
+
+[node name="east" type="CSGBox3D" parent="east" unique_id=1240788522]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 14, 2, 0)
 use_collision = true
 size = Vector3(30, 3, 1)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="east" unique_id=1020285879]
-transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0, 0, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="east/east" unique_id=1020285879]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 0, 0, 0)
 operation = 2
 size = Vector3(2, 3, 10)
 
-[node name="west" type="CSGBox3D" parent="." unique_id=177592304]
-transform = Transform3D(-4.371139e-08, 0, -1, 0, 1, 0, 1, 0, -4.371139e-08, -14, 2, 0)
+[node name="east forest" type="CSGBox3D" parent="east" unique_id=805229940]
+transform = Transform3D(0.766044, 0, -0.642788, 0, 1, 0, 0.642788, 0, 0.766044, 411, 5, -93.5)
+size = Vector3(348, 10, 265)
+
+[node name="clearing_1" type="CSGBox3D" parent="east/east forest" unique_id=858461285]
+transform = Transform3D(-0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, -0.707107, -15.5, 0, 166)
+operation = 2
+size = Vector3(132, 10, 128)
+
+[node name="path_1" type="CSGBox3D" parent="east/east forest" unique_id=187595148]
+transform = Transform3D(-0.965926, 0, -0.258819, 0, 1, 0, 0.258819, 0, -0.965926, -34.5, 0, 46.5)
+operation = 2
+size = Vector3(9, 10, 100)
+
+[node name="path_2" type="CSGBox3D" parent="east/east forest" unique_id=1136487365]
+transform = Transform3D(-0.866025, 0, -0.5, 0, 1, 0, 0.5, 0, -0.866025, -70.5, 0, -38.5)
+operation = 2
+size = Vector3(10, 10, 100)
+
+[node name="path_3" type="CSGBox3D" parent="east/east forest" unique_id=1556742719]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, -105.5, 0, -73)
+operation = 2
+size = Vector3(7, 10, 30)
+
+[node name="path_4" type="CSGBox3D" parent="east/east forest" unique_id=211756763]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -8.5, 0, -41)
+operation = 2
+size = Vector3(10, 10, 122)
+
+[node name="clearing_2" type="CSGBox3D" parent="east/east forest" unique_id=1261741240]
+transform = Transform3D(0.965926, 0, 0.258819, 0, 1, 0, -0.258819, 0, 0.965926, 85.5, 0, 28)
+operation = 2
+size = Vector3(21, 10, 52)
+
+[node name="path_5" type="CSGBox3D" parent="east/east forest" unique_id=2037240351]
+transform = Transform3D(-0.5, 0, 0.866025, 0, 1, 0, -0.866025, 0, -0.5, -70, 0, 39.5)
+operation = 2
+size = Vector3(10, 10, 63)
+
+[node name="clearing_3" type="CSGBox3D" parent="east/east forest" unique_id=135046820]
+transform = Transform3D(-0.5, 0, 0.866025, 0, 1, 0, -0.866025, 0, -0.5, -112.5, 0, 63)
+operation = 2
+size = Vector3(80, 10, 67)
+
+[node name="clearing_4" type="CSGBox3D" parent="east/east forest" unique_id=942692164]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -126, 0, -71)
+operation = 2
+size = Vector3(19, 10, 19)
+
+[node name="clearing_5" type="CSGBox3D" parent="east/east forest" unique_id=1912756430]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 74.5, 0, -32.5)
+operation = 2
+size = Vector3(91, 10, 85)
+
+[node name="thicket_1" type="CSGBox3D" parent="east/east forest" unique_id=893479274]
+transform = Transform3D(0.707107, 0, 0.707107, 0, 1, 0, -0.707107, 0, 0.707107, 58.5, 0, -45)
+size = Vector3(9, 10, 5)
+
+[node name="thicket_2" type="CSGBox3D" parent="east/east forest" unique_id=1482503073]
+transform = Transform3D(0.258819, 0, -0.965926, 0, 1, 0, 0.965926, 0, 0.258819, 59.5, 0, -52)
+size = Vector3(13, 10, 5)
+
+[node name="thicket_3" type="CSGBox3D" parent="east/east forest" unique_id=1034262117]
+transform = Transform3D(0.965926, 0, 0.258819, 0, 1, 0, -0.258819, 0, 0.965926, 89.5, 0, -20)
+size = Vector3(17, 10, 13)
+
+[node name="clearing_6" type="CSGBox3D" parent="east/east forest" unique_id=161977441]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 110, 0, 67.5)
+operation = 2
+size = Vector3(73, 10, 83)
+
+[node name="east field" type="CSGCombiner3D" parent="east" unique_id=1279358369]
+
+[node name="floor_9" type="CSGBox3D" parent="east/east field" unique_id=2056092204]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 410.5, 0, -189)
+use_collision = true
+size = Vector3(455, 1, 282)
+
+[node name="floor_11" type="CSGBox3D" parent="east/east field" unique_id=2051961851]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 386.5, 0, 8)
+use_collision = true
+size = Vector3(449, 1, 112)
+
+[node name="floor_12" type="CSGBox3D" parent="east/east field" unique_id=3406594]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 327, 0, 131.5)
+use_collision = true
+size = Vector3(128, 1, 24)
+
+[node name="floor_13" type="CSGBox3D" parent="east/east field" unique_id=2002560704]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 360, 0, 91.5)
+use_collision = true
+size = Vector3(334, 1, 56)
+
+[node name="west" type="CSGCombiner3D" parent="." unique_id=1391464117]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, -14, 2, 0)
+
+[node name="west" type="CSGBox3D" parent="west" unique_id=177592304]
 use_collision = true
 size = Vector3(30, 3, 1)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="west" unique_id=2095899989]
-transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 0, 0, 0)
+[node name="CSGBox3D2" type="CSGBox3D" parent="west/west" unique_id=2095899989]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 0, 0, 0)
 operation = 2
 size = Vector3(2, 3, 10)
+
+[node name="west field" type="CSGCombiner3D" parent="west" unique_id=2088942516]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 0, -2, -14)
+
+[node name="floor_15" type="CSGBox3D" parent="west/west field" unique_id=2115025744]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -328, 0, -116)
+use_collision = true
+size = Vector3(128, 1, 24)
+
+[node name="floor_16" type="CSGBox3D" parent="west/west field" unique_id=1413434560]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -327, 0, -76)
+use_collision = true
+size = Vector3(270, 1, 56)
+
+[node name="floor_17" type="CSGBox3D" parent="west/west field" unique_id=1645054794]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -327, 0, -20)
+use_collision = true
+size = Vector3(332, 1, 56)
+
+[node name="floor_18" type="CSGBox3D" parent="west/west field" unique_id=226721877]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -328, 0, 131.5)
+use_collision = true
+size = Vector3(128, 1, 24)
+
+[node name="floor_19" type="CSGBox3D" parent="west/west field" unique_id=1783944207]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -327, 0, 91.5)
+use_collision = true
+size = Vector3(270, 1, 56)
+
+[node name="floor_20" type="CSGBox3D" parent="west/west field" unique_id=1981559974]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -327, 0, 35.5)
+use_collision = true
+size = Vector3(332, 1, 56)
 
 [node name="north" type="CSGCombiner3D" parent="." unique_id=750492316]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1)
@@ -62,351 +329,334 @@ visible = false
 size = Vector3(1, 3, 100)
 
 [node name="Door" type="CSGBox3D" parent="north/boundary" unique_id=92710269]
-transform = Transform3D(-4.371139e-08, 0, -1, 0, 1, 0, 1, 0, -4.371139e-08, 0, 0, 0)
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 0, 0, 0)
 operation = 2
 size = Vector3(2, 3, 10)
 
-[node name="NorthRoad_floor" type="CSGBox3D" parent="north" unique_id=545735690]
+[node name="north rd" type="CSGBox3D" parent="north" unique_id=545735690]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -64)
 use_collision = true
 size = Vector3(40, 1, 100)
 
-[node name="palace_floor" type="CSGBox3D" parent="north" unique_id=1801802544]
+[node name="palace" type="CSGCombiner3D" parent="north" unique_id=632063092]
+
+[node name="palace_floor" type="CSGBox3D" parent="north/palace" unique_id=1801802544]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -154)
 use_collision = true
 size = Vector3(80, 1, 80)
 
-[node name="building" type="Node3D" parent="north" unique_id=756258162]
+[node name="palace_floor2" type="CSGBox3D" parent="north/palace" unique_id=1158549224]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -60, 0, -164)
+use_collision = true
+size = Vector3(40, 1, 60)
+
+[node name="palace_floor3" type="CSGBox3D" parent="north/palace" unique_id=1525189662]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60, 0, -164)
+use_collision = true
+size = Vector3(40, 1, 60)
+
+[node name="north rd house" type="Node3D" parent="north" unique_id=756258162]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.5, -14)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building" unique_id=2019046903]
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house" unique_id=2019046903]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, -1.5, -6)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D" unique_id=837220527]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D" unique_id=837220527]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D" unique_id=1947176795]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D" unique_id=1947176795]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building" unique_id=1783895808]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house" unique_id=1783895808]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, -1.5, -6)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D2" unique_id=1584251341]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D2" unique_id=1584251341]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D2" unique_id=506955737]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D2" unique_id=506955737]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D3" type="CSGBox3D" parent="north/building" unique_id=244839314]
+[node name="CSGBox3D3" type="CSGBox3D" parent="north/north rd house" unique_id=244839314]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, -1.5, -17)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D3" unique_id=785323122]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D3" unique_id=785323122]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D3" unique_id=148431423]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D3" unique_id=148431423]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D4" type="CSGBox3D" parent="north/building" unique_id=703343972]
+[node name="CSGBox3D4" type="CSGBox3D" parent="north/north rd house" unique_id=703343972]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, -1.5, -17)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D4" unique_id=22879568]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D4" unique_id=22879568]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D4" unique_id=2016809979]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D4" unique_id=2016809979]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D5" type="CSGBox3D" parent="north/building" unique_id=1415282314]
+[node name="CSGBox3D5" type="CSGBox3D" parent="north/north rd house" unique_id=1415282314]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, -1.5, -28)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D5" unique_id=1890808335]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D5" unique_id=1890808335]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D5" unique_id=682940530]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D5" unique_id=682940530]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D6" type="CSGBox3D" parent="north/building" unique_id=429475691]
+[node name="CSGBox3D6" type="CSGBox3D" parent="north/north rd house" unique_id=429475691]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, -1.5, -28)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D6" unique_id=763147983]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D6" unique_id=763147983]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D6" unique_id=772262987]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D6" unique_id=772262987]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D7" type="CSGBox3D" parent="north/building" unique_id=342433359]
+[node name="CSGBox3D7" type="CSGBox3D" parent="north/north rd house" unique_id=342433359]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, -1.5, -39)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D7" unique_id=570446995]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D7" unique_id=570446995]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D7" unique_id=804839604]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D7" unique_id=804839604]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D8" type="CSGBox3D" parent="north/building" unique_id=1595646164]
+[node name="CSGBox3D8" type="CSGBox3D" parent="north/north rd house" unique_id=1595646164]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, -1.5, -39)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D8" unique_id=1472650201]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D8" unique_id=1472650201]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D8" unique_id=209056439]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D8" unique_id=209056439]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D9" type="CSGBox3D" parent="north/building" unique_id=876665]
+[node name="CSGBox3D9" type="CSGBox3D" parent="north/north rd house" unique_id=876665]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, -1.5, -50)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D9" unique_id=740581880]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D9" unique_id=740581880]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D9" unique_id=1630388763]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D9" unique_id=1630388763]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D10" type="CSGBox3D" parent="north/building" unique_id=1885504253]
+[node name="CSGBox3D10" type="CSGBox3D" parent="north/north rd house" unique_id=1885504253]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, -1.5, -50)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D10" unique_id=1483302782]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D10" unique_id=1483302782]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D10" unique_id=1125736524]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D10" unique_id=1125736524]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D11" type="CSGBox3D" parent="north/building" unique_id=177522334]
+[node name="CSGBox3D11" type="CSGBox3D" parent="north/north rd house" unique_id=177522334]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, -1.5, -61)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D11" unique_id=502276281]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D11" unique_id=502276281]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D11" unique_id=179719563]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D11" unique_id=179719563]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D12" type="CSGBox3D" parent="north/building" unique_id=1964519931]
+[node name="CSGBox3D12" type="CSGBox3D" parent="north/north rd house" unique_id=1964519931]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, -1.5, -61)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D12" unique_id=235419010]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D12" unique_id=235419010]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D12" unique_id=516054758]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D12" unique_id=516054758]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D13" type="CSGBox3D" parent="north/building" unique_id=972690448]
+[node name="CSGBox3D13" type="CSGBox3D" parent="north/north rd house" unique_id=972690448]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, -1.5, -72)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D13" unique_id=1642376466]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D13" unique_id=1642376466]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D13" unique_id=1668248283]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D13" unique_id=1668248283]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D14" type="CSGBox3D" parent="north/building" unique_id=1135854917]
+[node name="CSGBox3D14" type="CSGBox3D" parent="north/north rd house" unique_id=1135854917]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, -1.5, -72)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D14" unique_id=2039837289]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D14" unique_id=2039837289]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D14" unique_id=1692444705]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D14" unique_id=1692444705]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D15" type="CSGBox3D" parent="north/building" unique_id=94833906]
+[node name="CSGBox3D15" type="CSGBox3D" parent="north/north rd house" unique_id=94833906]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, -1.5, -83)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D15" unique_id=831072475]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D15" unique_id=831072475]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D15" unique_id=863343640]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D15" unique_id=863343640]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D16" type="CSGBox3D" parent="north/building" unique_id=60982825]
+[node name="CSGBox3D16" type="CSGBox3D" parent="north/north rd house" unique_id=60982825]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, -1.5, -83)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D16" unique_id=223671225]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D16" unique_id=223671225]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D16" unique_id=1024595920]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D16" unique_id=1024595920]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D17" type="CSGBox3D" parent="north/building" unique_id=1390968149]
+[node name="CSGBox3D17" type="CSGBox3D" parent="north/north rd house" unique_id=1390968149]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, -1.5, -94)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D17" unique_id=1621985057]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D17" unique_id=1621985057]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D17" unique_id=932732982]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D17" unique_id=932732982]
 operation = 2
 size = Vector3(8, 3, 8)
 
-[node name="CSGBox3D18" type="CSGBox3D" parent="north/building" unique_id=408734469]
+[node name="CSGBox3D18" type="CSGBox3D" parent="north/north rd house" unique_id=408734469]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14, -1.5, -94)
 use_collision = true
 size = Vector3(10, 3, 10)
 
-[node name="CSGBox3D" type="CSGBox3D" parent="north/building/CSGBox3D18" unique_id=32428206]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, -0.25, 0)
+[node name="CSGBox3D" type="CSGBox3D" parent="north/north rd house/CSGBox3D18" unique_id=32428206]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 0)
 operation = 2
 size = Vector3(2, 2.5, 2)
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="north/building/CSGBox3D18" unique_id=708840509]
+[node name="CSGBox3D2" type="CSGBox3D" parent="north/north rd house/CSGBox3D18" unique_id=708840509]
 operation = 2
 size = Vector3(8, 3, 8)
 
 [node name="CSGCombiner3D" type="CSGCombiner3D" parent="." unique_id=1628360102]
-
-[node name="Floor2" type="CSGBox3D" parent="CSGCombiner3D" unique_id=1558772871]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0, 0)
 use_collision = true
-size = Vector3(30, 1, 30)
 
-[node name="Floor3" type="CSGBox3D" parent="CSGCombiner3D" unique_id=897938811]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -60, 0, -30)
-use_collision = true
-size = Vector3(30, 1, 30)
-
-[node name="Floor4" type="CSGBox3D" parent="CSGCombiner3D" unique_id=1741671403]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -90, 0, -60)
-use_collision = true
-size = Vector3(30, 1, 30)
-
-[node name="Floor9" type="CSGBox3D" parent="CSGCombiner3D" unique_id=495008419]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -90, 0, -90)
-use_collision = true
-size = Vector3(30, 1, 30)
-
-[node name="Floor10" type="CSGBox3D" parent="CSGCombiner3D" unique_id=1645540423]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -120, 0, -60)
-use_collision = true
-size = Vector3(30, 1, 30)
-
-[node name="Floor11" type="CSGBox3D" parent="CSGCombiner3D" unique_id=1635675398]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -120, 0, -90)
-use_collision = true
-size = Vector3(30, 1, 30)
-
-[node name="Floor5" type="CSGBox3D" parent="CSGCombiner3D" unique_id=952195279]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -35, 0, -25)
+[node name="floor_2" type="CSGBox3D" parent="CSGCombiner3D" unique_id=1558772871]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -25, 0, -5.5)
 use_collision = true
 size = Vector3(20, 1, 20)
 
-[node name="Floor6" type="CSGBox3D" parent="CSGCombiner3D" unique_id=15816987]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -55, 0, -5)
+[node name="floor_4" type="CSGBox3D" parent="CSGCombiner3D" unique_id=1995720628]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -55, 0, -34.5)
 use_collision = true
 size = Vector3(20, 1, 20)
 
-[node name="Floor7" type="CSGBox3D" parent="CSGCombiner3D" unique_id=1569739939]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -65, 0, -55)
+[node name="floor_3" type="CSGBox3D" parent="CSGCombiner3D" unique_id=104331144]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 0, -20)
 use_collision = true
-size = Vector3(20, 1, 20)
+size = Vector3(30, 1, 30)
 
-[node name="Floor8" type="CSGBox3D" parent="CSGCombiner3D" unique_id=1210864364]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -85, 0, -35)
+[node name="floor_5" type="CSGBox3D" parent="CSGCombiner3D" unique_id=1566442552]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -80, 0, -60.5)
 use_collision = true
-size = Vector3(20, 1, 20)
+size = Vector3(50, 1, 50)
 
 [node name="wall" type="CSGBox3D" parent="CSGCombiner3D" unique_id=310818925]
-transform = Transform3D(0.7071067, 0, -0.7071068, 0, 1, 0, 0.7071068, 0, 0.7071067, -19.656853, 2, -10.656853)
+transform = Transform3D(0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, 0.707107, -19.5, 2, -10.5)
 use_collision = true
 size = Vector3(16, 3, 1)
 
 [node name="CSGCombiner3D" type="CSGCombiner3D" parent="CSGCombiner3D" unique_id=1244984823]
 
 [node name="wall3" type="CSGBox3D" parent="CSGCombiner3D/CSGCombiner3D" unique_id=976887375]
-transform = Transform3D(-5.9604645e-08, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, -5.9604645e-08, -25.656853, 2, -25.156853)
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, -25.5, 2, -25)
 use_collision = true
 size = Vector3(19, 3, 1)
 
 [node name="wall4" type="CSGBox3D" parent="CSGCombiner3D/CSGCombiner3D" unique_id=944798823]
-transform = Transform3D(0.9999999, 0, -1.589326e-08, 0, 1, 0, 1.589326e-08, 0, 0.9999999, -54.656853, 2, 3.8431473)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -44.5, 2, -6)
 use_collision = true
 size = Vector3(19, 3, 1)
 
 [node name="wall5" type="CSGBox3D" parent="CSGCombiner3D/CSGCombiner3D" unique_id=2033793485]
-transform = Transform3D(1.4702741e-07, 0, 0.9999999, 0, 1, 0, -0.9999999, 0, 1.4702741e-07, -63.656853, 2, -5.1568537)
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -53.5, 2, -15)
 use_collision = true
 size = Vector3(19, 3, 1)
 
 [node name="wall6" type="CSGBox3D" parent="CSGCombiner3D/CSGCombiner3D" unique_id=327690877]
-transform = Transform3D(-0.9999999, 0, 1.03316026e-07, 0, 1, 0, -1.03316026e-07, 0, -0.9999999, -34.656853, 2, -34.156853)
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -34.5, 2, -34)
 use_collision = true
 size = Vector3(19, 3, 1)
 
@@ -414,36 +664,125 @@ size = Vector3(19, 3, 1)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0, -30)
 
 [node name="wall3" type="CSGBox3D" parent="CSGCombiner3D/CSGCombiner3D2" unique_id=973786956]
-transform = Transform3D(-5.9604645e-08, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, -5.9604645e-08, -25.656853, 2, -25.156853)
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, -25.5, 2, -35)
 use_collision = true
-size = Vector3(19, 3, 1)
+size = Vector3(39, 3, 1)
 
 [node name="wall4" type="CSGBox3D" parent="CSGCombiner3D/CSGCombiner3D2" unique_id=2076114117]
-transform = Transform3D(0.9999999, 0, -1.589326e-08, 0, 1, 0, 1.589326e-08, 0, 0.9999999, -54.656853, 2, 3.8431473)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -54.5, 2, -6)
 use_collision = true
-size = Vector3(19, 3, 1)
+size = Vector3(39, 3, 1)
 
 [node name="wall5" type="CSGBox3D" parent="CSGCombiner3D/CSGCombiner3D2" unique_id=215802834]
-transform = Transform3D(1.4702741e-07, 0, 0.9999999, 0, 1, 0, -0.9999999, 0, 1.4702741e-07, -63.656853, 2, -5.1568527)
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -74, 2, -30.5)
 use_collision = true
-size = Vector3(19, 3, 1)
+size = Vector3(50, 3, 1)
 
 [node name="wall6" type="CSGBox3D" parent="CSGCombiner3D/CSGCombiner3D2" unique_id=2115752379]
-transform = Transform3D(-0.9999999, 0, 1.03316026e-07, 0, 1, 0, -1.03316026e-07, 0, -0.9999999, -34.656853, 2, -34.156853)
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -50, 2, -54.5)
 use_collision = true
-size = Vector3(19, 3, 1)
+size = Vector3(50, 3, 1)
 
 [node name="wall2" type="CSGBox3D" parent="CSGCombiner3D" unique_id=61163948]
-transform = Transform3D(0.7071067, 0, -0.7071068, 0, 1, 0, 0.7071068, 0, 0.7071067, -40.656853, 2, 9.343147)
+transform = Transform3D(0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, 0.707107, -30.5, 2, -0.5)
 use_collision = true
 size = Vector3(16, 3, 1)
 
 [node name="wall3" type="CSGBox3D" parent="CSGCombiner3D" unique_id=553738063]
-transform = Transform3D(0.7071067, 0, -0.7071068, 0, 1, 0, 0.7071068, 0, 0.7071067, -49.656853, 2, -40.656853)
+transform = Transform3D(0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, 0.707107, -49.5, 2, -40.5)
 use_collision = true
 size = Vector3(18, 3, 1)
 
 [node name="wall4" type="CSGBox3D" parent="CSGCombiner3D" unique_id=1653014291]
-transform = Transform3D(0.7071067, 0, -0.7071068, 0, 1, 0, 0.7071068, 0, 0.7071067, -69.949745, 2, -19.949745)
+transform = Transform3D(0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, 0.707107, -60, 2, -30)
+use_collision = true
+size = Vector3(18, 3, 1)
+
+[node name="CSGCombiner3D2" type="CSGCombiner3D" parent="." unique_id=1041318929]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 19, 0, 20)
+use_collision = true
+
+[node name="floor_2" type="CSGBox3D" parent="CSGCombiner3D2" unique_id=1243954358]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -25, 0, -5.5)
+use_collision = true
+size = Vector3(20, 1, 20)
+
+[node name="floor_4" type="CSGBox3D" parent="CSGCombiner3D2" unique_id=725930698]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -55, 0, -34.5)
+use_collision = true
+size = Vector3(20, 1, 20)
+
+[node name="floor_3" type="CSGBox3D" parent="CSGCombiner3D2" unique_id=1465839580]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -40, 0, -20)
+use_collision = true
+size = Vector3(30, 1, 30)
+
+[node name="floor_5" type="CSGBox3D" parent="CSGCombiner3D2" unique_id=1545353930]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -80, 0, -60.5)
+use_collision = true
+size = Vector3(50, 1, 50)
+
+[node name="wall" type="CSGBox3D" parent="CSGCombiner3D2" unique_id=1428994112]
+transform = Transform3D(0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, 0.707107, -19.5, 2, -10.5)
+use_collision = true
+size = Vector3(16, 3, 1)
+
+[node name="CSGCombiner3D" type="CSGCombiner3D" parent="CSGCombiner3D2" unique_id=2005543784]
+
+[node name="wall3" type="CSGBox3D" parent="CSGCombiner3D2/CSGCombiner3D" unique_id=1859855667]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, -25.5, 2, -25)
+use_collision = true
+size = Vector3(19, 3, 1)
+
+[node name="wall4" type="CSGBox3D" parent="CSGCombiner3D2/CSGCombiner3D" unique_id=33511766]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -44.5, 2, -6)
+use_collision = true
+size = Vector3(19, 3, 1)
+
+[node name="wall5" type="CSGBox3D" parent="CSGCombiner3D2/CSGCombiner3D" unique_id=2041452302]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -53.5, 2, -15)
+use_collision = true
+size = Vector3(19, 3, 1)
+
+[node name="wall6" type="CSGBox3D" parent="CSGCombiner3D2/CSGCombiner3D" unique_id=1216945052]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -34.5, 2, -34)
+use_collision = true
+size = Vector3(19, 3, 1)
+
+[node name="CSGCombiner3D2" type="CSGCombiner3D" parent="CSGCombiner3D2" unique_id=819856383]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 0, -30)
+
+[node name="wall3" type="CSGBox3D" parent="CSGCombiner3D2/CSGCombiner3D2" unique_id=847396608]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, -25.5, 2, -25)
+use_collision = true
+size = Vector3(19, 3, 1)
+
+[node name="wall4" type="CSGBox3D" parent="CSGCombiner3D2/CSGCombiner3D2" unique_id=1696742617]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -44.5, 2, -6)
+use_collision = true
+size = Vector3(19, 3, 1)
+
+[node name="wall5" type="CSGBox3D" parent="CSGCombiner3D2/CSGCombiner3D2" unique_id=778340856]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -72.5, 2, -16)
+use_collision = true
+size = Vector3(19, 3, 1)
+
+[node name="wall6" type="CSGBox3D" parent="CSGCombiner3D2/CSGCombiner3D2" unique_id=1341665351]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -36.5, 2, -53)
+use_collision = true
+size = Vector3(19, 3, 1)
+
+[node name="wall2" type="CSGBox3D" parent="CSGCombiner3D2" unique_id=1826397260]
+transform = Transform3D(0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, 0.707107, -30.5, 2, -0.5)
+use_collision = true
+size = Vector3(16, 3, 1)
+
+[node name="wall3" type="CSGBox3D" parent="CSGCombiner3D2" unique_id=1615551537]
+transform = Transform3D(0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, 0.707107, -49.5, 2, -40.5)
+use_collision = true
+size = Vector3(18, 3, 1)
+
+[node name="wall4" type="CSGBox3D" parent="CSGCombiner3D2" unique_id=1801682073]
+transform = Transform3D(0.707107, 0, -0.707107, 0, 1, 0, 0.707107, 0, 0.707107, -60, 2, -30)
 use_collision = true
 size = Vector3(18, 3, 1)
