@@ -206,6 +206,14 @@ var last_catch := {}
 var last_refusal := ""
 # C-0: how many hit notices have gone out to attackers.
 var hits_notified := 0
+# C-1a: the last hit apply_hit ruled, for the checks: {target, base, crit,
+# armor, final, dealt, id, skill}. And how many it has ruled.
+var last_hit := {}
+var hits_applied := 0
+# C-1a: the crit roll, pinned for the checks: peer -> -1 (never), 1 (always).
+# An automated run pins every attacker at "never" unless a check says
+# otherwise, so the damage a check measures is the table's and not a die.
+var _crit_pin := {}
 # How far a body's centre may be from the strike's height and still be hit: a
 # body's own half height, and the reach of a leg or an arm beyond it. A body
 # that has jumped clear is out of it; one just off the ground is not.
@@ -259,7 +267,7 @@ const RACE_MULT_FIELDS := ["tolerance", "move"]
 var _server_tuning_pushed := {}
 # H-3: a maximum built from these falls with them, so a change takes the
 # current HP down to fit. Nothing else in the table touches HP directly.
-const VITALS_FIELDS := ["hp_per_endurance", "stamina_base", "stamina_per_endurance"]
+const VITALS_FIELDS := ["k_hp", "stamina_alpha", "stat_point_weight"]
 
 
 func _ready() -> void:
@@ -752,23 +760,23 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 			launched = true
 		else:
 			push = (forward + Vector3.UP * Tuning.server.shove_up_bias).normalized()
-		var event := ForceSystem.make_event(
-			ForceSystem.Kind.SHOVE,
-			push,
-			Tuning.server.shove_power,
-			actor.stats.strength,
-			peer,
-			is_ally,
-			Tuning.server.shove_damage,
-			Tuning.server.shove_stun_time)
+		# C-1a: the damage is apply_hit's (shove coefficient x bare hands);
+		# the push is the same event it always was.
+		var shove_def := Skills.get_def("shove")
+		var ctx := {
+			"kind": ForceSystem.Kind.SHOVE,
+			"direction": push,
+			"power": Tuning.server.shove_power,
+			"ally": is_ally,
+			"stun_time": Tuning.server.shove_stun_time,
+			"hit_y": actor.global_position.y + shove_def.strike_height * actor.body_scale(),
+		}
 		if launched:
 			# The body being launched gives itself a jump's worth of lift and
 			# adds the push to it, so where in its arc the push lands stops
 			# mattering.
-			event["spring"] = true
-		event["skill"] = "shove"
-		event["hit_y"] = actor.global_position.y + Skills.get_def("shove").strike_height * actor.body_scale()
-		send_force(body, event)
+			ctx["spring"] = true
+		apply_hit(actor, body, shove_def, ctx)
 		hits += 1
 		if launched:
 			print("PLAYGROUND_SHOVE_LAUNCH by=%s target=%s angle=%.0f" % [
@@ -964,6 +972,7 @@ func harness_set_race(player: Player, kind: int) -> bool:
 		return false
 	player.stats.race = kind
 	player.stats.clear_overrides()
+	player.stats.clear_points()
 	player.stats.gear_weight = 0.0
 	# H-3: a dwarf's 150 does not fit a human's 105. Clamped, not refilled --
 	# the playground refill on a race change is H-4's pedestal, not this door.
@@ -1094,16 +1103,16 @@ func _rule_throw(actor: Player, payload: Dictionary) -> Variant:
 		return null
 	# source_strength 0 so the one force door takes the speed as given: the
 	# strength is already in the solve above, and applying it twice would send
-	# every throw past the cursor it was aimed at.
-	send_force(target, ForceSystem.make_event(
-		ForceSystem.Kind.THROW,
-		velocity / speed,
-		speed,
-		0.0,
-		peer,
-		true,
-		Tuning.server.shove_damage * charge if line else 0.0,
-		0.0))
+	# every throw past the cursor it was aimed at. C-1a: a line throw's damage
+	# to the thrown body is apply_hit's, like every other.
+	apply_hit(actor, target, null, {
+		"kind": ForceSystem.Kind.THROW,
+		"direction": velocity / speed,
+		"power": speed,
+		"source_strength": 0.0,
+		"ally": true,
+		"raw_damage": Tuning.server.shove_damage * charge if line else 0.0,
+	})
 	if target is Rock:
 		(target as Rock).note_thrown(peer)
 	print("PLAYGROUND_THROW by=%s target=%s line=%s charge=%.2f speed=%.2f" % [
@@ -1261,6 +1270,13 @@ func send_force(target: Node, event: Dictionary) -> void:
 	var holder_peer := holder_of(target)
 	if holder_peer != 0 and launched:
 		_end_hold(holder_peer, "target_pushed")
+	# C-1a: HP is apply_hit's alone. A force that carries damage without
+	# having been through it is a bug, and is sent on with none.
+	if float(event.get("damage", 0.0)) > 0.0 and not bool(event.get("hit_applied", false)):
+		push_error("send_force: damage %.1f on %s did not go through apply_hit" % [
+			float(event["damage"]), target.name])
+		print("PLAYGROUND_HIT_BYPASS target=%s" % target.name)
+		event["damage"] = 0.0
 	if target is Player:
 		var person_peer := (target as Player).get_multiplayer_authority()
 		# 결정 2: only a body that is launched empties its hands. A body that
@@ -1268,8 +1284,8 @@ func send_force(target: Node, event: Dictionary) -> void:
 		# this table that decides, not the holder's own machine.
 		if _holds.has(person_peer) and launched:
 			_end_hold(person_peer, "holder_pushed")
-		# B-d: the damage and the stun are decided here and the HP is written
-		# here. What goes out to the owner is the push, and a stun to apply.
+		# B-d: the stun is decided here. What goes out to the owner is the
+		# push, and a stun to apply; the damage was apply_hit's.
 		_rule_hurt(target as Player, event)
 		# B-e: and the push is remembered, because it is the reason this body
 		# is about to be moving faster than its own legs explain.
@@ -1322,44 +1338,43 @@ func _notify_hit(target: Node3D, event: Dictionary) -> void:
 		var def := Skills.get_def(skill)
 		big = big or (def != null and def.feedback_big)
 	var point: Vector3 = event.get("hit_point", target.global_position)
+	var hit_id := int(event.get("id", 0))
 	hits_notified += 1
 	if attacker.is_local():
 		if HitFeedback.instance != null:
-			HitFeedback.instance.on_hit(target, point, damage, big, true, target is Player and (target as Player).is_local(), skill)
+			HitFeedback.instance.on_hit(target, point, damage, big, true, target is Player and (target as Player).is_local(), skill, hit_id)
 	else:
-		hit_feedback.rpc_id(source, target.get_path(), point, damage, big, skill)
+		hit_feedback.rpc_id(source, target.get_path(), point, damage, big, skill, hit_id)
 
 
 # Server -> the attacker. A picture and nothing else.
 @rpc("any_peer", "call_remote", "reliable")
-func hit_feedback(target_path: NodePath, point: Vector3, damage: float, big: bool, skill: String) -> void:
+func hit_feedback(target_path: NodePath, point: Vector3, damage: float, big: bool, skill: String, hit_id: int) -> void:
 	if not result_is_server_sent("hit_feedback", multiplayer.get_remote_sender_id()):
 		return
 	var target := get_node_or_null(target_path) as Node3D
 	if target == null or HitFeedback.instance == null or not point.is_finite():
 		return
 	var on_me := target is Player and (target as Player).is_local()
-	HitFeedback.instance.on_hit(target, point, maxf(damage, 0.0), big, true, on_me, skill)
+	HitFeedback.instance.on_hit(target, point, maxf(damage, 0.0), big, true, on_me, skill, hit_id)
 
 
-# 4-chapter damage table. A team mate is any other player while the playground
-# is all field; party membership arrives in stage D.
+# 4-chapter stun table. A team mate is any other player while the playground
+# is all field; party membership arrives in stage D. C-1a: the damage half
+# moved to apply_hit; this is the stun and the knockdown.
 func _rule_hurt(target: Player, event: Dictionary) -> void:
 	event["stun_apply"] = 0.0
 	if target.sync_dead:
 		return
 	var ally := bool(event.get("is_ally_source", false))
-	var damage := float(event.get("damage", 0.0))
 	if target.state == Player.State.AIRBORNE:
-		# Already flying: a team mate's push is free, anyone else's hurts, and
-		# nothing stuns in the air.
-		if not ally:
-			server_damage(target, damage, "force")
+		# Already flying: nothing stuns in the air.
 		return
-	if not ally or Tuning.server.ally_ground_damage:
-		server_damage(target, damage, "force")
-	if target.sync_dead:
-		return
+	# C-1a: a skill that stuns on a hit (the parry) does so whether or not
+	# the push launched the body.
+	var on_hit := float(event.get("stun_on_hit", 0.0))
+	if on_hit > 0.0 and (not ally or Tuning.server.ally_ground_stun):
+		event["stun_apply"] = on_hit
 	# M-7: a caught attacker is held still through the stun path, whether or
 	# not the (empty) push moved it.
 	if event.has("catch_stun"):
@@ -1449,12 +1464,173 @@ func server_set_hp(player: Player, value: float) -> void:
 	player.hp = clampf(value, 0.0, player.stats.max_hp)
 
 
-func server_damage(player: Player, amount: float, cause: String) -> void:
+# C-1a: every loss of HP carries an id (the force event's, or a fresh one for
+# a fall), replicated with the HP so every screen can match the hit it draws
+# to the one it was told about. Called by apply_hit and by the fall ruling;
+# nothing else may take HP off a body.
+func server_damage(player: Player, amount: float, cause: String, hit_id := 0) -> void:
 	if player == null or not is_judge() or amount <= 0.0 or player.sync_dead:
 		return
 	server_set_hp(player, player.hp - amount)
+	player.note_hit(hit_id if hit_id > 0 else ForceSystem.next_id(), amount)
 	if player.hp <= 0.0:
 		server_kill(player, cause)
+
+
+# ------------------------------------------------------------ C-1a: the hit
+# The one damage function. Every blow that costs HP -- a strike, a shove, a
+# thrown rock, a line throw's landing -- comes through here, and HP is taken
+# off a body here and nowhere else (the fall ruling calls server_damage for
+# its own, environmental reason). The push leaves through send_force as it
+# always did, with the damage in the event only as a readout for the screens.
+#
+#   damage = coefficient x weapon attack        (def.damage x WeaponDef)
+#          x ctx.mult                            (speed / height bonus, C-1b/c)
+#          x crit_mult if the roll says so       (crit_base + agility over the race's)
+#   then     max(0, damage - armour x armor_flat_pct) x 100 / (100 + armour)
+#   then     the ally rules: a team mate in the air takes nothing, one on the
+#            ground takes it while ally_ground_damage says so
+#
+# ctx: direction (the push), power (knock power; default the def's),
+# source_strength (default the attacker's), ally, mult, raw_damage (a hit
+# with no skill: the number itself), kind (ForceSystem.Kind), stun_time,
+# hit_y, down_request, spring, source_peer (when there is no attacker body).
+# Returns the ruling, with the event's verdicts (down_apply ...) merged in.
+func apply_hit(attacker: Node3D, target: Node3D, def: SkillDef, ctx: Dictionary) -> Dictionary:
+	if not is_judge() or target == null or not is_instance_valid(target):
+		return {}
+	var peer := 0
+	var strength := 0.0
+	if attacker is Player:
+		peer = (attacker as Player).get_multiplayer_authority()
+		strength = (attacker as Player).stats.strength
+	elif attacker is Dummy:
+		strength = (attacker as Dummy).strength()
+	peer = int(ctx.get("source_peer", peer))
+	strength = float(ctx.get("source_strength", strength))
+	var base := 0.0
+	if ctx.has("raw_damage"):
+		base = float(ctx["raw_damage"])
+	elif def != null:
+		base = def.value("damage") * Weapons.attack_power_for(def.weapon_id)
+	base *= float(ctx.get("mult", 1.0))
+	var crit := _roll_crit(attacker, peer)
+	var rolled := base * (Tuning.server.crit_mult if crit else 1.0)
+	var armour := armor_of(target)
+	var final := damage_after_armor(rolled, armour)
+	var ally := bool(ctx.get("ally", false))
+	var dealt := final
+	if target is Player:
+		var person := target as Player
+		if person.sync_dead:
+			dealt = 0.0
+		elif ally and person.state == Player.State.AIRBORNE:
+			# Already flying: a team mate's push is free.
+			dealt = 0.0
+		elif ally and not Tuning.server.ally_ground_damage:
+			dealt = 0.0
+	elif not (target is Dummy):
+		# A rock has no HP to lose.
+		dealt = 0.0
+	var power := float(ctx.get("power", def.value("knock_power") if def != null else 0.0))
+	var event := ForceSystem.make_event(
+		int(ctx.get("kind", ForceSystem.Kind.KNOCKBACK)),
+		ctx.get("direction", Vector3.FORWARD) as Vector3,
+		power,
+		strength,
+		peer,
+		ally,
+		dealt,
+		float(ctx.get("stun_time", 0.0)))
+	event["hit_applied"] = true
+	event["crit"] = crit
+	event["base_damage"] = base
+	event["armor"] = armour
+	if def != null:
+		event["skill"] = def.id
+		if def.stun_on_hit > 0.0:
+			event["stun_on_hit"] = def.stun_on_hit
+	for key in ["hit_y", "down_request", "spring"]:
+		if ctx.has(key):
+			event[key] = ctx[key]
+	var hit_id := int(event["id"])
+	if dealt > 0.0:
+		if target is Player:
+			server_damage(target as Player, dealt, "hit", hit_id)
+		elif target is Dummy:
+			(target as Dummy).take_damage(dealt, hit_id)
+	hits_applied += 1
+	last_hit = {"target": target.name, "skill": def.id if def != null else "",
+		"base": base, "crit": crit, "armor": armour, "final": final, "dealt": dealt, "id": hit_id}
+	print("PLAYGROUND_HIT by=%s target=%s skill=%s base=%.2f crit=%s armor=%.0f final=%.2f dealt=%.2f id=%d" % [
+		attacker.name if attacker != null else "-", target.name, last_hit["skill"],
+		base, crit, armour, final, dealt, hit_id])
+	send_force(target, event)
+	var out := last_hit.duplicate()
+	for key in ["down_apply", "stun_apply", "knock_launched"]:
+		if event.has(key):
+			out[key] = event[key]
+	return out
+
+
+# C-1a: the armour formula, on its own so a check can read it as a table.
+#   max(0, attack - armour x armor_flat_pct) x 100 / (100 + armour)
+static func damage_after_armor(attack: float, armour: float) -> float:
+	var flat := maxf(0.0, attack - armour * Tuning.server.armor_flat_pct)
+	return flat * 100.0 / (100.0 + maxf(armour, 0.0))
+
+
+# C-1a: armour belongs to gear; with no gear yet, the sliders stand in.
+func armor_of(target: Node3D) -> float:
+	if target is Player:
+		return maxf(Tuning.server.armor_player, 0.0)
+	if target is Dummy:
+		return maxf(Tuning.server.armor_dummy, 0.0)
+	return 0.0
+
+
+# C-1a: the crit chance: base, plus agility above the race's own, per point.
+func crit_chance(attacker: Node3D) -> float:
+	var chance: float = Tuning.server.crit_base
+	if attacker is Player:
+		var stats := (attacker as Player).stats
+		chance += (stats.agility - stats.base_agility()) * Tuning.server.crit_per_agility
+	return clampf(chance, 0.0, 1.0)
+
+
+# The roll, on the server. Pinned per attacker peer for the checks; an
+# automated run pins everyone at "never" unless a check lifts it.
+func _roll_crit(attacker: Node3D, peer: int) -> bool:
+	var pin := int(_crit_pin.get(peer, -1 if Net.auto_smoke else 0))
+	if pin < 0:
+		return false
+	if pin > 0:
+		return true
+	return randf() < crit_chance(attacker)
+
+
+# For the automated checks only: -1 never, 0 roll, 1 always. Peer 0 is a
+# scarecrow's blows.
+func harness_pin_crit(peer: int, mode: int) -> bool:
+	if not is_judge() or not Net.auto_smoke:
+		return false
+	_crit_pin[peer] = clampi(mode, -1, 1)
+	return true
+
+
+# For the automated checks only: the allocated points, which C-5 will hand
+# out. Server-written, like the race; the Vitals synchronizer carries them.
+func harness_set_points(player: Player, points: PackedInt32Array) -> bool:
+	if not is_judge() or not Net.auto_smoke or player == null or player.stats == null:
+		return false
+	var fixed := PackedInt32Array([0, 0, 0, 0, 0])
+	for index in mini(points.size(), fixed.size()):
+		fixed[index] = points[index]
+	player.stats.points = fixed
+	if not player.sync_dead:
+		server_set_hp(player, player.hp)
+	forgive_move(player.get_multiplayer_authority(), "harness_points")
+	return true
 
 
 # The one place a body dies, and it only happens once: B-a's rule that nothing
@@ -1824,6 +2000,8 @@ func _rule_race(actor: Player, kind: int) -> Variant:
 		return null
 	actor.stats.race = kind
 	actor.stats.clear_overrides()
+	# C-1a: the stand is a fresh sheet: no points on it.
+	actor.stats.clear_points()
 	actor.stats.gear_weight = 0.0
 	server_set_hp(actor, actor.hp)
 	forgive_move(peer, "race_changed")
@@ -2060,25 +2238,21 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3) -> Variant:
 			continue
 		var is_ally := body is Player and caster != null and Tuning.server.same_party
 		var push := (forward + Vector3.UP * Tuning.server.shove_up_bias).normalized()
-		var event := ForceSystem.make_event(
-			ForceSystem.Kind.KNOCKBACK,
-			push,
-			def.value("knock_power"),
-			caster_strength,
-			peer,
-			is_ally,
-			def.value("damage"),
-			0.0)
-		event["skill"] = def.id
-		event["hit_y"] = strike_y
+		var ctx := {
+			"direction": push,
+			"source_strength": caster_strength,
+			"ally": is_ally,
+			"hit_y": strike_y,
+		}
 		# M-2: the knockdown is asked for here and ruled in _rule_hurt, like
 		# the stun: only a body on the ground goes down; in the air the push is
 		# all it gets. A body already down is put down again, for the full time.
 		if def.outcome == SkillDef.Outcome.DOWN:
-			event["down_request"] = true
-		send_force(body, event)
+			ctx["down_request"] = true
+		# C-1a: the damage is apply_hit's; the push goes out with it.
+		var hit := apply_hit(actor, body, def, ctx)
 		hits += 1
-		if float(event.get("down_apply", 0.0)) > 0.0:
+		if float(hit.get("down_apply", 0.0)) > 0.0:
 			downed += 1
 	last_strike = {"skill": def.id, "hits": hits, "downed": downed, "by": actor.name,
 		"at_unix": Time.get_unix_time_from_system()}

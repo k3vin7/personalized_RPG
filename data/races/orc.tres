@@ -9,6 +9,7 @@ label = "오크"
 strength = 100.0
 endurance = 80.0
 agility = 60.0
+vitality = 80.0
 intellect = 10.0
 height_cm = 220.0
 body_weight = 140.0

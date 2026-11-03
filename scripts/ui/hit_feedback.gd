@@ -11,14 +11,15 @@ extends Node3D
 #   - the body that was hit applies its force event (Player, Dummy)
 #   - a body on another screen is seen losing HP (the replica)
 #
-# so the same hit can arrive here twice on one screen. A hit on the same body
-# within DEDUPE seconds is one hit, and the first report wins.
+# so the same hit can arrive here twice on one screen. C-1a: every report
+# carries the hit's id (the force event's, replicated with the HP), and one
+# id is one hit -- two monsters landing on the same body in the same frame
+# are two. A report with no id (0) is never folded.
 
 static var instance: HitFeedback
 
-# A second report of the same body being hit inside this window is the same
-# hit seen from the other side.
-const DEDUPE := 0.25
+# How many hit ids are remembered for the fold.
+const REMEMBER_IDS := 64
 const NUMBER_RISE := 1.2
 const NUMBER_FONT := 30
 const PARTICLE_LIFE := 0.35
@@ -40,7 +41,9 @@ var deduped := 0
 var last_number_value := 0.0
 var last_point := Vector3.ZERO
 var last_target := ""
+# hit id -> {big}
 var _recent := {}
+var _recent_order: Array[int] = []
 var _sound: AudioStreamPlayer3D
 
 
@@ -62,24 +65,25 @@ func _exit_tree() -> void:
 #   target: the body that was hit. point: where, in the world. damage: what
 #   it cost. big: a big swing or a launch (shakes). by_me: this screen's
 #   body dealt it. on_me: this screen's body took it. kind: a log label.
-func on_hit(target: Node3D, point: Vector3, damage: float, big: bool, by_me: bool, on_me: bool, kind := "") -> void:
+func on_hit(target: Node3D, point: Vector3, damage: float, big: bool, by_me: bool, on_me: bool, kind := "", hit_id := 0) -> void:
 	if not Tuning.values.hit_feedback_enabled or target == null or not is_instance_valid(target):
 		return
-	var key := String(target.get_path())
-	var now := float(Time.get_ticks_msec()) / 1000.0
-	var recent: Dictionary = _recent.get(key, {})
-	if now - float(recent.get("at", -10.0)) < DEDUPE:
+	if hit_id > 0 and _recent.has(hit_id):
 		deduped += 1
 		# The same hit from the other side. Which report comes first is a
-		# matter of packet order: on the host its own body's HP drops a step
-		# before the force event is applied. The one thing the later report can
-		# add is "big" -- the shake -- so that is taken from it.
+		# matter of packet order: on the host its own body's HP is written a
+		# step before the force event is applied. The one thing the later
+		# report can add is "big" -- the shake -- so that is taken from it.
+		var recent: Dictionary = _recent[hit_id]
 		if big and not bool(recent.get("big", false)) and (by_me or on_me):
 			recent["big"] = true
-			_recent[key] = recent
 			_shake()
 		return
-	_recent[key] = {"at": now, "big": big}
+	if hit_id > 0:
+		_recent[hit_id] = {"big": big}
+		_recent_order.append(hit_id)
+		if _recent_order.size() > REMEMBER_IDS:
+			_recent.erase(_recent_order.pop_front())
 	hits += 1
 	last_point = point
 	last_target = target.name

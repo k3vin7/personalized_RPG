@@ -22,6 +22,20 @@ extends Resource
 
 @export var gear_weight: float = 0.0
 
+# C-1a: the allocated points, one count per ability in Ability order. An
+# ability is the race's number plus points x Tuning.server.stat_point_weight.
+# Levels and the points themselves are C-5's; this stage only has the shape,
+# and every body is at zero. Written only by the server (the Vitals
+# synchronizer carries it), like the race.
+enum Ability {
+	STRENGTH,
+	ENDURANCE,
+	AGILITY,
+	INTELLECT,
+	VITALITY,
+}
+@export var points: PackedInt32Array = PackedInt32Array([0, 0, 0, 0, 0])
+
 # Stage E: what this body is carrying. Not exported -- it is set by the hold,
 # not by the character sheet -- but it is part of the weight every formula in
 # 4-chapter reads, which is how carrying something makes a body slower and its
@@ -39,7 +53,8 @@ func race_data() -> RaceData:
 # ServerAuthority.
 var strength: float:
 	get:
-		return strength_override if not is_nan(strength_override) else race_data().strength
+		var base := strength_override if not is_nan(strength_override) else race_data().strength
+		return base + point_bonus(Ability.STRENGTH)
 
 var race_weight: float:
 	get:
@@ -47,15 +62,34 @@ var race_weight: float:
 
 var endurance: float:
 	get:
-		return race_data().endurance
+		return race_data().endurance + point_bonus(Ability.ENDURANCE)
 
 var agility: float:
 	get:
-		return race_data().agility
+		return race_data().agility + point_bonus(Ability.AGILITY)
 
 var intellect: float:
 	get:
-		return race_data().intellect
+		return race_data().intellect + point_bonus(Ability.INTELLECT)
+
+# C-1a: the fifth ability, which HP comes out of.
+var vitality: float:
+	get:
+		return race_data().vitality + point_bonus(Ability.VITALITY)
+
+
+# C-1a: what the allocated points add to one ability. The weight is the
+# server's slider; the points are the server's too.
+func point_bonus(ability: int) -> float:
+	if ability < 0 or ability >= points.size():
+		return 0.0
+	return float(points[ability]) * Tuning.server.stat_point_weight
+
+
+# The race's own number for an ability, with no points and no override: the
+# crit chance reads agility against this.
+func base_agility() -> float:
+	return race_data().agility
 
 var height_cm: float:
 	get:
@@ -64,14 +98,15 @@ var height_cm: float:
 # H-3: derived, like the abilities above. The coefficients are in the server's
 # tuning table (Tuning.server), which on a client is a replica only the server's
 # push may write -- so a client that moves its own slider changes nothing about
-# how much it can take.
+# how much it can take. C-1a: HP = vitality x k_hp (H-3 had it on endurance);
+# stamina = endurance x (1 + alpha). A human is 105 / 101.5.
 var max_hp: float:
 	get:
-		return endurance * Tuning.server.hp_per_endurance
+		return vitality * Tuning.server.k_hp
 
 var max_stamina: float:
 	get:
-		return Tuning.server.stamina_base + endurance * Tuning.server.stamina_per_endurance
+		return endurance * (1.0 + Tuning.server.stamina_alpha)
 
 
 func total_weight() -> float:
@@ -91,3 +126,7 @@ func is_overridden() -> bool:
 func clear_overrides() -> void:
 	strength_override = NAN
 	weight_override = NAN
+
+
+func clear_points() -> void:
+	points = PackedInt32Array([0, 0, 0, 0, 0])

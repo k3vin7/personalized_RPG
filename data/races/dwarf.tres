@@ -9,6 +9,7 @@ label = "드워프"
 strength = 80.0
 endurance = 100.0
 agility = 40.0
+vitality = 100.0
 intellect = 50.0
 height_cm = 150.0
 body_weight = 90.0

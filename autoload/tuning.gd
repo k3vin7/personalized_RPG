@@ -103,6 +103,9 @@ func limits_for(field: String) -> Vector2:
 	var value := float(server_default(field))
 	if field == "kill_plane_y" or value < 0.0:
 		return Vector2(minf(value * 4.0, -1.0), 0.0)
+	# C-1a: armour ships at 0 (no gear) and the formula is read out to 400.
+	if field.begins_with("armor_") and field != "armor_flat_pct":
+		return Vector2(0.0, 500.0)
 	return Vector2(1.0 if field == "grabbed_escape_presses" else 0.0, maxf(value * 4.0, 1.0))
 
 

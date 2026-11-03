@@ -18,3 +18,4 @@ strike_height = 0.4
 colour = Color(1.0000, 0.6627, 0.3020, 1)
 range_shape = 0
 trail = false
+weapon_id = "bare"

@@ -38,6 +38,7 @@ const GROUP_LABELS := {
 	"Force": "힘 · 밀치기 · 잡기 · 넉백 (손맛 Q6)",
 	"Skills": "기술 · 허수아비 공격",
 	"Survival": "낙하 · 낙사 · 리스폰",
+	"Combat": "전투 튜닝 (서버 승인) — 무기 공격력 · 방어력 · 치명타",
 }
 # A Korean name beside the field names that come up in the work order and the
 # feel questions. The field name stays: it is what the documents call it.
@@ -52,9 +53,22 @@ const FIELD_LABELS := {
 	"ratio_mult_max": "배율 상한",
 	"dash_cooldown": "돌진 쿨다운",
 	"stamina_dash_cost": "돌진 스태미나",
-	"hp_per_endurance": "지구력당 HP",
-	"stamina_base": "스태미나 기본",
-	"stamina_per_endurance": "지구력당 스태미나",
+	"k_hp": "체력당 HP (k_hp)",
+	"stamina_alpha": "스태미나 = 지구력 × (1+α)",
+	"stat_point_weight": "배분 포인트 가중치",
+	"weapon_attack_sword": "검 공격력",
+	"weapon_attack_shield": "방패 공격력",
+	"weapon_attack_bare": "맨손 공격력",
+	"armor_player": "캐릭터 방어력 (장비 대신)",
+	"armor_dummy": "허수아비 방어력",
+	"armor_flat_pct": "방어력 고정 감소 비율",
+	"crit_base": "치명타 기본 확률",
+	"crit_mult": "치명타 배율",
+	"crit_per_agility": "민첩 1당 치명타 확률",
+	"punch_stamina": "주먹 스태미나",
+	"kick_stamina": "발차기 스태미나",
+	"shove_stamina": "밀치기 스태미나",
+	"grab_stamina": "들기 중 초당 스태미나",
 	"shove_power": "밀치기 힘",
 	"grab_range": "잡기 거리",
 	"lift_per_strength": "근력당 들 수 있는 kg",
@@ -574,8 +588,9 @@ func _refresh_readout() -> void:
 			player.stats.strength, player.stats.total_weight(),
 			player.stats.gear_weight, player.stats.held_weight,
 			player.stats.height_cm],
-		"지구력 %.0f  민첩 %.0f  지능 %.0f" % [
-			player.stats.endurance, player.stats.agility, player.stats.intellect],
+		"지구력 %.0f  민첩 %.0f  지능 %.0f  체력 %.0f   배분 %s" % [
+			player.stats.endurance, player.stats.agility, player.stats.intellect,
+			player.stats.vitality, player.stats.points],
 		"ratio: %.3f (기준 %.2f)   점프 높이: %.2f m   초기 속도: %.2f" % [
 			player.get_ratio(), Tuning.server.ratio_ref,
 			player.get_jump_height(), player.get_jump_velocity()],
@@ -592,11 +607,11 @@ func _refresh_readout() -> void:
 func _race_vitals_line() -> String:
 	var parts := PackedStringArray()
 	for kind in Races.all_kinds():
-		var endurance := Races.data_for(kind).endurance
-		parts.append("%s %.0f/%.0f" % [
+		var data := Races.data_for(kind)
+		parts.append("%s %.0f/%.1f" % [
 			Races.label_for(kind),
-			endurance * Tuning.server.hp_per_endurance,
-			Tuning.server.stamina_base + endurance * Tuning.server.stamina_per_endurance])
+			data.vitality * Tuning.server.k_hp,
+			data.endurance * (1.0 + Tuning.server.stamina_alpha)])
 	return "  ".join(parts)
 
 

@@ -16,6 +16,10 @@ extends Resource
 @export var endurance: float = 70.0
 @export var agility: float = 70.0
 @export var intellect: float = 70.0
+# C-1a: the fifth ability. HP comes out of this, stamina out of endurance.
+# Temporary (2026-11-02): equal to endurance for every race, until the table
+# says otherwise.
+@export var vitality: float = 70.0
 
 @export_group("Body")
 # Stored in H-1 and read in H-4, which is where the capsule and the mesh start

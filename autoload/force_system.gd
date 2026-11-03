@@ -23,6 +23,13 @@ enum Kind {
 static var _next_id := 0
 
 
+# C-1a: an id for a loss of HP that no force event made (a fall), from the
+# same counter, so a screen can tell every hit it is shown apart.
+static func next_id() -> int:
+	_next_id += 1
+	return _next_id
+
+
 static func make_event(
 		kind: int,
 		direction: Vector3,

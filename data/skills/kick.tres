@@ -20,3 +20,4 @@ arc_plane = 1
 arc_start_deg = -50.0
 arc_sweep_deg = 70.0
 arc_duration = 0.18
+weapon_id = "bare"

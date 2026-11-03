@@ -47,6 +47,14 @@ var last_tolerance := 0.0
 var holder_peer := 0
 var sync_position := Vector3.ZERO
 var sync_hp := MAX_HP
+# C-1a: the last few hits' ids and amounts, written by the server's
+# apply_hit and carried in push_state, so a replica draws the hits it was
+# told about and not a guess off the HP. A ring: two hits in one state
+# interval are two.
+const HIT_RING := 4
+var hit_ids := PackedInt32Array()
+var hit_damages := PackedFloat32Array()
+var _drawn_hit_ids: Array[int] = []
 
 var _settle_left := 0.0
 var _state_left := 0.0
@@ -181,7 +189,7 @@ func apply_force_event(event: Dictionary) -> void:
 			velocity.y = Tuning.server.launch_min_up_speed
 	else:
 		velocity += change
-	hp = maxf(0.0, hp - float(event.get("damage", 0.0)))
+	# C-1a: the HP was taken by apply_hit before this event was sent.
 	_settle_left = RETURN_DELAY
 	_refresh()
 	# C-0: the hit, on the screen that simulates this scarecrow (the host's).
@@ -189,9 +197,26 @@ func apply_force_event(event: Dictionary) -> void:
 		var skill := String(event.get("skill", ""))
 		var def := Skills.get_def(skill) if skill != "" else null
 		var big := launched or (def != null and def.feedback_big)
-		HitFeedback.instance.on_hit(self, event.get("hit_point", global_position), float(event.get("damage", 0.0)), big, false, false, skill)
+		HitFeedback.instance.on_hit(self, event.get("hit_point", global_position), float(event.get("damage", 0.0)), big, false, false, skill, int(event.get("id", 0)))
 	print("PLAYGROUND_DUMMY_HIT name=%s hp=%.0f push=%.2f launched=%s tolerance=%.2f" % [
 		name, hp, velocity.length(), launched, float(event.get("knock_tolerance", 0.0))])
+
+
+# C-1a: the server's one way of taking HP off a scarecrow (apply_hit).
+func take_damage(amount: float, hit_id: int) -> void:
+	if not is_multiplayer_authority() or amount <= 0.0:
+		return
+	hp = maxf(0.0, hp - amount)
+	hit_ids.append(hit_id)
+	hit_damages.append(amount)
+	while hit_ids.size() > HIT_RING:
+		hit_ids.remove_at(0)
+		hit_damages.remove_at(0)
+	_refresh()
+
+
+func last_hit_id() -> int:
+	return hit_ids[hit_ids.size() - 1] if hit_ids.size() > 0 else 0
 
 
 func set_hold_display(peer: int) -> void:
@@ -238,7 +263,7 @@ func _physics_process(delta: float) -> void:
 			_state_left -= delta
 			if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 				_state_left = SyncRules.STATE_INTERVAL
-				push_state.rpc(global_position, hp)
+				push_state.rpc(global_position, hp, "", hit_ids, hit_damages)
 			return
 	if not is_multiplayer_authority():
 		# Shown, not simulated.
@@ -302,7 +327,7 @@ func _physics_process(delta: float) -> void:
 	_state_left -= delta
 	if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 		_state_left = SyncRules.STATE_INTERVAL
-		push_state.rpc(global_position, hp, attack_phase)
+		push_state.rpc(global_position, hp, attack_phase, hit_ids, hit_damages)
 
 
 # M-7: the pattern, on the server. Nothing while held, dead-still or switched
@@ -418,11 +443,22 @@ func attack_direction() -> Vector3:
 
 
 @rpc("authority", "call_remote", "unreliable_ordered")
-func push_state(at_position: Vector3, at_hp: float, at_phase := "") -> void:
+func push_state(at_position: Vector3, at_hp: float, at_phase := "", ids := PackedInt32Array(), damages := PackedFloat32Array()) -> void:
 	sync_position = at_position
-	# C-0: HP going down on a replica is a hit seen from this screen.
-	if _has_state and at_hp < sync_hp - 0.01 and HitFeedback.instance != null:
-		HitFeedback.instance.on_hit(self, at_position + Vector3.UP * 0.3, sync_hp - at_hp, false, false, false, "hp")
+	# C-1a: a hit id this replica has not drawn is a hit seen from this
+	# screen, with the amount the server dealt. The first packet's are history.
+	for index in ids.size():
+		var id := ids[index]
+		if id <= 0 or _drawn_hit_ids.has(id):
+			continue
+		_drawn_hit_ids.append(id)
+		if _drawn_hit_ids.size() > 32:
+			_drawn_hit_ids.pop_front()
+		if _has_state and HitFeedback.instance != null:
+			var damage := damages[index] if index < damages.size() else 0.0
+			HitFeedback.instance.on_hit(self, at_position + Vector3.UP * 0.3, damage, false, false, false, "hp", id)
+	hit_ids = ids
+	hit_damages = damages
 	sync_hp = at_hp
 	if at_phase != attack_phase:
 		_set_attack_phase(at_phase)

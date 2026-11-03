@@ -9,6 +9,7 @@ label = "인간"
 strength = 60.0
 endurance = 70.0
 agility = 70.0
+vitality = 70.0
 intellect = 70.0
 height_cm = 180.0
 body_weight = 80.0

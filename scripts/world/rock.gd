@@ -37,6 +37,12 @@ var home := Vector3.ZERO
 var holder_peer := 0
 
 var _hit_times := {}
+# The velocity this rock went into the last physics step with. body_entered
+# arrives after the step, when linear_velocity is already what the collision
+# left (a rock stopped dead by a capsule reads 0.2 m/s), so the speed and the
+# heading of a hit are read from this, not from linear_velocity. Measured
+# (C-1a): a 15.98 m/s line throw into a standing body registered no hit.
+var _flight_velocity := Vector3.ZERO
 var _thrower_peer := 0
 var _thrower_grace := 0.0
 var _state_left := 0.0
@@ -151,6 +157,7 @@ func _physics_process(delta: float) -> void:
 				rotation = rotation.lerp(_sync_rotation, SyncRules.ease(delta))
 		return
 
+	_flight_velocity = linear_velocity
 	if global_position.y < Tuning.server.kill_plane_y:
 		# Fallen out of the world. There are only three rocks, so losing one is
 		# losing a third of the stage: it comes back to its mark instead.
@@ -277,7 +284,7 @@ func _on_body_entered(body: Node) -> void:
 		return
 	if not body.has_method("apply_force_event"):
 		return
-	var speed := linear_velocity.length()
+	var speed := _flight_velocity.length()
 	if speed < HIT_SPEED:
 		return
 	if body is Player and (body as Player).get_multiplayer_authority() == _thrower_peer and _thrower_grace > 0.0:
@@ -287,7 +294,7 @@ func _on_body_entered(body: Node) -> void:
 	if now - float(_hit_times.get(key, -10.0)) < HIT_COOLDOWN:
 		return
 	_hit_times[key] = now
-	var direction := linear_velocity.normalized()
+	var direction := _flight_velocity.normalized()
 	direction.y = maxf(direction.y, 0.15)
 	# No one's strength behind it once it has left the hand: a rock in flight is
 	# an environmental force, so source_strength is 0.
@@ -301,15 +308,18 @@ func _on_body_entered(body: Node) -> void:
 	# judges it: a player's throw, with the party toggle on.
 	var source := _thrower_peer if _thrower_grace > 0.0 else 0
 	var ally := source != 0 and body is Player and Tuning.server.same_party
-	ServerAuthority.instance.send_force(body, ForceSystem.make_event(
-		ForceSystem.Kind.KNOCKBACK,
-		direction,
-		speed * HIT_POWER_PER_SPEED,
-		0.0,
-		source,
-		ally,
-		HIT_DAMAGE,
-		0.0))
+	# C-1a: the damage is apply_hit's (a hit with no skill: the number
+	# itself, through the crit and the armour); the push is as it was.
+	ServerAuthority.instance.apply_hit(
+		ServerAuthority.instance.actor_for(source) if source != 0 else null, body, null, {
+			"kind": ForceSystem.Kind.KNOCKBACK,
+			"direction": direction,
+			"power": speed * HIT_POWER_PER_SPEED,
+			"source_strength": 0.0,
+			"source_peer": source,
+			"ally": ally,
+			"raw_damage": HIT_DAMAGE,
+		})
 	print("PLAYGROUND_ROCK_HIT rock=%s target=%s speed=%.2f" % [name, body.name, speed])
 
 

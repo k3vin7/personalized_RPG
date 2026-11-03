@@ -771,23 +771,22 @@ func _vitals_checks() -> void:
 	var judge := _judge
 	# Checked against what the server holds, not against what this file thinks
 	# the numbers are: the formula is the claim, the table is the input.
-	var hp_k := Tuning.server.hp_per_endurance
-	var st_base := Tuning.server.stamina_base
-	var st_k := Tuning.server.stamina_per_endurance
-	note("vitals coefficients: hp_per_endurance %.3f stamina_base %.1f stamina_per_endurance %.3f" % [
-		hp_k, st_base, st_k])
+	# C-1a: HP = vitality x k_hp, stamina = endurance x (1 + alpha).
+	var hp_k := Tuning.server.k_hp
+	var st_alpha := Tuning.server.stamina_alpha
+	note("vitals coefficients: k_hp %.3f stamina_alpha %.3f" % [hp_k, st_alpha])
 	for kind: int in Races.all_kinds():
 		var data := Races.data_for(kind)
 		var tag: String = String(Races.Kind.keys()[kind]).to_lower()
 		await tick_request(func() -> void: judge.harness_set_race(_local, kind))
 		await _wait(0.3)
-		var want_hp := data.endurance * hp_k
-		var want_stamina := st_base + data.endurance * st_k
-		note("race %s: endurance %.0f -> max_hp %.1f (formula %.1f), max_stamina %.1f (formula %.1f), hp now %.1f, stamina now %.1f" % [
-			data.label, data.endurance, _local.stats.max_hp, want_hp,
+		var want_hp := data.vitality * hp_k
+		var want_stamina := data.endurance * (1.0 + st_alpha)
+		note("race %s: vitality %.0f endurance %.0f -> max_hp %.1f (formula %.1f), max_stamina %.1f (formula %.1f), hp now %.1f, stamina now %.1f" % [
+			data.label, data.vitality, data.endurance, _local.stats.max_hp, want_hp,
 			_local.stats.max_stamina, want_stamina, _local.hp, _local.stamina])
-		expect(absf(_local.stats.max_hp - want_hp) < 0.01, "%s_max_hp_is_endurance_times_the_coefficient" % tag)
-		expect(absf(_local.stats.max_stamina - want_stamina) < 0.01, "%s_max_stamina_is_base_plus_a_slice_of_endurance" % tag)
+		expect(absf(_local.stats.max_hp - want_hp) < 0.01, "%s_max_hp_is_vitality_times_k_hp" % tag)
+		expect(absf(_local.stats.max_stamina - want_stamina) < 0.01, "%s_max_stamina_is_endurance_times_one_plus_alpha" % tag)
 		expect(_local.hp <= _local.stats.max_hp + 0.01, "%s_hp_sits_inside_its_max" % tag)
 		expect(_local.stamina <= _local.stats.max_stamina + 0.01, "%s_stamina_sits_inside_its_max" % tag)
 
@@ -795,7 +794,7 @@ func _vitals_checks() -> void:
 	await tick_request(func() -> void: judge.harness_set_race(_local, Races.Kind.HUMAN))
 	await _wait(0.3)
 	expect(absf(_local.stats.max_hp - 105.0) < 0.01, "a_human_has_105_hp")
-	expect(absf(_local.stats.max_stamina - 101.0) < 0.01, "and_101_stamina")
+	expect(absf(_local.stats.max_stamina - 101.5) < 0.01, "and_101_5_stamina")
 
 	# A race change clamps: a full dwarf (150) put back on human keeps 105.
 	await tick_request(func() -> void: judge.harness_set_race(_local, Races.Kind.DWARF))
@@ -807,14 +806,17 @@ func _vitals_checks() -> void:
 	note("dwarf 150 -> human: hp %.1f / %.1f" % [_local.hp, _local.stats.max_hp])
 	expect(absf(_local.hp - 105.0) < 0.01, "back_on_human_the_hp_is_clamped_to_105")
 	# And the stamina pool regrows to the new maximum, no further.
+	# C-1a: the climb is 101.5 -> 145 (endurance x 1.45, no longer 101 -> 110),
+	# so the wait is what the regen needs plus a margin, not a fixed second.
 	await tick_request(func() -> void: judge.harness_set_race(_local, Races.Kind.DWARF))
-	await _wait(1.0)
-	note("human -> dwarf after 1 s: stamina %.1f / %.1f (regen %.0f/s)" % [
-		_local.stamina, _local.stats.max_stamina, Tuning.server.stamina_regen])
-	expect(absf(_local.stamina - _local.stats.max_stamina) < 0.5, "the_stamina_pool_regrows_to_110")
+	var climb := (145.0 - 101.5) / maxf(Tuning.server.stamina_regen, 1.0) + 0.5
+	await _wait(climb)
+	note("human -> dwarf after %.2f s: stamina %.1f / %.1f (regen %.0f/s)" % [
+		climb, _local.stamina, _local.stats.max_stamina, Tuning.server.stamina_regen])
+	expect(absf(_local.stamina - _local.stats.max_stamina) < 0.5, "the_stamina_pool_regrows_to_145")
 	await tick_request(func() -> void: judge.harness_set_race(_local, Races.Kind.HUMAN))
 	await _wait(0.3)
-	expect(_local.stamina <= 101.01, "and_is_cut_back_to_101")
+	expect(_local.stamina <= 101.51, "and_is_cut_back_to_101_5")
 
 	# A respawn fills to the derived maximum.
 	await tick_request(func() -> void: judge.server_set_hp(_local, 20.0))
@@ -841,15 +843,15 @@ func _vitals_checks() -> void:
 			expect(absf(seen[0] - mate.stats.max_hp) < 0.01, "the_client_computes_the_same_max_hp")
 			expect(absf(seen[1] - mate.stats.max_stamina) < 0.01, "and_the_same_max_stamina")
 			expect(absf(forged[0] - mate.stats.max_hp) < 0.01, "a_clients_own_coefficient_write_changes_nothing")
-		expect(absf(Tuning.server.hp_per_endurance - hp_k) < 0.0001,
+		expect(absf(Tuning.server.k_hp - hp_k) < 0.0001,
 			"a_clients_push_of_the_table_is_refused")
 
 	# The slider is a request. Up: the max grows, the hp does not. Down: the hp
 	# is cut to fit. Both reach the client.
 	await tick_request(func() -> void: ServerAuthority.submit_intent(_local,
-		ServerAuthority.Intent.SERVER_TUNING, {"field": "hp_per_endurance", "value": 2.0}))
+		ServerAuthority.Intent.SERVER_TUNING, {"field": "k_hp", "value": 2.0}))
 	await _wait(0.5)
-	note("hp_per_endurance 2.0: human max_hp %.1f hp %.1f" % [_local.stats.max_hp, _local.hp])
+	note("k_hp 2.0: human max_hp %.1f hp %.1f" % [_local.stats.max_hp, _local.hp])
 	expect(absf(_local.stats.max_hp - 140.0) < 0.01, "a_slider_request_changes_the_servers_table")
 	expect(absf(_local.hp - 105.0) < 0.01, "a_bigger_max_is_not_a_heal")
 	if mate != null:
@@ -858,14 +860,14 @@ func _vitals_checks() -> void:
 			var seen_after: PackedFloat32Array = after[0]
 			expect(absf(seen_after[0] - 160.0) < 0.01, "the_new_coefficient_reached_the_client")
 	await tick_request(func() -> void: ServerAuthority.submit_intent(_local,
-		ServerAuthority.Intent.SERVER_TUNING, {"field": "hp_per_endurance", "value": 1.0}))
+		ServerAuthority.Intent.SERVER_TUNING, {"field": "k_hp", "value": 1.0}))
 	await _wait(0.5)
-	note("hp_per_endurance 1.0: human max_hp %.1f hp %.1f" % [_local.stats.max_hp, _local.hp])
+	note("k_hp 1.0: human max_hp %.1f hp %.1f" % [_local.stats.max_hp, _local.hp])
 	expect(absf(_local.hp - 70.0) < 0.01, "a_smaller_max_takes_the_hp_down_with_it")
 
 	# Back where the rest of the stage expects things.
 	await tick_request(func() -> void: ServerAuthority.submit_intent(_local,
-		ServerAuthority.Intent.SERVER_TUNING, {"field": "hp_per_endurance", "value": hp_k}))
+		ServerAuthority.Intent.SERVER_TUNING, {"field": "k_hp", "value": hp_k}))
 	if mate != null:
 		await tick_request(func() -> void: judge.harness_set_race(mate, Races.Kind.HUMAN))
 	await _wait(0.5)
@@ -896,9 +898,9 @@ func _ask_client_vitals() -> Array:
 func client_report_vitals() -> void:
 	var own := PackedFloat32Array([_local.stats.max_hp, _local.stats.max_stamina, _local.hp])
 	# N-1: the replica refuses the write itself, so nothing to put back.
-	Tuning.server.hp_per_endurance = 9.0
+	Tuning.server.k_hp = 9.0
 	var forged := PackedFloat32Array([_local.stats.max_hp, _local.stats.max_stamina, _local.hp])
-	_judge.push_server_tuning.rpc_id(1, {"hp_per_endurance": 9.0})
+	_judge.push_server_tuning.rpc_id(1, {"k_hp": 9.0})
 	report_vitals.rpc_id(1, own, forged)
 
 

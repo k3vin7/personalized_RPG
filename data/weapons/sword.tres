@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="WeaponDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/weapon_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "sword"
+label = "검"
+kind = 1
+hands = 1
+attack_field = "weapon_attack_sword"
+attack_power_value = 10.0

@@ -577,7 +577,7 @@ func _race_checks() -> void:
 		expect(_local.stats.race == kind, "standing_on_the_%s_stand_and_pressing_g_takes_the_race" % String(Races.Kind.keys()[kind]).to_lower())
 		expect(absf(_local.stats.strength - data.strength) < 0.01 and absf(_local.stats.race_weight - data.body_weight) < 0.01,
 			"%s_strength_and_weight_are_the_race_data" % String(Races.Kind.keys()[kind]).to_lower())
-		expect(absf(_local.stats.max_hp - data.endurance * Tuning.server.hp_per_endurance) < 0.01
+		expect(absf(_local.stats.max_hp - data.vitality * Tuning.server.k_hp) < 0.01
 			and _local.hp <= _local.stats.max_hp + 0.01, "%s_hp_follows_and_is_clamped" % String(Races.Kind.keys()[kind]).to_lower())
 	# Back to human for everything after. Told to the move check: the orc
 	# stand to the human stand is 6.6 m in a step.

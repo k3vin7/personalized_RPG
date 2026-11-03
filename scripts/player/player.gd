@@ -133,6 +133,15 @@ var sync_race: int = Races.DEFAULT
 var sync_strength_override := NAN
 var sync_weight_override := NAN
 var sync_gear_weight := 0.0
+# C-1a: the allocated points (server's, Vitals synchronizer). All zero.
+var sync_points := PackedInt32Array([0, 0, 0, 0, 0])
+# C-1a: the last few hits' ids and amounts, written by the server with the
+# HP and carried on Vitals, so every screen draws the hits it was told about.
+# A ring rather than one value: two monsters landing in the same tick are two
+# hits, and a single field would carry only the second.
+const HIT_RING := 4
+var sync_hit_ids := PackedInt32Array()
+var sync_hit_damages := PackedFloat32Array()
 
 var movement: PlayerMovement
 var climb: PlayerClimb
@@ -161,8 +170,10 @@ var last_hitstop_frames := 0
 # C-0: the hit flash, in seconds of white.
 var _flash_left := 0.0
 var flashes_applied := 0
-# C-0: the HP this screen last saw on this body, for the replica's feedback.
-var _seen_hp := -1.0
+# C-1a: the hit ids this screen has drawn for this body.
+var _drawn_hit_ids: Array[int] = []
+var _hits_primed := false
+var _shown_hp := -1
 const TRAIL_MAX_SAMPLES := 24
 const TRAIL_FADE := 0.18
 const LIMB_BAR_THICKNESS := 0.14
@@ -574,17 +585,23 @@ func _sync_stats() -> void:
 		sync_strength_override = stats.strength_override
 		sync_weight_override = stats.weight_override
 		sync_gear_weight = stats.gear_weight
+		sync_points = stats.points
 		return
 	if Races.is_known(sync_race):
 		stats.race = sync_race
 	stats.strength_override = sync_strength_override
 	stats.weight_override = sync_weight_override
 	stats.gear_weight = sync_gear_weight
+	if sync_points.size() == stats.points.size():
+		stats.points = sync_points
 
 
 func _physics_process(delta: float) -> void:
 	_sync_stats()
-	_watch_hp()
+	_watch_hit()
+	if roundi(hp) != _shown_hp:
+		_shown_hp = roundi(hp)
+		_apply_state_colour()
 	if stats != null and stats.race != _body_race:
 		_apply_body_size()
 	# M-5: the weapon follows the server's word on every peer, the owner too.
@@ -960,7 +977,7 @@ func apply_force_event(event: Dictionary) -> void:
 		var def := Skills.get_def(skill) if skill != "" else null
 		var big := launched or (def != null and def.feedback_big)
 		var point: Vector3 = event.get("hit_point", global_position)
-		HitFeedback.instance.on_hit(self, point, float(event.get("damage", 0.0)), big, false, true, skill)
+		HitFeedback.instance.on_hit(self, point, float(event.get("damage", 0.0)), big, false, true, skill, int(event.get("id", 0)))
 	print("PLAYGROUND_FORCE peer=%s power=%.2f verdict=%s airborne=%s hp=%.0f vel=(%.2f, %.2f, %.2f) y=%.2f" % [
 		name, change.length(), "launched" if launched else "slid",
 		state == State.AIRBORNE, hp,
@@ -1407,17 +1424,46 @@ func trail_sample_count() -> int:
 	return _trail_samples.size()
 
 
-# C-0: a replica (and the owner, whose HP is the server's too) losing HP is a
-# hit seen from this screen. The force event, when this screen gets one, says
-# the same thing first; HitFeedback keeps one of the two.
-func _watch_hp() -> void:
-	if _seen_hp < 0.0:
-		_seen_hp = hp
+# C-1a: a hit id on this body this screen has not drawn (the server wrote it
+# with the HP) is a hit seen from here, with the amount the server dealt. The
+# force event, when this screen gets one, carries the same id; HitFeedback
+# keeps one of the two.
+func _watch_hit() -> void:
+	if not _hits_primed:
+		# What was there when this body arrived is history, not a hit now.
+		_hits_primed = true
+		for id in sync_hit_ids:
+			_drawn_hit_ids.append(id)
 		return
-	if hp < _seen_hp - 0.01 and HitFeedback.instance != null:
-		var point := global_position + Vector3.UP * (0.3 * body_scale())
-		HitFeedback.instance.on_hit(self, point, _seen_hp - hp, false, false, is_local(), "hp")
-	_seen_hp = hp
+	for index in sync_hit_ids.size():
+		var id := sync_hit_ids[index]
+		if id <= 0 or _drawn_hit_ids.has(id):
+			continue
+		_drawn_hit_ids.append(id)
+		if _drawn_hit_ids.size() > 32:
+			_drawn_hit_ids.pop_front()
+		if HitFeedback.instance != null:
+			var damage := sync_hit_damages[index] if index < sync_hit_damages.size() else 0.0
+			var point := global_position + Vector3.UP * (0.3 * body_scale())
+			HitFeedback.instance.on_hit(self, point, damage, false, false, is_local(), "hp", id)
+
+
+# C-1a: the server's record of a loss of HP, newest last. Server only.
+func note_hit(id: int, damage: float) -> void:
+	sync_hit_ids.append(id)
+	sync_hit_damages.append(damage)
+	while sync_hit_ids.size() > HIT_RING:
+		sync_hit_ids.remove_at(0)
+		sync_hit_damages.remove_at(0)
+
+
+# The newest hit's id, 0 for none. Read by the checks.
+func last_hit_id() -> int:
+	return sync_hit_ids[sync_hit_ids.size() - 1] if sync_hit_ids.size() > 0 else 0
+
+
+func last_hit_damage() -> float:
+	return sync_hit_damages[sync_hit_damages.size() - 1] if sync_hit_damages.size() > 0 else 0.0
 
 
 func _apply_state_colour() -> void:
@@ -1434,6 +1480,9 @@ func _apply_state_colour() -> void:
 		_label.text = "%s · %s" % [name, State.keys()[state]]
 		if predicted_action != -1:
 			_label.text += " (%s?)" % PREDICT_NAMES.get(predicted_action, "동작")
+		# C-1a: the HP, readable off every body on every screen.
+		if stats != null:
+			_label.text += "\nHP %d / %d" % [roundi(hp), roundi(stats.max_hp)]
 		if overhead_note != "":
 			_label.text += "\n" + overhead_note
 		if sync_knock != "":

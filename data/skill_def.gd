@@ -51,6 +51,13 @@ enum RangeShape {
 	CIRCLE,
 }
 
+# C-1a: what kind of damage this is. Every C-1 skill is physical and not
+# holy; the fields are here for the tags the design names.
+enum AttackTag {
+	PHYSICAL,
+	MAGIC,
+}
+
 # C-0: which way the strike bar sweeps. Horizontal is a yaw sweep (a side
 # cut); vertical is a pitch sweep (an overhead cut, a kick). A sweep of zero
 # is a thrust along the heading either way.
@@ -75,8 +82,20 @@ enum ArcPlane {
 # The hit rectangle: this far ahead, this wide.
 @export var reach: float = 1.5
 @export var width: float = 1.2
+# C-1a: the '피해' column is a coefficient on the weapon's attack power
+# (WeaponDef, by weapon_id). Bare hands are 1, so for the bare four this is
+# the damage itself.
 @export var damage: float = 0.0
+@export var weapon_id: String = "bare"
 @export var knock_power: float = 0.0
+# C-1a: the '스태미나' column. A fixed cost per cast; 0 stamina refuses the
+# cast at the intent (C-1b/C-1d spend it, this stage carries it).
+@export var stamina_cost: float = 0.0
+# C-1a: damage itself never stuns (only a launch does); a skill that says so
+# here stuns for this long on a hit. 0 for everything in C-1 but the parry.
+@export var stun_on_hit: float = 0.0
+@export var attack_tag: AttackTag = AttackTag.PHYSICAL
+@export var holy: bool = false
 # M-7: when the ruling lands, measured from the cast. 0 means "at the end of
 # the windup", which is every strike today; a bow or a boss swing can put it
 # elsewhere. The catch window closes at this moment.
@@ -152,6 +171,7 @@ const TUNING_SUFFIX := {
 	"impact_at": "impact_at",
 	"catch_window": "catch_window",
 	"catch_force": "catch_force",
+	"stamina_cost": "stamina",
 }
 
 

@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="WeaponDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/weapon_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "bare"
+label = "맨손"
+kind = 0
+hands = 0
+attack_field = "weapon_attack_bare"
+attack_power_value = 1.0

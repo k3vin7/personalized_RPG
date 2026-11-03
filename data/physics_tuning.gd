@@ -121,25 +121,77 @@ extends Resource
 			stamina_dash_cost = value
 
 @export_group("Vitals")
-# H-3: HP and stamina come out of endurance, not out of a stored maximum. HP is
-# proportional, so the difference between races lands on how much they take;
-# stamina is a base plus a small slice of it, so the same difference barely
-# touches how far they move. These three go into the server's HP ruling, so the
-# copy that counts is the server's table (Tuning.server, like everything in this
-# file since N-1) and the slider is a request, like the abilities. 1.5 puts a human (70) at 105, a
-# dwarf (100) at 150, an orc (80) at 120 -- 100 was a placeholder, not a value.
-@export var hp_per_endurance: float = 1.5:
+# C-1a: HP = vitality x k_hp, stamina = endurance x (1 + stamina_alpha). H-3
+# had HP on endurance and stamina as a base plus a slice; the design split the
+# ability (2026-11-02). Temporary numbers chosen to land where H-3 did: a
+# human is 105 / 101.5, a dwarf 150 / 145, an orc 120 / 116. These go into the
+# server's HP ruling, so the copy that counts is Tuning.server and a slider is
+# a request.
+@export var k_hp: float = 1.5:
 	set(value):
 		if Tuning.may_write(self):
-			hp_per_endurance = value
-@export var stamina_base: float = 80.0:
+			k_hp = value
+@export var stamina_alpha: float = 0.45:
 	set(value):
 		if Tuning.may_write(self):
-			stamina_base = value
-@export var stamina_per_endurance: float = 0.3:
+			stamina_alpha = value
+# C-1a: an allocated point is worth this much of an ability. Two points a
+# level (C-5); the structure is here, the points are all zero.
+@export var stat_point_weight: float = 0.5:
 	set(value):
 		if Tuning.may_write(self):
-			stamina_per_endurance = value
+			stat_point_weight = value
+
+@export_group("Combat")
+# C-1a: the damage formula's numbers. Every one is temporary (the tracker's
+# blue cells) and lives here so the feel session can move it.
+#   damage = coefficient (the skill's '피해' column) x weapon attack
+#          x speed/height bonus (C-1b/c) x crit
+#   then   max(0, damage - armour x armor_flat_pct) x 100 / (100 + armour)
+# Strength plays no part in damage; intellect is recorded and unused.
+@export var weapon_attack_sword: float = 10.0:
+	set(value):
+		if Tuning.may_write(self):
+			weapon_attack_sword = value
+@export var weapon_attack_shield: float = 6.0:
+	set(value):
+		if Tuning.may_write(self):
+			weapon_attack_shield = value
+# Bare hands: 1, so the bare skills' coefficients are the damage itself.
+@export var weapon_attack_bare: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			weapon_attack_bare = value
+# Armour is gear's alone in the design; there is no gear yet, so these two
+# stand in for it on every character and every scarecrow. 0 is "no gear".
+@export var armor_player: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			armor_player = value
+@export var armor_dummy: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			armor_dummy = value
+# The flat part of the armour formula: how much of the armour is taken off
+# the attack before the ratio. The handle on how wide the "0 damage" band is.
+@export var armor_flat_pct: float = 0.05:
+	set(value):
+		if Tuning.may_write(self):
+			armor_flat_pct = value
+# Crit: base chance plus agility above the race's own, times this per point.
+# The server rolls it.
+@export var crit_base: float = 0.05:
+	set(value):
+		if Tuning.may_write(self):
+			crit_base = value
+@export var crit_mult: float = 1.5:
+	set(value):
+		if Tuning.may_write(self):
+			crit_mult = value
+@export var crit_per_agility: float = 0.001:
+	set(value):
+		if Tuning.may_write(self):
+			crit_per_agility = value
 
 @export_group("Force")
 @export var shove_power: float = 7.0:
@@ -357,6 +409,12 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			punch_power = value
+# C-1a: the '스태미나' column, temporary. Carried on the SkillDef; nothing
+# spends it until C-1d (the bare four) and C-1b (the sword's).
+@export var punch_stamina: float = 3.0:
+	set(value):
+		if Tuning.may_write(self):
+			punch_stamina = value
 @export var kick_windup: float = 0.25:
 	set(value):
 		if Tuning.may_write(self):
@@ -385,6 +443,19 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			kick_power = value
+@export var kick_stamina: float = 7.0:
+	set(value):
+		if Tuning.may_write(self):
+			kick_stamina = value
+# The shove's and the grab's (per second while lifting), same column.
+@export var shove_stamina: float = 6.0:
+	set(value):
+		if Tuning.may_write(self):
+			shove_stamina = value
+@export var grab_stamina: float = 2.0:
+	set(value):
+		if Tuning.may_write(self):
+			grab_stamina = value
 # M-7: the catch. How long before an attack lands a grab counts as catching it,
 # what the catcher's strength is measured against (attack catch_force times
 # this), and how long the caught attacker is held still.

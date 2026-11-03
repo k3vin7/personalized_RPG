@@ -9,6 +9,7 @@ label = "엘프"
 strength = 50.0
 endurance = 70.0
 agility = 90.0
+vitality = 70.0
 intellect = 60.0
 height_cm = 170.0
 body_weight = 60.0
