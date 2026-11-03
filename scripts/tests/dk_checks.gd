@@ -66,6 +66,7 @@ func run(world: Node3D) -> void:
 	await _park(HOME)
 	client_run.rpc_id(_client_peer(), CLIENT_HOME)
 	await _key_checks()
+	await _arc_check()
 	await _camera_checks()
 	expect(await _wait_stage("client_done", 40.0), "client_finished_its_checks")
 	if _client_result.size() == 2:
@@ -163,32 +164,47 @@ func _key_checks() -> void:
 		_local.movement.dash_key_label(), _local.skills.key_label(0), _local.skills.key_label(1)])
 
 	# 5) The line-throw modifier is C, read while held; Shift (the dash) is not it.
+	# (parse_input_event buffers; flushed so the state is read the same frame.)
 	var hold := InputEventKey.new()
 	hold.physical_keycode = KEY_C
 	hold.pressed = true
 	Input.parse_input_event(hold)
+	Input.flush_buffered_events()
 	await get_tree().physics_frame
 	var c_held := _local.grab.line_throw_held()
 	var lift := InputEventKey.new()
 	lift.physical_keycode = KEY_C
 	lift.pressed = false
 	Input.parse_input_event(lift)
+	Input.flush_buffered_events()
 	await get_tree().physics_frame
 	var c_lifted := _local.grab.line_throw_held()
 	hold = InputEventKey.new()
 	hold.physical_keycode = KEY_SHIFT
 	hold.pressed = true
 	Input.parse_input_event(hold)
+	Input.flush_buffered_events()
 	await get_tree().physics_frame
 	var shift_held := _local.grab.line_throw_held()
 	lift = InputEventKey.new()
 	lift.physical_keycode = KEY_SHIFT
 	lift.pressed = false
 	Input.parse_input_event(lift)
+	Input.flush_buffered_events()
 	await get_tree().physics_frame
 	_local.movement.cancel_armed()
 	note("line throw: C held=%s, lifted=%s, Shift held=%s (key %s)" % [c_held, c_lifted, shift_held, OS.get_keycode_string(PlayerGrab.LINE_THROW_KEY)])
 	expect(PlayerGrab.LINE_THROW_KEY == KEY_C and c_held and not c_lifted and not shift_held, "the_line_throw_modifier_is_c_and_not_shift")
+
+
+# The debug panel's jump arc (the line along the jump the cursor would get)
+# is off by default: nothing is drawn while standing.
+func _arc_check() -> void:
+	await _wait(0.5)
+	var arc := get_tree().current_scene.get_node_or_null("JumpArc") as MeshInstance3D
+	note("jump arc node: %s visible=%s grounded=%s" % [
+		arc != null, arc.visible if arc != null else false, _local.is_grounded_state()])
+	expect(arc == null or not arc.visible, "the_jump_arc_preview_is_off_by_default")
 
 
 func _camera_checks() -> void:
@@ -224,6 +240,7 @@ func report_result(values: PackedInt32Array) -> void:
 func client_run(home: Vector3) -> void:
 	await _park(home)
 	await _key_checks()
+	await _arc_check()
 	await _camera_checks()
 	print("DK_RESULT peer=%d checks=%d failures=%d" % [_peer_id, _checks, _failures])
 	report_result.rpc_id(1, PackedInt32Array([_checks, _failures]))

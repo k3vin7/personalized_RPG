@@ -139,7 +139,10 @@ var _slot_buttons: Array[Button] = []
 var _rebind_dash := false
 var _dash_button: Button
 var _arc: MeshInstance3D
-var _arc_enabled := true
+# Off by default (2026-11-03): the line drawn from the feet along the jump
+# the cursor would get was always on and read as clutter. The panel's
+# "점프 궤적 미리보기" switch turns it on for this screen.
+var _arc_enabled := false
 # The race and weapon buttons, by kind; the one this body has is lit.
 var _race_buttons := {}
 var _weapon_buttons := {}
