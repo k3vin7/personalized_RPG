@@ -1259,18 +1259,18 @@ func clear_predicted() -> void:
 	_apply_state_colour()
 
 
-# The whole of the motion: a lean towards whatever was aimed at. Deliberately
-# small -- it has to be taken back without looking like a glitch when the
-# server says no.
+# The pose. A predicted action no longer bows the body (2026-11-03: the 12
+# degree lean and the 0.08 m dip stacked on the cast's own lean and read as
+# bowing on every attack); the prediction shows in the colour and the label.
+# M-1: the cast's lean is the SkillDef's (0 for every player skill now, the
+# swing is the motion). M-2: a body that was knocked down lies flat, and eases
+# back up through the getup.
 func _apply_predicted_pose() -> void:
 	if _visual == null:
 		return
-	var leaning := predicted_action != -1
-	# M-1: the cast's own lean adds to the prediction's. M-2: a body that was
-	# knocked down lies flat, and eases back up through the getup.
 	var lying := _lying()
-	_visual.rotation.x = deg_to_rad(-(12.0 if leaning else 0.0) - _skill_lean_deg - 85.0 * lying)
-	_visual.position.y = (-0.08 if leaning else 0.0) - (half_height() - radius()) * lying
+	_visual.rotation.x = deg_to_rad(-_skill_lean_deg - 85.0 * lying)
+	_visual.position.y = -(half_height() - radius()) * lying
 
 
 # M-1: the procedural show, one phase at a time. "windup" leans the capsule

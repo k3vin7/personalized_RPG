@@ -933,12 +933,21 @@ func _phase_replication_check() -> void:
 	await _wait(0.3)
 	_local.movement.set_aim_override(HOME + Vector3(3.0, 0.0, 0.0))
 	await tick_request(func() -> void: _local.skills.press_slot(3))
+	# The body's tilt on this screen through the cast: the attack motion is
+	# the swing, not a bow (2026-11-03).
+	var tilt_max := 0.0
+	var sampled := 0.0
+	while sampled < kick.value("windup") + kick.value("recovery") + 0.2:
+		await get_tree().physics_frame
+		sampled += get_physics_process_delta_time()
+		tilt_max = maxf(tilt_max, rad_to_deg(absf(_local._visual.rotation.x)))
 	if await _wait_report("phase"):
 		var seen: Dictionary = _reports["phase"]
-		note("kick windup on the other screen: seen=%s lean %.1f deg (def %.1f), delay after the owner's clock %.3f s, phases seen %d, cleared after=%s" % [
-			seen.get("seen", false), float(seen.get("lean", 0.0)), kick.windup_lean_deg,
-			float(seen.get("delay", -1.0)), int(seen.get("count", 0)), seen.get("cleared", false)])
-		expect(bool(seen.get("seen", false)) and float(seen.get("lean", 0.0)) > 0.5, "the_other_screen_shows_the_windup_lean")
+		note("kick windup on the other screen: seen=%s lean %.1f deg (def %.1f) tilt %.1f deg, delay after the owner's clock %.3f s, phases seen %d, cleared after=%s | own screen tilt max %.1f deg" % [
+			seen.get("seen", false), float(seen.get("lean", 0.0)), kick.windup_lean_deg, float(seen.get("tilt_deg", 0.0)),
+			float(seen.get("delay", -1.0)), int(seen.get("count", 0)), seen.get("cleared", false), tilt_max])
+		expect(bool(seen.get("seen", false)), "the_other_screen_shows_the_windup")
+		expect(tilt_max < 0.5 and float(seen.get("tilt_deg", 99.0)) < 0.5, "and_the_body_does_not_bow_on_either_screen")
 		expect(float(seen.get("delay", 9.0)) < 0.25, "and_no_later_than_a_quarter_second_after_the_owner")
 		expect(bool(seen.get("cleared", false)), "and_takes_it_down_when_the_cast_ends")
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
@@ -950,11 +959,13 @@ func _phase_replication_check() -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_watch_phase(path: NodePath, seconds: float) -> void:
 	var body := get_node_or_null(path) as Player
-	var out := {"seen": false, "lean": 0.0, "delay": -1.0, "count": 0, "cleared": false}
+	var out := {"seen": false, "lean": 0.0, "tilt_deg": 0.0, "delay": -1.0, "count": 0, "cleared": false}
 	var t := 0.0
 	while t < seconds and body != null:
 		await get_tree().physics_frame
 		t += get_physics_process_delta_time()
+		if body.sync_skill_phase != "":
+			out["tilt_deg"] = maxf(float(out["tilt_deg"]), rad_to_deg(absf(body._visual.rotation.x)))
 		if not bool(out["seen"]) and body.sync_skill_phase == "windup":
 			await get_tree().physics_frame
 			out["seen"] = true
