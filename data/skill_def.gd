@@ -21,6 +21,9 @@ enum Outcome {
 	NONE,
 	KNOCKBACK,
 	DOWN,
+	# C-1c: the ruling throws the off-hand weapon as a body (the shield)
+	# instead of striking.
+	THROW_WEAPON,
 }
 
 # M-6: how the key is read. PRESS_CAST is the cast flow (arm or cast on the
@@ -31,6 +34,9 @@ enum Outcome {
 enum InputMode {
 	PRESS_CAST,
 	HOLD_RELEASE,
+	# C-1c: held up while the key is down (the shield raise). The press
+	# opens it, the release ends it; no windup, no ruling of its own.
+	HOLD_BLOCK,
 }
 
 # C-0: the shape drawn on the ground when the key arms this skill (smart key
@@ -108,6 +114,15 @@ enum ArcPlane {
 # C-1b: damage x (1 + this x the caster's horizontal speed at the intent,
 # as the server saw it, / base_move_speed). The thrust's; 0 for the rest.
 @export var speed_bonus: float = 0.0
+# C-1c: damage x (1 + this x metres fallen by the caster when it lands, off
+# the server's record of its peak). The shield slam's; 0 for the rest.
+@export var height_bonus: float = 0.0
+# C-1c: may be cast from the air (the shield slam). The owner sends the
+# intent without leaving AIRBORNE; the ruling lands at the impact time.
+@export var usable_airborne: bool = false
+# C-1c: a team mate in the air is launched rather than pushed (the shove's
+# co-op step), with the shove's angle. The shield bash's.
+@export var launches_airborne_ally: bool = false
 # M-7: when the ruling lands, measured from the cast. 0 means "at the end of
 # the windup", which is every strike today; a bow or a boss swing can put it
 # elsewhere. The catch window closes at this moment.
@@ -187,6 +202,8 @@ const TUNING_SUFFIX := {
 	"shape_angle_deg": "angle",
 	"vertical_angle_deg": "vertical_angle",
 	"speed_bonus": "speed_bonus",
+	"height_bonus": "height_bonus",
+	"circle_radius": "radius",
 }
 
 
@@ -230,3 +247,9 @@ func swing_time() -> float:
 # C-0: whether the key shows a shape on the ground before the cast.
 func shows_range() -> bool:
 	return range_shape != RangeShape.NONE and input_mode == InputMode.PRESS_CAST
+
+
+# C-1c: the circle's radius through value(), so a slider-backed one (the
+# shield slam's shield_slam_radius) is what the server rules with.
+func circle_radius_value() -> float:
+	return value("circle_radius")

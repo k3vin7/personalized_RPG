@@ -140,10 +140,15 @@ func _fill_checks() -> void:
 	var sword_ids: Array = Array(Weapons.get_def("sword").skill_ids)
 	expect(_ids(0, 4) == sword_ids and _ids(4, 8) == Skills.BARE_IDS,
 		"a_one_hand_weapon_puts_its_four_in_the_main_hand_and_the_bare_four_in_the_off_hand")
+	# C-1c: the shield goes to the off hand and leaves the sword where it is,
+	# so "a shield alone" means emptying the hands first.
+	await tick_request(func() -> void: _local.set_weapon(WeaponKinds.Kind.NONE))
 	await tick_request(func() -> void: _local.set_weapon(WeaponKinds.Kind.SHIELD))
 	note("shield: slots %s" % [_ids(0, 8)])
-	expect(_ids(0, 4) == Skills.BARE_IDS and _ids(4, 8) == ["", "", "", ""],
-		"a_shield_alone_keeps_the_bare_four_in_the_main_hand")
+	# C-1c: the shield's four take the off hand; M-1 had them empty.
+	var shield_ids: Array = Array(Weapons.get_def("shield").skill_ids)
+	expect(_ids(0, 4) == Skills.BARE_IDS and _ids(4, 8) == shield_ids,
+		"a_shield_alone_keeps_the_bare_four_in_the_main_hand_and_its_four_in_the_off_hand")
 	await tick_request(func() -> void: _local.set_weapon(WeaponKinds.Kind.NONE))
 	# Hands full: every slot shuts but the kick.
 	var rock := _world.get_node("Rock_0") as Rock

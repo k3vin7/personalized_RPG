@@ -47,6 +47,17 @@ var last_fire_unix := 0.0
 # server's count: ServerAuthority.stamina_spent_by.)
 var parries_won := 0
 var parries_lost := 0
+# C-1c: the raised shield. The key holds it up; the server keeps its own
+# record (Intent.BLOCK on/off) and rules every blow against that.
+var _block_def: SkillDef
+var _blocking := false
+var _block_recovery_left := 0.0
+var blocks_started := 0
+var blocks_broken := 0
+# C-1c: a cast from the air (the shield slam): the intent is out, the body
+# stays AIRBORNE, and the swing is shown when the windup would have ended.
+var _air_cast_left := 0.0
+var _air_cast_def: SkillDef
 # M-7: whether the cast in progress already sent its intent (at the start of
 # the windup) so _fire() does not send it again.
 var _sent_at_start := false
@@ -76,14 +87,24 @@ func fill_slots() -> void:
 	# C-1c's). A one-hand weapon: its WeaponDef's skill_ids take the first
 	# four (C-1b: the sword's; a weapon with none yet leaves them empty), and
 	# the bare four fill the off hand.
+	# C-1c: the off hand. A shield there takes slots 5-8 with its four; an
+	# empty off hand beside a weapon gets the bare four; bare + nothing is
+	# the bare four and four empty.
+	var shield: int = player.offhand
 	var first := 4 if one_hand_weapon else 0
-	for offset in bare.size():
-		slots[first + offset] = bare[offset]
+	if not (one_hand_weapon and shield != WeaponKinds.Kind.NONE):
+		for offset in bare.size():
+			slots[first + offset] = bare[offset]
 	if one_hand_weapon:
 		var def := Weapons.def_for_kind(weapon)
 		if def != null:
 			for offset in mini(def.skill_ids.size(), 4):
 				slots[offset] = Skills.get_def(def.skill_ids[offset])
+	if shield != WeaponKinds.Kind.NONE:
+		var off := Weapons.def_for_kind(shield)
+		if off != null:
+			for offset in mini(off.skill_ids.size(), 4):
+				slots[4 + offset] = Skills.get_def(off.skill_ids[offset])
 
 
 func slot_def(index: int) -> SkillDef:
@@ -218,10 +239,15 @@ func press_slot(index: int) -> bool:
 		print("PLAYGROUND_SLOT_IGNORED slot=%d why=%s" % [index + 1,
 			"empty" if def == null else ("locked" if slot_locked(index) else ("cooldown" if slot_on_cooldown(index) else "busy"))])
 		return false
-	if not player.is_grounded_state():
+	if not player.is_grounded_state() and not _airborne_cast_allowed(def):
 		presses_ignored += 1
 		print("PLAYGROUND_SLOT_IGNORED slot=%d why=state_%s" % [index + 1, Player.State.keys()[player.state]])
 		return false
+	if def.input_mode == SkillDef.InputMode.HOLD_BLOCK:
+		return _block_press(def)
+	# C-1c: any other key brings the shield down first.
+	if _blocking:
+		end_block()
 	if def.input_mode == SkillDef.InputMode.HOLD_RELEASE:
 		return _hold_press(def)
 	# C-1b: a skill with no range to show (the parry, the shield raise) casts
@@ -254,6 +280,11 @@ func _hold_press(def: SkillDef) -> bool:
 # thrown in a line. Everything about that is PlayerGrab's already.
 func release_slot(index: int) -> bool:
 	var def := slot_def(index)
+	if def != null and def.input_mode == SkillDef.InputMode.HOLD_BLOCK:
+		if _blocking and _block_def == def:
+			end_block()
+			return true
+		return false
 	if def == null or def.input_mode != SkillDef.InputMode.HOLD_RELEASE:
 		return false
 	if player.grab == null:
@@ -288,9 +319,39 @@ func cast_armed() -> bool:
 
 func cast_slot(index: int) -> bool:
 	var def := slot_def(index)
-	if def == null or slot_locked(index) or slot_on_cooldown(index) or is_busy() or not player.is_grounded_state():
+	if def == null or slot_locked(index) or slot_on_cooldown(index) or is_busy() \
+			or (not player.is_grounded_state() and not _airborne_cast_allowed(def)):
 		presses_ignored += 1
 		return false
+	if _blocking:
+		end_block()
+	# C-1c: from the air the intent goes out and the body stays in the air;
+	# the server books the impact as for any strike, and the swing is shown
+	# when the windup would have ended. No recovery lock: the landing is one.
+	if not player.is_grounded_state():
+		var air_cost := def.value("stamina_cost")
+		if air_cost > 0.0 and player.stamina <= 0.0:
+			presses_ignored += 1
+			return false
+		if player.movement != null:
+			player.movement.cancel_armed()
+		var air_heading := player.movement.shove_direction() if player.movement != null else -player.global_transform.basis.z
+		if air_heading == Vector3.ZERO:
+			air_heading = -player.global_transform.basis.z
+		casts_started += 1
+		ServerAuthority.submit_intent(player, ServerAuthority.Intent.SKILL, {
+			"skill": def.id,
+			"direction": air_heading,
+		})
+		casts_sent += 1
+		last_cast_unix = Time.get_unix_time_from_system()
+		_air_cast_def = def
+		_air_cast_left = def.value("windup")
+		var air_cooldown := def.value("cooldown")
+		if air_cooldown > 0.0:
+			_cooldown_until[def.id] = Time.get_ticks_msec() + int((def.value("windup") + air_cooldown) * 1000.0)
+		print("PLAYGROUND_AIR_CAST peer=%s skill=%s" % [player.name, def.id])
+		return true
 	# C-1b: the stamina column. An empty pool refuses the cast here, off the
 	# replica; the server refuses the intent the same way and (C-1b') takes
 	# the cost off its own copy, which is the one every screen shows.
@@ -378,6 +439,70 @@ func _finish() -> void:
 		player.change_state(Player.State.IDLE)
 
 
+# ------------------------------------------------------------ C-1c: the block
+
+func is_blocking() -> bool:
+	return _blocking
+
+
+func block_recovery_left() -> float:
+	return _block_recovery_left
+
+
+# The press: the shield comes up, and the server is told so it can rule the
+# blows that follow. Refused on this machine where the server would refuse
+# it too: busy, off the ground, in the raise's recovery, or (the replica's
+# word) a pool under the fraction a broken block waits for.
+func _block_press(def: SkillDef) -> bool:
+	if _blocking or is_busy() or _block_recovery_left > 0.0 or not player.is_grounded_state():
+		presses_ignored += 1
+		print("PLAYGROUND_SLOT_IGNORED slot=block why=%s" % ("blocking" if _blocking else ("busy" if is_busy() else "recovery")))
+		return false
+	# An empty pool cannot raise it; the lockout after a break is the
+	# server's, which refuses the intent and that brings the shield down.
+	if player.stamina <= 0.0:
+		presses_ignored += 1
+		print("PLAYGROUND_SLOT_IGNORED slot=block why=stamina")
+		return false
+	_blocking = true
+	_block_def = def
+	blocks_started += 1
+	if player.movement != null:
+		player.movement.cancel_armed()
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.BLOCK, {"on": true})
+	player.show_block(true)
+	return true
+
+
+# The release, or anything that takes the shield down: a cast, a fall, the
+# server breaking it. The raise's recovery (후딜 0.1) runs from here.
+func end_block() -> void:
+	if not _blocking:
+		return
+	_blocking = false
+	_block_def = null
+	_block_recovery_left = Tuning.server.shield_raise_recovery
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.BLOCK, {"on": false})
+	player.show_block(false)
+
+
+# C-1c: the server's word: the block broke (the pool hit 0) or was refused.
+func on_block_result(raised: bool) -> void:
+	if raised or not _blocking:
+		return
+	blocks_broken += 1
+	_blocking = false
+	_block_def = null
+	_block_recovery_left = Tuning.server.shield_raise_recovery
+	player.show_block(false)
+	print("PLAYGROUND_BLOCK_BROKEN peer=%s" % player.name)
+
+
+# C-1c: a skill that may be cast from the air, while the body is in it.
+func _airborne_cast_allowed(def: SkillDef) -> bool:
+	return def != null and def.usable_airborne and player.state == Player.State.AIRBORNE
+
+
 # C-1b: the server's word on a parry. A success ends the recovery now (the
 # recovery was the failed parry's cost); a failure changes nothing.
 func on_parry_result(success: bool) -> void:
@@ -411,6 +536,17 @@ func _physics_process(delta: float) -> void:
 		elif player.grab != null and player.grab.is_holding():
 			_drop_when_held_until = 0
 			player.grab.drop()
+	# C-1c: the raise's recovery, and a block that cannot stand (the body
+	# left the ground, was stunned, died).
+	_block_recovery_left = maxf(0.0, _block_recovery_left - delta)
+	if _blocking and (not player.is_grounded_state() or player.sync_dead or player.state == Player.State.DEAD):
+		end_block()
+	if _air_cast_def != null:
+		_air_cast_left -= delta
+		if _air_cast_left <= 0.0:
+			player.show_skill_phase(_air_cast_def, "strike")
+			_air_cast_def = null
+			player.show_skill_phase(null, "")
 	if _cast_def == null:
 		return
 	if player.state == Player.State.CASTING:

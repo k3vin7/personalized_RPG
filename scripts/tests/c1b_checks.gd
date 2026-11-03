@@ -91,6 +91,12 @@ func _wait_dummy_home(dummy: Dummy) -> void:
 		waited += get_physics_process_delta_time()
 	if dummy.global_position.distance_to(dummy.home) > 0.3:
 		note("scarecrow %s is %.2f m off its mark after %.1f s" % [dummy.name, dummy.global_position.distance_to(dummy.home), waited])
+	# And refilled (C-1c lesson): the mark refills RETURN_DELAY after the
+	# last hit, and a measurement straddling it reads damage minus refill.
+	waited = 0.0
+	while waited < 3.5 and dummy.hp < dummy.max_hp() - 0.01:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
 
 
 # Stand `distance` south of the scarecrow (its back), facing it.

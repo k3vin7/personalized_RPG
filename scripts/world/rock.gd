@@ -97,16 +97,7 @@ func _ready() -> void:
 	collision.shape = shape
 	add_child(collision)
 
-	var mesh_instance := MeshInstance3D.new()
-	var sphere := SphereMesh.new()
-	sphere.radius = radius
-	sphere.height = radius * 2.0
-	mesh_instance.mesh = sphere
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color("8b8f94").lerp(Color("4a4f55"), clampf(weight / 20.0, 0.0, 1.0))
-	material.roughness = 0.9
-	mesh_instance.material_override = material
-	add_child(mesh_instance)
+	_build_visual(radius)
 
 	_label = Label3D.new()
 	_label.text = "%.0fkg" % weight
@@ -138,6 +129,37 @@ func _apply_gravity() -> void:
 
 static func radius_for(rock_weight: float) -> float:
 	return 0.3 + rock_weight * 0.012
+
+
+# C-1c: the picture. A rock is a grey sphere; a thrown shield (Shield, which
+# derives from this) draws its own plank over the same sphere collision.
+func _build_visual(radius: float) -> void:
+	var mesh_instance := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = radius
+	sphere.height = radius * 2.0
+	mesh_instance.mesh = sphere
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color("8b8f94").lerp(Color("4a4f55"), clampf(weight / 20.0, 0.0, 1.0))
+	material.roughness = 0.9
+	mesh_instance.material_override = material
+	add_child(mesh_instance)
+
+
+# C-1c: what a hit by this body is, for apply_hit. A plain rock is a hit
+# with no skill: HIT_DAMAGE itself and a push that scales with its speed. A
+# shield's is its throw skill (coefficient x shield attack, the table's
+# knockback), so the three are hooks.
+func _hit_def() -> SkillDef:
+	return null
+
+
+func _hit_power(speed: float) -> float:
+	return speed * HIT_POWER_PER_SPEED
+
+
+func _hit_damage() -> float:
+	return HIT_DAMAGE
 
 
 func _physics_process(delta: float) -> void:
@@ -310,16 +332,20 @@ func _on_body_entered(body: Node) -> void:
 	var ally := source != 0 and body is Player and Tuning.server.same_party
 	# C-1a: the damage is apply_hit's (a hit with no skill: the number
 	# itself, through the crit and the armour); the push is as it was.
+	# C-1c: a shield's hit names its throw skill instead (_hit_def).
+	var def := _hit_def()
+	var ctx := {
+		"kind": ForceSystem.Kind.KNOCKBACK,
+		"direction": direction,
+		"power": _hit_power(speed),
+		"source_strength": 0.0,
+		"source_peer": source,
+		"ally": ally,
+	}
+	if def == null:
+		ctx["raw_damage"] = _hit_damage()
 	ServerAuthority.instance.apply_hit(
-		ServerAuthority.instance.actor_for(source) if source != 0 else null, body, null, {
-			"kind": ForceSystem.Kind.KNOCKBACK,
-			"direction": direction,
-			"power": speed * HIT_POWER_PER_SPEED,
-			"source_strength": 0.0,
-			"source_peer": source,
-			"ally": ally,
-			"raw_damage": HIT_DAMAGE,
-		})
+		ServerAuthority.instance.actor_for(source) if source != 0 else null, body, def, ctx)
 	print("PLAYGROUND_ROCK_HIT rock=%s target=%s speed=%.2f" % [name, body.name, speed])
 
 

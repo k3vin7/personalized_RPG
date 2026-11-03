@@ -1,0 +1,29 @@
+[gd_resource type="Resource" script_class="SkillDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/skill_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "shield_raise"
+label = "방패 들기"
+hands = 2
+intent = -1
+input_mode = 2
+outcome = 0
+usable_while_holding = false
+tuning_prefix = "shield_raise"
+weapon_id = "shield"
+reach = 0.0
+width = 0.0
+windup_lean_deg = 0.0
+recovery_lean_deg = 0.0
+strike_extent = 0.6
+strike_height = 0.4
+colour = Color(0.29, 0.435, 0.647, 1)
+range_shape = 0
+shape_angle_deg = 180.0
+arc_plane = 1
+arc_start_deg = 0.0
+arc_sweep_deg = 0.0
+arc_duration = 0.0
+trail = false

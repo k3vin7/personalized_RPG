@@ -680,6 +680,152 @@ extends Resource
 		if Tuning.may_write(self):
 			parry_window = value
 
+@export_group("Shield")
+# C-1c: the shield's four, the tracker's rows as sliders. The raise is a
+# window, not a strike: up after raise_time, posture 0 -> 100% from then to
+# posture_time; a blow from the front costs no HP and (blocked damage x
+# block_stamina_mult) stamina; the push is judged against a tolerance raised
+# by the posture (block_tolerance_mult, temporary); at 0 stamina the shield
+# drops and cannot be raised until the pool is back to block_recover_fraction
+# of its maximum (temporary).
+@export var shield_raise_time: float = 0.2:
+	set(value):
+		if Tuning.may_write(self):
+			shield_raise_time = value
+@export var shield_posture_time: float = 0.6:
+	set(value):
+		if Tuning.may_write(self):
+			shield_posture_time = value
+@export var shield_raise_recovery: float = 0.1:
+	set(value):
+		if Tuning.may_write(self):
+			shield_raise_recovery = value
+@export var shield_raise_angle: float = 180.0:
+	set(value):
+		if Tuning.may_write(self):
+			shield_raise_angle = value
+@export var block_stamina_mult: float = 0.5:
+	set(value):
+		if Tuning.may_write(self):
+			block_stamina_mult = value
+@export var block_tolerance_mult: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			block_tolerance_mult = value
+@export var block_recover_fraction: float = 0.25:
+	set(value):
+		if Tuning.may_write(self):
+			block_recover_fraction = value
+@export var shield_bash_windup: float = 0.15:
+	set(value):
+		if Tuning.may_write(self):
+			shield_bash_windup = value
+@export var shield_bash_recovery: float = 0.4:
+	set(value):
+		if Tuning.may_write(self):
+			shield_bash_recovery = value
+@export var shield_bash_cooldown: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			shield_bash_cooldown = value
+@export var shield_bash_range: float = 1.5:
+	set(value):
+		if Tuning.may_write(self):
+			shield_bash_range = value
+@export var shield_bash_width: float = 1.4:
+	set(value):
+		if Tuning.may_write(self):
+			shield_bash_width = value
+@export var shield_bash_damage: float = 0.5:
+	set(value):
+		if Tuning.may_write(self):
+			shield_bash_damage = value
+@export var shield_bash_power: float = 9.0:
+	set(value):
+		if Tuning.may_write(self):
+			shield_bash_power = value
+@export var shield_bash_stamina: float = 12.0:
+	set(value):
+		if Tuning.may_write(self):
+			shield_bash_stamina = value
+@export var shield_throw_windup: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			shield_throw_windup = value
+@export var shield_throw_recovery: float = 0.5:
+	set(value):
+		if Tuning.may_write(self):
+			shield_throw_recovery = value
+@export var shield_throw_cooldown: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			shield_throw_cooldown = value
+# The '사거리' column: how far the flat throw lands from the hand. The speed
+# is derived from it and the hand's height under gravity, not a number of its own.
+@export var shield_throw_range: float = 8.0:
+	set(value):
+		if Tuning.may_write(self):
+			shield_throw_range = value
+@export var shield_throw_width: float = 0.5:
+	set(value):
+		if Tuning.may_write(self):
+			shield_throw_width = value
+@export var shield_throw_damage: float = 0.8:
+	set(value):
+		if Tuning.may_write(self):
+			shield_throw_damage = value
+@export var shield_throw_power: float = 6.0:
+	set(value):
+		if Tuning.may_write(self):
+			shield_throw_power = value
+@export var shield_throw_stamina: float = 10.0:
+	set(value):
+		if Tuning.may_write(self):
+			shield_throw_stamina = value
+# The thrown shield as a body: its weight (not in the table; temporary).
+@export var shield_weight: float = 5.0:
+	set(value):
+		if Tuning.may_write(self):
+			shield_weight = value
+@export var shield_slam_windup: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			shield_slam_windup = value
+@export var shield_slam_recovery: float = 0.5:
+	set(value):
+		if Tuning.may_write(self):
+			shield_slam_recovery = value
+@export var shield_slam_cooldown: float = 1.5:
+	set(value):
+		if Tuning.may_write(self):
+			shield_slam_cooldown = value
+@export var shield_slam_range: float = 1.3:
+	set(value):
+		if Tuning.may_write(self):
+			shield_slam_range = value
+@export var shield_slam_radius: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			shield_slam_radius = value
+@export var shield_slam_damage: float = 1.5:
+	set(value):
+		if Tuning.may_write(self):
+			shield_slam_damage = value
+@export var shield_slam_power: float = 5.0:
+	set(value):
+		if Tuning.may_write(self):
+			shield_slam_power = value
+@export var shield_slam_stamina: float = 14.0:
+	set(value):
+		if Tuning.may_write(self):
+			shield_slam_stamina = value
+# +20% damage per metre fallen by the time it lands (the server's own record
+# of the caster's peak), temporary.
+@export var shield_slam_height_bonus: float = 0.2:
+	set(value):
+		if Tuning.may_write(self):
+			shield_slam_height_bonus = value
+
 @export_group("Survival")
 @export var fall_damage_min_height: float = 4.0:
 	set(value):

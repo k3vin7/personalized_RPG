@@ -18,6 +18,11 @@ const PATHS := {
 	"side_cut": "res://data/skills/side_cut.tres",
 	"overhead_cut": "res://data/skills/overhead_cut.tres",
 	"parry": "res://data/skills/parry.tres",
+	# C-1c: the shield's four.
+	"shield_raise": "res://data/skills/shield_raise.tres",
+	"shield_bash": "res://data/skills/shield_bash.tres",
+	"shield_throw": "res://data/skills/shield_throw.tres",
+	"shield_slam": "res://data/skills/shield_slam.tres",
 }
 
 # What an empty hand can do, in slot order.

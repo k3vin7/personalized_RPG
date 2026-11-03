@@ -27,6 +27,9 @@ properties/6/replication_mode = 1
 properties/7/path = NodePath(".:sync_skill_at")
 properties/7/spawn = true
 properties/7/replication_mode = 1
+properties/8/path = NodePath(".:sync_blocking")
+properties/8/spawn = true
+properties/8/replication_mode = 1
 
 [sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_2"]
 properties/0/path = NodePath(".:hp")
@@ -62,6 +65,9 @@ properties/9/replication_mode = 1
 properties/10/path = NodePath(".:stamina")
 properties/10/spawn = true
 properties/10/replication_mode = 1
+properties/11/path = NodePath(".:sync_offhand")
+properties/11/spawn = true
+properties/11/replication_mode = 1
 
 [node name="Player" type="CharacterBody3D"]
 script = ExtResource("1")

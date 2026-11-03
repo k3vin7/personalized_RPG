@@ -10,3 +10,4 @@ kind = 4
 hands = 2
 attack_field = "weapon_attack_shield"
 attack_power_value = 6.0
+skill_ids = PackedStringArray("shield_raise", "shield_bash", "shield_throw", "shield_slam")

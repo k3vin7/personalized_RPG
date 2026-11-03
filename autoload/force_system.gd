@@ -169,10 +169,15 @@ func judge_knockback(
 		total_weight: float,
 		target_strength: float,
 		race_mult: float,
-		grounded: bool) -> Dictionary:
+		grounded: bool,
+		tolerance_mult: float = 1.0) -> Dictionary:
 	var change := change_for(event, total_weight)
 	var h_speed := Vector2(change.x, change.z).length()
-	var tolerance := tolerance_for(target_strength, race_mult)
+	# C-1c: a body blocking has its tolerance raised by its posture (the
+	# server passes 1 + posture x block_tolerance_mult); the push itself is
+	# the same, as the design says: 0% posture is pushed like a body that
+	# was hit, 100% holds its ground against more.
+	var tolerance := tolerance_for(target_strength, race_mult) * maxf(tolerance_mult, 0.0)
 	var judged := lift_angle_deg(event) < Tuning.server.knock_lift_angle_deg
 	return {
 		"h_speed": h_speed,

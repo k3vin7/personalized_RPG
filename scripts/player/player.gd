@@ -111,6 +111,11 @@ var sync_jumped := false
 # owner asks (Intent.WEAPON); the server writes it; every peer, the owner too,
 # applies what arrives. Nothing on a client writes this and keeps it.
 var sync_weapon: int = WeaponKinds.Kind.NONE
+# C-1c: the off hand (the shield, or nothing), the server's like the weapon.
+var sync_offhand: int = WeaponKinds.Kind.NONE
+# C-1c: the owner's raised shield, on the pose synchronizer for the picture
+# on other screens. The server keeps its own record of the block.
+var sync_blocking := false
 # M-5: the cast's show, replicated so the other screen can read a windup: the
 # slot's skill, the phase, and the owner's wall clock when it started. Remote
 # bodies replay the same hooks off these.
@@ -211,6 +216,9 @@ var _fall_tracking := false
 var last_fall_height := 0.0
 var weapon: int = WeaponKinds.Kind.NONE
 var _weapon_node: Node3D
+var offhand: int = WeaponKinds.Kind.NONE
+var _offhand_node: Node3D
+var _block_shown := false
 # A short line under the name: escape progress, and anything else worth reading
 # off the body.
 var overhead_note := ""
@@ -607,6 +615,10 @@ func _physics_process(delta: float) -> void:
 		_apply_weapon(sync_weapon)
 		if skills != null:
 			skills.fill_slots()
+	if sync_offhand != offhand:
+		_apply_offhand(sync_offhand)
+		if skills != null:
+			skills.fill_slots()
 	_except_holder()
 	if is_local():
 		# The server owns the flag; this is the body catching up with it, which
@@ -655,6 +667,9 @@ func _physics_process(delta: float) -> void:
 		sync_yaw = rotation.y
 		sync_state = state
 		sync_jumped = _jumped_this_flight
+		sync_blocking = skills != null and skills.is_blocking()
+		if sync_blocking != _block_shown:
+			show_block(sync_blocking)
 		_update_shadow()
 		return
 	# M-5: the cast's show, replayed from the owner's stamp. The strike box
@@ -693,6 +708,8 @@ func _physics_process(delta: float) -> void:
 		# between state packets without letting them drift.
 		global_position = global_position.lerp(shown, SyncRules.ease(delta))
 	rotation.y = lerp_angle(rotation.y, sync_yaw, SyncRules.ease_yaw(delta))
+	if sync_blocking != _block_shown:
+		show_block(sync_blocking)
 	_update_shadow()
 	if sync_state != state:
 		change_state(sync_state)
@@ -864,9 +881,42 @@ func apply_respawn(at: Vector3) -> void:
 # the Vitals synchronizer, applied by every peer in _physics_process; nothing
 # on the owner writes the weapon itself any more.
 func set_weapon(kind: int) -> void:
-	if not is_local() or kind == weapon:
+	if not is_local():
+		return
+	# C-1c: the shield goes to the off hand; the rest to the main hand. NONE
+	# empties both.
+	if kind == WeaponKinds.Kind.SHIELD:
+		if offhand == kind:
+			return
+	elif kind == weapon and (kind != WeaponKinds.Kind.NONE or offhand == WeaponKinds.Kind.NONE):
 		return
 	ServerAuthority.submit_intent(self, ServerAuthority.Intent.WEAPON, {"weapon": kind})
+
+
+# C-1c: the picture of the off hand, at the left hand under the body's visual
+# (not the swing pivot: a sword's arc does not turn the shield).
+func _apply_offhand(kind: int) -> void:
+	offhand = kind
+	if is_instance_valid(_offhand_node):
+		_offhand_node.queue_free()
+	_offhand_node = null
+	_block_shown = false
+	if kind == WeaponKinds.Kind.NONE:
+		return
+	_offhand_node = WeaponKinds.build_mesh(kind)
+	_offhand_node.name = "OffHand"
+	_offhand_node.position = Vector3(-0.34, 0.1, -0.1)
+	_visual.add_child(_offhand_node)
+
+
+# C-1c: the raised shield: forward and up, square to the heading.
+func show_block(raised: bool) -> void:
+	_block_shown = raised
+	if not is_instance_valid(_offhand_node):
+		return
+	_offhand_node.position = Vector3(-0.1, 0.35, -0.5) if raised else Vector3(-0.34, 0.1, -0.1)
+	_offhand_node.rotation_degrees = Vector3(0.0, 0.0, 0.0) if raised else Vector3(0.0, 0.0, 0.0)
+	_offhand_node.scale = Vector3(1.15, 1.15, 1.15) if raised else Vector3.ONE
 
 
 # The picture of the weapon. Only ever called with the server's value.

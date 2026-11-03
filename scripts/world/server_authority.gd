@@ -57,6 +57,9 @@ enum Intent {
 	# charging a throw. The server drains the charge's stamina while it is on
 	# and the hold stands; it decides nothing else.
 	CHARGE,
+	# C-1c: the shield raised (on) or lowered (off). A request: the server
+	# keeps the block and rules every blow on the body against it.
+	BLOCK,
 }
 
 # Anything that can be picked up joins this group and offers
@@ -608,6 +611,8 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 			result = _rule_weapon(actor, int(payload.get("weapon", -1)))
 		Intent.CHARGE:
 			result = _rule_charge(actor, bool(payload.get("on", false)))
+		Intent.BLOCK:
+			result = _rule_block(actor, bool(payload.get("on", false)))
 	if result == null:
 		return _refuse(sender, kind, "refused")
 	granted_intents += 1
@@ -624,6 +629,9 @@ func _refuse(sender: int, kind: int, why: String) -> Variant:
 	var actor := actor_for(sender)
 	if actor != null and actor.is_local():
 		actor.clear_predicted()
+		# C-1c: a refused raise brings the owner's shield down.
+		if kind == Intent.BLOCK and actor.skills != null:
+			actor.skills.on_block_result(false)
 	elif sender > 1:
 		intent_refused.rpc_id(sender, kind)
 	return null
@@ -638,6 +646,9 @@ func intent_refused(kind: int) -> void:
 	var actor := actor_for(multiplayer.get_unique_id())
 	if actor != null and actor.is_local() and actor.predicted_action == kind:
 		actor.clear_predicted()
+	# C-1c: a refused raise brings the shield down.
+	if kind == Intent.BLOCK and actor != null and actor.is_local() and actor.skills != null:
+		actor.skills.on_block_result(false)
 
 
 # Only the shape of the message, not whether it is allowed. The rulings below
@@ -650,7 +661,7 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 			return _target_for(payload) != null
 		Intent.DROP, Intent.ESCAPE, Intent.RESPAWN, Intent.DASH:
 			return true
-		Intent.CHARGE:
+		Intent.CHARGE, Intent.BLOCK:
 			return payload.get("on") is bool
 		Intent.SKILL:
 			return Skills.is_known(String(payload.get("skill", ""))) \
@@ -1048,6 +1059,9 @@ func _rule_grab(actor: Player, target: Node3D) -> Variant:
 	# M-7: an attack in its window is caught before the ordinary rules apply.
 	if _try_catch(actor, target):
 		return true
+	# C-1c: a shield on the ground goes back into an empty off hand.
+	if target is Shield and _pick_up_shield(actor, target as Shield):
+		return true
 	if not can_grab(actor, target):
 		return null
 	_take_hold(actor.get_multiplayer_authority(), target)
@@ -1442,13 +1456,19 @@ func _rule_knockback(target: Player, event: Dictionary) -> bool:
 	# M-7: a stunned or knocked-down body is standing on the ground for the
 	# tolerance -- it is not flying, it is held still -- so a push on it is
 	# judged like any other, not waved through as "already in the air".
+	# C-1c: a blocked blow is judged against a tolerance raised by the
+	# posture; the push itself is unchanged (the design: 0% is pushed like
+	# a hit, 100% holds against more).
+	var posture := float(event.get("block_posture", -1.0))
+	var tolerance_mult := 1.0 + maxf(posture, 0.0) * Tuning.server.block_tolerance_mult if posture >= 0.0 else 1.0
 	var verdict := ForceSystem.judge_knockback(
 		event,
 		target.stats.total_weight(),
 		target.stats.strength,
 		race_tolerance_mult(target.stats.race),
 		target.is_grounded_state() or target.state == Player.State.STUNNED
-			or target.state == Player.State.DOWNED)
+			or target.state == Player.State.DOWNED,
+		tolerance_mult)
 	event["knock_h_speed"] = float(verdict["h_speed"])
 	event["knock_tolerance"] = float(verdict["tolerance"])
 	event["knock_launched"] = bool(verdict["launched"])
@@ -1595,6 +1615,7 @@ func apply_hit(attacker: Node3D, target: Node3D, def: SkillDef, ctx: Dictionary)
 	var final := damage_after_armor(rolled, armour)
 	var ally := bool(ctx.get("ally", false))
 	var dealt := final
+	var posture := -1.0
 	if target is Player:
 		var person := target as Player
 		if person.sync_dead:
@@ -1604,6 +1625,13 @@ func apply_hit(attacker: Node3D, target: Node3D, def: SkillDef, ctx: Dictionary)
 			dealt = 0.0
 		elif ally and not Tuning.server.ally_ground_damage:
 			dealt = 0.0
+		else:
+			# C-1c: a raised shield between the blow and the body: no HP,
+			# stamina instead, and the push judged against the posture.
+			posture = _block_guards(person, attacker)
+			if posture >= 0.0:
+				_block_absorbs(person, final, posture, attacker)
+				dealt = 0.0
 	elif not (target is Dummy):
 		# A rock has no HP to lose.
 		dealt = 0.0
@@ -1621,6 +1649,9 @@ func apply_hit(attacker: Node3D, target: Node3D, def: SkillDef, ctx: Dictionary)
 	event["crit"] = crit
 	event["base_damage"] = base
 	event["armor"] = armour
+	if posture >= 0.0:
+		event["blocked"] = true
+		event["block_posture"] = posture
 	if def != null:
 		event["skill"] = def.id
 		if def.stun_on_hit > 0.0:
@@ -1636,7 +1667,8 @@ func apply_hit(attacker: Node3D, target: Node3D, def: SkillDef, ctx: Dictionary)
 			(target as Dummy).take_damage(dealt, hit_id)
 	hits_applied += 1
 	last_hit = {"target": target.name, "skill": def.id if def != null else "",
-		"base": base, "crit": crit, "armor": armour, "final": final, "dealt": dealt, "id": hit_id}
+		"base": base, "crit": crit, "armor": armour, "final": final, "dealt": dealt, "id": hit_id,
+		"blocked": posture >= 0.0, "posture": posture}
 	print("PLAYGROUND_HIT by=%s target=%s skill=%s base=%.2f crit=%s armor=%.0f final=%.2f dealt=%.2f id=%d" % [
 		attacker.name if attacker != null else "-", target.name, last_hit["skill"],
 		base, crit, armour, final, dealt, hit_id])
@@ -2102,8 +2134,18 @@ func _rule_weapon(actor: Player, kind: int) -> Variant:
 		last_refusal = "holding"
 		print("PLAYGROUND_WEAPON_REFUSED peer=%s why=holding" % actor.name)
 		return null
-	actor.sync_weapon = kind
-	print("PLAYGROUND_WEAPON peer=%s kind=%s" % [actor.name, WeaponKinds.LABELS.get(kind, "?")])
+	# C-1c: the shield is the off hand's; NONE empties both hands; the rest
+	# is the main hand's. A block cannot outlive the shield.
+	if kind == WeaponKinds.Kind.SHIELD:
+		actor.sync_offhand = kind
+	elif kind == WeaponKinds.Kind.NONE:
+		actor.sync_weapon = kind
+		actor.sync_offhand = kind
+		_blocks.erase(peer)
+	else:
+		actor.sync_weapon = kind
+	print("PLAYGROUND_WEAPON peer=%s kind=%s main=%s off=%s" % [actor.name, WeaponKinds.LABELS.get(kind, "?"),
+		WeaponKinds.LABELS.get(actor.sync_weapon, "?"), WeaponKinds.LABELS.get(actor.sync_offhand, "?")])
 	return true
 
 
@@ -2112,6 +2154,234 @@ func _rule_weapon(actor: Player, kind: int) -> Variant:
 func weapon_of(peer: int) -> int:
 	var actor := actor_for(peer)
 	return actor.sync_weapon if actor != null else WeaponKinds.Kind.NONE
+
+
+func offhand_of(peer: int) -> int:
+	var actor := actor_for(peer)
+	return actor.sync_offhand if actor != null else WeaponKinds.Kind.NONE
+
+
+# Whether the peer's hands hold what a WeaponDef asks for.
+func holds_weapon(peer: int, def: WeaponDef) -> bool:
+	if def == null:
+		return false
+	if def.hands == SkillDef.Hands.OFF_HAND:
+		return offhand_of(peer) == def.kind
+	return weapon_of(peer) == def.kind
+
+
+# ------------------------------------------------------------ C-1c: the block
+# The raised shield is a window on the server, like the parry: opened by the
+# owner's BLOCK on, closed by its off, by the shield leaving the hand, by a
+# hit that empties the pool, or by the body leaving the ground. A blow on
+# the blocker from inside shield_raise_angle costs no HP; the blocked damage
+# x block_stamina_mult comes off the stamina; the push is judged against a
+# tolerance raised by the posture (0 at shield_raise_time, 1 at
+# shield_posture_time). A pool at 0 breaks the block and locks the raise
+# until the pool is back to block_recover_fraction of its maximum.
+var _blocks := {}
+var _block_lockout := {}
+var blocks_broken := 0
+var last_block := {}
+
+
+func _rule_block(actor: Player, on: bool) -> Variant:
+	var peer := actor.get_multiplayer_authority()
+	if not on:
+		_blocks.erase(peer)
+		return true
+	if actor.sync_dead or not actor.is_grounded_state():
+		print("PLAYGROUND_BLOCK_REFUSED by=%s why=state_%s" % [actor.name, Player.State.keys()[actor.state]])
+		return null
+	if offhand_of(peer) != WeaponKinds.Kind.SHIELD:
+		print("PLAYGROUND_BLOCK_REFUSED by=%s why=no_shield" % actor.name)
+		return null
+	if _block_lockout.has(peer):
+		print("PLAYGROUND_BLOCK_REFUSED by=%s why=recovering stamina=%.1f" % [actor.name, actor.stamina])
+		return null
+	_blocks[peer] = {"since": Time.get_ticks_msec()}
+	print("PLAYGROUND_BLOCK_UP by=%s" % actor.name)
+	return true
+
+
+func is_blocking(peer: int) -> bool:
+	return _blocks.has(peer)
+
+
+func block_locked(peer: int) -> bool:
+	return _block_lockout.has(peer)
+
+
+# The posture: -1 while no shield is up (or it is still coming up), else
+# 0..1 from shield_raise_time to shield_posture_time after the press.
+func block_posture(peer: int) -> float:
+	if not _blocks.has(peer):
+		return -1.0
+	var held := float(Time.get_ticks_msec() - int(_blocks[peer]["since"])) / 1000.0
+	var raise: float = Tuning.server.shield_raise_time
+	var full: float = Tuning.server.shield_posture_time
+	if held < raise:
+		return -1.0
+	return clampf((held - raise) / maxf(full - raise, 0.001), 0.0, 1.0)
+
+
+# The posture that guards `target` against `attacker`, or -1: a shield up,
+# and the attacker inside the raise's angle about the body's heading.
+func _block_guards(target: Player, attacker: Node3D) -> float:
+	var posture := block_posture(target.get_multiplayer_authority())
+	if posture < 0.0 or attacker == null or not is_instance_valid(attacker):
+		return -1.0
+	var forward := -target.global_transform.basis.z
+	forward.y = 0.0
+	var offset := attacker.global_position - target.global_position
+	offset.y = 0.0
+	if forward.length_squared() < 0.0001 or offset.length_squared() < 0.0001:
+		return posture
+	var angle := rad_to_deg(forward.normalized().angle_to(offset.normalized()))
+	if angle > Tuning.server.shield_raise_angle * 0.5:
+		return -1.0
+	return posture
+
+
+# Called by apply_hit for a blocked blow: the stamina, and the break at 0.
+func _block_absorbs(target: Player, damage: float, posture: float, attacker: Node3D) -> void:
+	var peer := target.get_multiplayer_authority()
+	var cost := damage * Tuning.server.block_stamina_mult
+	spend_stamina(target, cost, "block")
+	last_block = {"by": peer, "attacker": attacker.name if attacker != null else "-", "damage": damage,
+		"posture": posture, "stamina_cost": cost, "broken": false}
+	if target.stamina <= 0.0:
+		_blocks.erase(peer)
+		_block_lockout[peer] = true
+		blocks_broken += 1
+		last_block["broken"] = true
+		_tell_block(target, false)
+		print("PLAYGROUND_BLOCK_BROKEN by=%s attacker=%s" % [target.name, last_block["attacker"]])
+	print("PLAYGROUND_BLOCKED by=%s attacker=%s damage=%.2f posture=%.2f stamina_cost=%.2f stamina=%.1f" % [
+		target.name, last_block["attacker"], damage, posture, cost, target.stamina])
+
+
+func _tell_block(target: Player, raised: bool) -> void:
+	if target.is_local():
+		if target.skills != null:
+			target.skills.on_block_result(raised)
+	else:
+		block_result.rpc_id(target.get_multiplayer_authority(), raised)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func block_result(raised: bool) -> void:
+	if not result_is_server_sent("block_result", multiplayer.get_remote_sender_id()):
+		return
+	var actor := actor_for(multiplayer.get_unique_id())
+	if actor != null and actor.is_local() and actor.skills != null:
+		actor.skills.on_block_result(raised)
+
+
+# Every step: a block whose body left the ground or died is over; a lockout
+# lifts when the pool is back.
+func _tick_blocks() -> void:
+	for peer: int in _blocks.keys():
+		var actor := actor_for(peer)
+		if actor == null or actor.sync_dead or not actor.is_grounded_state() or offhand_of(peer) != WeaponKinds.Kind.SHIELD:
+			_blocks.erase(peer)
+	for peer: int in _block_lockout.keys():
+		var actor := actor_for(peer)
+		if actor == null:
+			_block_lockout.erase(peer)
+		elif actor.stats != null and actor.stamina >= actor.stats.max_stamina * Tuning.server.block_recover_fraction:
+			_block_lockout.erase(peer)
+			print("PLAYGROUND_BLOCK_RECOVERED by=%s stamina=%.1f" % [actor.name, actor.stamina])
+
+
+# ------------------------------------------------------ C-1c: the shield throw
+# The off-hand weapon leaves the hand as a body: a Shield (a rock in every
+# rule) spawned at the hand on every peer and given a flat line throw whose
+# speed lands it the table's range away. The hand is empty from here until
+# the grab key on the shield puts it back (_rule_grab).
+var _shield_seq := 0
+var shields_thrown := 0
+var last_shield_throw := {}
+
+
+func _rule_weapon_throw(actor: Player, def: SkillDef, direction: Vector3) -> Variant:
+	var peer := actor.get_multiplayer_authority()
+	if offhand_of(peer) != WeaponKinds.Kind.SHIELD or actor.sync_dead:
+		return null
+	var forward := Vector3(direction.x, 0.0, direction.z)
+	if forward.length_squared() < 0.0001:
+		return null
+	forward = forward.normalized()
+	actor.sync_offhand = WeaponKinds.Kind.NONE
+	_blocks.erase(peer)
+	_shield_seq += 1
+	var shield_name := "Shield_%d" % _shield_seq
+	var from := actor.hand_position() + forward * (actor.radius() + 0.3)
+	var shield := _spawn_shield(shield_name, from)
+	if multiplayer.has_multiplayer_peer():
+		spawn_shield.rpc(shield_name, from)
+	# Flat, from the hand: the range is where it meets the ground again
+	# under gravity, so the speed is range / fall time.
+	var gravity: float = maxf(Tuning.server.gravity, 0.01)
+	var drop := maxf(from.y - (actor.global_position.y - actor.half_height()), 0.1)
+	var speed := def.value("reach") / sqrt(2.0 * drop / gravity)
+	shield.note_thrown(peer)
+	# No strength behind it: the table's range is the range.
+	send_force(shield, ForceSystem.make_event(
+		ForceSystem.Kind.THROW, forward, speed, 0.0, peer, true, 0.0, 0.0))
+	shields_thrown += 1
+	last_shield_throw = {"by": peer, "shield": shield_name, "speed": speed, "from": from}
+	print("PLAYGROUND_SHIELD_THROW by=%s shield=%s speed=%.2f range=%.1f drop=%.2f" % [
+		actor.name, shield_name, speed, def.value("reach"), drop])
+	return true
+
+
+func _spawn_shield(shield_name: String, at: Vector3) -> Shield:
+	var existing := get_parent().get_node_or_null(shield_name)
+	if existing != null:
+		existing.queue_free()
+		existing.name = shield_name + "_old"
+	var shield := Shield.new()
+	shield.setup(shield_name, at, Tuning.server.shield_weight)
+	get_parent().add_child(shield)
+	return shield
+
+
+# Server -> every peer: a shield left a hand here. Code-built nodes do not
+# replicate (CLAUDE.md 1), so each peer builds its own copy; its position
+# then rides Rock.push_state like a rock's.
+@rpc("any_peer", "call_remote", "reliable")
+func spawn_shield(shield_name: String, at: Vector3) -> void:
+	if not result_is_server_sent("spawn_shield", multiplayer.get_remote_sender_id()):
+		return
+	_spawn_shield(shield_name, at)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func despawn_shield(shield_name: String) -> void:
+	if not result_is_server_sent("despawn_shield", multiplayer.get_remote_sender_id()):
+		return
+	var node := get_parent().get_node_or_null(shield_name)
+	if node != null:
+		node.name = shield_name + "_gone"
+		node.queue_free()
+
+
+# The grab key on a shield on the ground: back into an empty off hand, the
+# object gone on every peer. A full off hand lifts it like a rock instead.
+func _pick_up_shield(actor: Player, shield: Shield) -> bool:
+	var peer := actor.get_multiplayer_authority()
+	if offhand_of(peer) != WeaponKinds.Kind.NONE or not can_grab(actor, shield):
+		return false
+	actor.sync_offhand = WeaponKinds.Kind.SHIELD
+	var shield_name := shield.name
+	if multiplayer.has_multiplayer_peer():
+		despawn_shield.rpc(shield_name)
+	shield.name = shield_name + "_gone"
+	shield.queue_free()
+	forgive_move(peer, "shield_picked")
+	print("PLAYGROUND_SHIELD_PICKED by=%s shield=%s" % [actor.name, shield_name])
+	return true
 
 
 # M-1: a slot's cast. The SkillDef names the rule; this door keeps the clock.
@@ -2132,15 +2402,18 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 	if now < int(cooldowns.get(def.id, 0)):
 		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=cooldown" % [actor.name, def.id])
 		return null
-	if not actor.is_grounded_state():
+	# C-1c: a skill that says so may be cast from the air (the shield slam).
+	if not actor.is_grounded_state() and not (def.usable_airborne and actor.state == Player.State.AIRBORNE):
 		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=state_%s" % [
 			actor.name, def.id, Player.State.keys()[actor.state]])
 		return null
+	# C-1c: a cast brings the shield down.
+	_blocks.erase(peer)
 	# C-1b: a weapon's skill needs that weapon in the hand, by the server's
 	# own word on what the peer is carrying.
 	if def.weapon_id != "bare":
 		var needed := Weapons.get_def(def.weapon_id)
-		if needed == null or weapon_of(peer) != needed.kind:
+		if needed == null or not holds_weapon(peer, needed):
 			print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=no_weapon" % [actor.name, def.id])
 			return null
 	# C-1b: the stamina column. A pool at 0 refuses the cast at the intent;
@@ -2353,7 +2626,11 @@ func _run_pending_strikes() -> void:
 				continue
 		if now >= int(record["at"]):
 			_pending_strikes.erase(actor)
-			_rule_strike(actor, def, record["direction"], float(record.get("mult", 1.0)))
+			# C-1c: the throw of the off-hand weapon is a ruling of its own.
+			if def.outcome == SkillDef.Outcome.THROW_WEAPON and actor is Player:
+				_rule_weapon_throw(actor as Player, def, record["direction"])
+			else:
+				_rule_strike(actor, def, record["direction"], float(record.get("mult", 1.0)))
 
 
 # M-7: the catch. A grab aimed at a body whose strike is booked and inside its
@@ -2450,8 +2727,19 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0)
 	# C-1b: a FAN is a horizontal sector of the reach, shape_angle_deg wide;
 	# a vertical_angle_deg is a vertical fan in place of the flat height band.
 	var fan := def.range_shape == SkillDef.RangeShape.FAN
+	# C-1c: a CIRCLE is a disc of circle_radius centred reach ahead.
+	var circle := def.range_shape == SkillDef.RangeShape.CIRCLE
+	var circle_radius := def.circle_radius_value()
 	var half_angle := def.value("shape_angle_deg") * 0.5
 	var vertical_half := def.value("vertical_angle_deg") * 0.5
+	# C-1c: the height bonus (the shield slam's), off the server's record of
+	# how far this body has fallen by now.
+	var height_bonus := def.value("height_bonus")
+	if height_bonus > 0.0 and caster != null:
+		var watch: Dictionary = _fall_watch.get(peer, {})
+		var fallen := maxf(0.0, float(watch.get("peak", actor.global_position.y)) - actor.global_position.y)
+		mult *= 1.0 + height_bonus * fallen
+		print("PLAYGROUND_HEIGHT_BONUS by=%s skill=%s fallen=%.2f mult=%.3f" % [actor.name, def.id, fallen, mult])
 	var hits := 0
 	var downed := 0
 	var parried := 0
@@ -2469,6 +2757,9 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0)
 			if along <= -target_radius or offset.length() > reach + target_radius:
 				continue
 			if rad_to_deg(atan2(across, along)) > half_angle:
+				continue
+		elif circle:
+			if (offset - forward * reach).length() > circle_radius + target_radius:
 				continue
 		else:
 			if along <= -target_radius or along > reach + target_radius:
@@ -2502,6 +2793,14 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0)
 			"hit_y": strike_y,
 			"mult": mult,
 		}
+		# C-1c: the shield bash launches a team mate in the air the way the
+		# shove does (the co-op step), at the shove's angle, with the spring.
+		if def.launches_airborne_ally and is_ally and recently_airborne(body as Player):
+			var launch_angle := deg_to_rad(Tuning.server.shove_ally_launch_angle_deg)
+			ctx["direction"] = forward * cos(launch_angle) + Vector3.UP * sin(launch_angle)
+			ctx["spring"] = true
+			print("PLAYGROUND_SHOVE_LAUNCH by=%s target=%s angle=%.0f skill=%s" % [
+				actor.name, body.name, Tuning.server.shove_ally_launch_angle_deg, def.id])
 		# M-2: the knockdown is asked for here and ruled in _rule_hurt, like
 		# the stun: only a body on the ground goes down; in the air the push is
 		# all it gets. A body already down is put down again, for the full time.
@@ -2618,6 +2917,7 @@ func _physics_process(delta: float) -> void:
 	_place_held_people(delta)
 	_run_pending_strikes()
 	_expire_parries()
+	_tick_blocks()
 	_watch_vitals(delta)
 	# N-1: any write to the server's table reaches the replicas within a step,
 	# whoever made it. The heartbeat below repairs a dropped push.

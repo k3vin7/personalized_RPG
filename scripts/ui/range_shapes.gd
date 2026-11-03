@@ -54,7 +54,7 @@ static func write(mesh: ImmediateMesh, def: SkillDef, scale: float = 1.0) -> voi
 				mesh.surface_add_vertex(Vector3(sin(b) * reach, 0.0, -cos(b) * reach))
 		SkillDef.RangeShape.CIRCLE:
 			var centre := Vector3(0.0, 0.0, -reach)
-			var radius := def.circle_radius * scale
+			var radius := def.circle_radius_value() * scale
 			for index in CIRCLE_SEGMENTS:
 				var a := TAU * float(index) / float(CIRCLE_SEGMENTS)
 				var b := TAU * float(index + 1) / float(CIRCLE_SEGMENTS)
@@ -102,7 +102,7 @@ static func extent_of(def: SkillDef) -> float:
 		SkillDef.RangeShape.LINE:
 			return def.value("reach") + LINE_TIP
 		SkillDef.RangeShape.CIRCLE:
-			return def.value("reach") + def.circle_radius
+			return def.value("reach") + def.circle_radius_value()
 		SkillDef.RangeShape.NONE:
 			return 0.0
 	return def.value("reach")
