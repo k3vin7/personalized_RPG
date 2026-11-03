@@ -450,11 +450,14 @@ func _slam_and_parry(press_before_impact: float) -> Dictionary:
 	var stunned_seen := 0.0
 	var stun_started := -1.0
 	var hp_after_slam := -1.0
+	var pitch_max := -180.0
 	waited = 0.0
 	var ruled_at := -1.0
 	while waited < 2.0:
 		await get_tree().physics_frame
 		waited += get_physics_process_delta_time()
+		if _local._swing_active:
+			pitch_max = maxf(pitch_max, rad_to_deg(_local._swing_pivot.rotation.x))
 		if ruled_at < 0.0 and _judge.pending_strike(dummy).is_empty():
 			ruled_at = waited
 		if hp_after_slam < 0.0 and ruled_at >= 0.0 and waited > ruled_at + 0.3:
@@ -479,6 +482,7 @@ func _slam_and_parry(press_before_impact: float) -> Dictionary:
 		"recovery": recovery_seen,
 		"stun": stunned_seen,
 		"last": _judge.last_parry.duplicate(),
+		"sword_pitch_deg": pitch_max,
 	}
 
 
@@ -489,6 +493,8 @@ func _parry_checks() -> void:
 	var inside := await _slam_and_parry(0.12)
 	note("parry %.3f s before the slam: %s" % [float(inside["pressed_before_impact"]), inside])
 	expect(int(inside["parries"]) == 1 and float(inside["hp_lost"]) < 0.01, "a_parry_inside_the_window_turns_the_slam_and_costs_no_hp")
+	# The motion: the sword stands upright (pitch +90 is the blade pointing up).
+	expect(absf(float(inside["sword_pitch_deg"]) - 90.0) < 5.0, "the_parry_stands_the_sword_upright")
 	expect(absf(float(inside["stun"]) - slam.value("recovery")) < 0.12 and absf(float(inside["last"].get("stun", 0.0)) - slam.value("recovery")) < 0.001,
 		"and_holds_the_attacker_for_its_own_recovery_0_5")
 	expect(float(inside["recovery"]) >= 0.0 and float(inside["recovery"]) < parry.value("recovery") - 0.1,
@@ -633,11 +639,14 @@ func _two_peer_checks() -> void:
 	client_cast_at.rpc_id(_client_peer(), HOME, 3)
 	waited = 0.0
 	var host_stunned := 0.0
+	var mate_pitch := -180.0
 	while waited < 2.0:
 		await get_tree().physics_frame
 		waited += get_physics_process_delta_time()
 		if _local.state == Player.State.STUNNED:
 			host_stunned += get_physics_process_delta_time()
+		if mate._swing_active:
+			mate_pitch = maxf(mate_pitch, rad_to_deg(mate._swing_pivot.rotation.x))
 	note("the client's parry of the host's thrust: parries +%d, last %s, client hp %.1f -> %.1f, host stunned %.2f s" % [
 		_judge.parries - parries, _judge.last_parry, hp_before, mate.hp, host_stunned])
 	# One way of latency sits between the press and the window, so this is
@@ -646,6 +655,8 @@ func _two_peer_checks() -> void:
 	expect(_judge.parries - parries == 1 and absf(mate.hp - hp_before) < 0.01 and absf(host_stunned - thrust.value("recovery")) < 0.15
 		or (_judge.parries == parries and absf((hp_before - mate.hp) - thrust.value("damage") * 10.0) < 0.01),
 		"the_clients_parry_turns_the_hosts_thrust_or_misses_by_the_lag_and_nothing_else")
+	note("the client's parry on this screen: sword pitch max %.1f deg" % mate_pitch)
+	expect(absf(mate_pitch - 90.0) < 5.0, "and_this_screen_shows_the_clients_sword_upright")
 	await _wait(1.0)
 	client_take_weapon.rpc_id(_client_peer(), WeaponKinds.Kind.NONE)
 	await tick_request(func() -> void:
