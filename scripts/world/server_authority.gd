@@ -53,6 +53,10 @@ enum Intent {
 	# synchronizer carries it) or tells the owner which weapon it may hold.
 	RACE,
 	WEAPON,
+	# C-1b': a notice, like DASH: the owner started (on) or ended (off)
+	# charging a throw. The server drains the charge's stamina while it is on
+	# and the hold stands; it decides nothing else.
+	CHARGE,
 }
 
 # Anything that can be picked up joins this group and offers
@@ -399,6 +403,8 @@ func _was_standing_on(holder: Player, target: Node3D) -> bool:
 
 # The only way a hold ends. Returns what was being held.
 func _end_hold(holder_peer: int, reason: String, away_hint := Vector3.ZERO) -> Node3D:
+	# C-1b': no hold, no charge to drain.
+	_charging.erase(holder_peer)
 	if not _holds.has(holder_peer):
 		return null
 	var record: Dictionary = _holds[holder_peer]
@@ -600,6 +606,8 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 			result = _rule_race(actor, int(payload.get("race", -1)))
 		Intent.WEAPON:
 			result = _rule_weapon(actor, int(payload.get("weapon", -1)))
+		Intent.CHARGE:
+			result = _rule_charge(actor, bool(payload.get("on", false)))
 	if result == null:
 		return _refuse(sender, kind, "refused")
 	granted_intents += 1
@@ -642,6 +650,8 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 			return _target_for(payload) != null
 		Intent.DROP, Intent.ESCAPE, Intent.RESPAWN, Intent.DASH:
 			return true
+		Intent.CHARGE:
+			return payload.get("on") is bool
 		Intent.SKILL:
 			return Skills.is_known(String(payload.get("skill", ""))) \
 				and _direction_of(payload) != Vector3.ZERO
@@ -1205,6 +1215,8 @@ func _rule_escape(actor: Player) -> Variant:
 	if holder_peer == 0 or not _holds.has(holder_peer):
 		return null
 	var record: Dictionary = _holds[holder_peer]
+	# C-1b': the press's cost, off the server's copy.
+	spend_stamina(actor, Tuning.server.stamina_escape_press, "escape")
 	if float(record["window"]) <= 0.0:
 		record["presses"] = 0
 		record["window"] = Tuning.server.grabbed_escape_window
@@ -1463,6 +1475,64 @@ func _rule_knockback(target: Player, event: Dictionary) -> bool:
 # so a death is "the server says you are dead" plus "your machine puts the
 # body in the DEAD state".
 
+# ------------------------------------------------------- C-1b': the stamina
+# The server's number, like hp. Regen and every cost come through here: the
+# cast (_rule_skill), the dash notice (_rule_dash), the escape press
+# (_rule_escape), the hold and the charge (_enforce_holds), the climb
+# (_watch_vitals). The owner reads its replica to refuse an empty cast or
+# dash before asking; nothing on any peer writes it but this file.
+var _stamina_spent := {}
+var _charging := {}
+
+
+func server_set_stamina(player: Player, value: float) -> void:
+	if player == null or not is_judge() or player.stats == null:
+		return
+	player.stamina = clampf(value, 0.0, player.stats.max_stamina)
+
+
+# Takes `amount` off, to no less than 0, and returns what actually came off.
+func spend_stamina(player: Player, amount: float, why: String) -> float:
+	if player == null or not is_judge() or amount <= 0.0:
+		return 0.0
+	var taken := minf(amount, player.stamina)
+	server_set_stamina(player, player.stamina - taken)
+	var peer := player.get_multiplayer_authority()
+	_stamina_spent[peer] = float(_stamina_spent.get(peer, 0.0)) + taken
+	if taken < amount - 0.001:
+		print("PLAYGROUND_STAMINA_SHORT peer=%s why=%s asked=%.1f had=%.1f" % [player.name, why, amount, taken])
+	return taken
+
+
+# What the server has taken off this peer since it joined. Read by the checks.
+func stamina_spent_by(peer: int) -> float:
+	return float(_stamina_spent.get(peer, 0.0))
+
+
+func _rule_charge(actor: Player, on: bool) -> Variant:
+	var peer := actor.get_multiplayer_authority()
+	if on and _holds.has(peer):
+		_charging[peer] = true
+	else:
+		_charging.erase(peer)
+	return true
+
+
+# Every step, for every body: regen while standing (the replicated state),
+# the climb's drain on the wall, and a maximum that fell takes the pool down.
+func _tick_stamina(player: Player, delta: float) -> void:
+	if player.stats == null:
+		return
+	if player.sync_dead:
+		return
+	if player.state == Player.State.CLIMB:
+		spend_stamina(player, Tuning.server.stamina_climb_drain * delta, "climb")
+	elif player.is_grounded_state():
+		server_set_stamina(player, player.stamina + Tuning.server.stamina_regen * delta)
+	if player.stamina > player.stats.max_stamina:
+		server_set_stamina(player, player.stats.max_stamina)
+
+
 func server_set_hp(player: Player, value: float) -> void:
 	if player == null or not is_judge():
 		return
@@ -1670,6 +1740,7 @@ func server_respawn(player: Player) -> void:
 		return
 	var peer := player.get_multiplayer_authority()
 	server_set_hp(player, player.stats.max_hp)
+	server_set_stamina(player, player.stats.max_stamina)
 	player.sync_dead = false
 	_respawn_left.erase(peer)
 	_fall_watch.erase(peer)
@@ -1805,6 +1876,7 @@ func _watch_vitals(delta: float) -> void:
 				_expire_flight_source(peer)
 		_fall_watch[peer] = watch
 		_check_move(player, delta)
+		_tick_stamina(player, delta)
 
 		if player.sync_dead:
 			_respawn_left[peer] = maxf(0.0, float(_respawn_left.get(peer, 0.0)) - delta)
@@ -2077,6 +2149,8 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 	if def.value("stamina_cost") > 0.0 and actor.stamina <= 0.0:
 		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=no_stamina" % [actor.name, def.id])
 		return null
+	# C-1b': the cost comes off here, the server's copy, at the intent.
+	spend_stamina(actor, def.value("stamina_cost"), def.id)
 	var direction := _direction_of(payload)
 	# M-7: the intent arrives at the start of the windup, so the recovery lock
 	# and the cooldown run from the impact, not from now.
@@ -2162,12 +2236,15 @@ func _parry_turns(target: Player, attacker: Node3D, attack: SkillDef) -> bool:
 		return false
 	forward = forward.normalized()
 	var side := Vector3(-forward.z, 0.0, forward.x)
+	# C-1b' (user's call): no distance in it. A melee blow that is landing on
+	# this body from an attacker inside the front 90 degrees is turned,
+	# however far the weapon reached. Projectiles are C-3's to decide.
 	var offset := attacker.global_position - target.global_position
 	offset.y = 0.0
 	var along := offset.dot(forward)
 	var across := absf(offset.dot(side))
 	var angle := rad_to_deg(atan2(across, along))
-	if offset.length() > def.value("reach") + body_radius(attacker) or angle > def.value("shape_angle_deg") * 0.5:
+	if angle > def.value("shape_angle_deg") * 0.5:
 		print("PLAYGROUND_PARRY_MISSED by=%s attacker=%s distance=%.2f angle=%.0f" % [
 			target.name, attacker.name, offset.length(), angle])
 		return false
@@ -2469,6 +2546,9 @@ func _rule_dash(actor: Player) -> Variant:
 	var now := float(Time.get_ticks_msec()) / 1000.0
 	var last := float(_dash_seen.get(peer, -100.0))
 	_dash_seen[peer] = now
+	# C-1b': the dash's cost. The dash has already happened on the owner's
+	# machine (v4: its own move), so this is taken, not refused.
+	spend_stamina(actor, Tuning.server.stamina_dash_cost, "dash")
 	if now - last < Tuning.server.dash_cooldown - DASH_COOLDOWN_SLACK:
 		print("PLAYGROUND_DASH_COOLDOWN_OVER peer=%s gap=%.2f cooldown=%.2f" % [
 			actor.name, now - last, Tuning.server.dash_cooldown])
@@ -2596,6 +2676,16 @@ func _enforce_holds(delta: float) -> void:
 		# A body that died in someone's hands is not still in them.
 		if target is Player and (target as Player).state == Player.State.DEAD:
 			_end_hold(holder_peer, "target_dead")
+			continue
+		# C-1b': the hold's cost, per second, off the server's copy: the
+		# charge's rate while the owner says it is charging, the grab's
+		# stamina column (per second while lifting) otherwise.
+		if _charging.has(holder_peer):
+			spend_stamina(holder, Tuning.server.stamina_charge_per_sec * delta, "charge")
+		else:
+			var grab := Skills.get_def("grab")
+			if grab != null:
+				spend_stamina(holder, grab.value("stamina_cost") * delta, "hold")
 
 
 # N-3: a held person rides the holder's hand on the server's say-so, the way a

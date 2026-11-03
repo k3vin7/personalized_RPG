@@ -239,11 +239,9 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			throw_line_mult_max = value
-# 6-chapter stamina costs.
-@export var stamina_hold_per_sec: float = 5.0:
-	set(value):
-		if Tuning.may_write(self):
-			stamina_hold_per_sec = value
+# 6-chapter stamina costs. C-1b': the hold's own drain is the grab's
+# stamina column (grab_stamina, per second while lifting); stamina_hold_per_sec
+# was a second copy of the same number and is gone.
 @export var stamina_charge_per_sec: float = 8.0:
 	set(value):
 		if Tuning.may_write(self):
@@ -667,10 +665,8 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			parry_cooldown = value
-@export var parry_range: float = 1.2:
-	set(value):
-		if Tuning.may_write(self):
-			parry_range = value
+# No parry_range: the parry has no distance condition (C-1b', the user's
+# call); the resource's reach is a note, not a rule.
 @export var parry_angle: float = 90.0:
 	set(value):
 		if Tuning.may_write(self):

@@ -954,7 +954,8 @@ func request_dash() -> bool:
 	if player.stamina < Tuning.server.stamina_dash_cost:
 		print("PLAYGROUND_DASH_NO_STAMINA peer=%s stamina=%.1f" % [player.name, player.stamina])
 		return false
-	player.stamina -= Tuning.server.stamina_dash_cost
+	# C-1b': the cost comes off on the server when the dash notice arrives
+	# (_rule_dash); this reads the replica to refuse an empty one.
 	_dash_direction = cursor_direction()
 	_dash_total = float(plan["distance"])
 	_dash_left = _dash_total

@@ -534,13 +534,14 @@ func _stamina_checks() -> void:
 	var thrust := Skills.get_def("thrust")
 	await _stand_before(dummy, 2.0)
 	var before := _local.stamina
-	var spent := _local.skills.stamina_spent
+	var spent := _judge.stamina_spent_by(_peer_id)
 	await tick_request(func() -> void: _local.skills.press_slot(0))
 	var after := _local.stamina
-	note("thrust: stamina %.2f -> %.2f (cost %.0f, regen %.0f/s over the tick)" % [before, after, thrust.value("stamina_cost"), Tuning.server.stamina_regen])
-	expect(absf(_local.skills.stamina_spent - spent - thrust.value("stamina_cost")) < 0.001
+	note("thrust: stamina %.2f -> %.2f (cost %.0f, regen %.0f/s over the tick; server took %.2f)" % [
+		before, after, thrust.value("stamina_cost"), Tuning.server.stamina_regen, _judge.stamina_spent_by(_peer_id) - spent])
+	expect(absf(_judge.stamina_spent_by(_peer_id) - spent - thrust.value("stamina_cost")) < 0.001
 		and before - after > thrust.value("stamina_cost") - Tuning.server.stamina_regen * 0.05 - 0.01,
-		"a_cast_costs_its_stamina_column")
+		"a_cast_costs_its_stamina_column_on_the_server")
 	await _wait_idle()
 	# At 0 the press is refused on the owner's machine and the intent is
 	# refused by the server if sent anyway.
@@ -613,7 +614,9 @@ func _two_peer_checks() -> void:
 	if await _wait_report("cast"):
 		var cast: Dictionary = _reports["cast"]
 		note("the client's own count: %s" % [cast])
-		expect(absf(float(cast.get("spent", 0.0)) - thrust.value("stamina_cost")) < 0.001, "the_client_paid_the_stamina_column")
+		expect(float(cast.get("spent", 0.0)) > thrust.value("stamina_cost") - 1.5
+			and absf(_judge.stamina_spent_by(_client_peer()) - thrust.value("stamina_cost")) < 0.001,
+			"the_client_paid_the_stamina_column_on_the_server_and_saw_it")
 	# The client parries the host's thrust: the host is held for the thrust's
 	# recovery, the client takes nothing.
 	# Both put back first: the client's thrust slid the host half a metre
@@ -698,12 +701,20 @@ func client_take_weapon(kind: int) -> void:
 func client_cast_at(aim: Vector3, slot: int) -> void:
 	var was: bool = Tuning.values.smart_key_enabled
 	Tuning.values.smart_key_enabled = true
-	var spent := _local.skills.stamina_spent
+	# C-1b': the cost lands on this screen a packet later, as the server's
+	# number; the deepest the pool goes in the next 0.8 s is what was paid
+	# (regen refills 8 in a third of a second).
+	var before := _local.stamina
+	var lowest := before
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(aim)
 		_local.skills.press_slot(slot))
-	await _wait(0.8)
-	report.rpc_id(1, "cast", {"spent": _local.skills.stamina_spent - spent, "slot": slot})
+	var waited := 0.0
+	while waited < 0.8:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		lowest = minf(lowest, _local.stamina)
+	report.rpc_id(1, "cast", {"spent": before - lowest, "slot": slot})
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
 	Tuning.values.smart_key_enabled = was
 

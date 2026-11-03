@@ -182,12 +182,11 @@ var _body_race := -1
 var _body_shape: CapsuleShape3D
 var _body_mesh: CapsuleMesh
 var _facing: MeshInstance3D
+# C-1b': the server's number, like hp: written only by ServerAuthority
+# (regen, every cost) and carried on the Vitals synchronizer. The owner reads
+# it to refuse an empty cast or dash before the intent goes out; every screen
+# shows it. H-3 had the owner writing it and the pose synchronizer carrying it.
 var stamina := 100.0
-# H-3: the owner's stamina, replicated on the pose synchronizer for display on
-# other screens. Spending it is still the owner's (the server does not check
-# stamina costs yet -- that is the combat stage), so this is a readout, not a
-# ruling: nothing on another peer may branch on it.
-var sync_stamina := 100.0
 var camera: QuarterCamera
 
 var _visual: Node3D
@@ -277,7 +276,6 @@ func _ready() -> void:
 	stats = (load("res://data/default_stats.tres") as CharacterStats).duplicate(true)
 	hp = stats.max_hp
 	stamina = stats.max_stamina
-	sync_stamina = stamina
 	collision_layer = PLAYER_LAYER
 	# Rocks are included: a rock you can walk through is not a thing you would
 	# bother picking up, and a thrown one has to be able to knock you about.
@@ -653,19 +651,12 @@ func _physics_process(delta: float) -> void:
 				collision_layer = PLAYER_LAYER
 		if _fall_tracking and state == State.AIRBORNE:
 			_fall_peak_y = maxf(_fall_peak_y, global_position.y)
-		if is_grounded_state():
-			stamina = minf(stats.max_stamina, stamina + Tuning.server.stamina_regen * delta)
-		# A maximum that fell (slider, race) takes the pool down with it.
-		stamina = minf(stamina, stats.max_stamina)
-		sync_stamina = stamina
 		sync_position = global_position
 		sync_yaw = rotation.y
 		sync_state = state
 		sync_jumped = _jumped_this_flight
 		_update_shadow()
 		return
-	# Shown, not simulated, like the pose: the owner's number as last heard.
-	stamina = sync_stamina
 	# M-5: the cast's show, replayed from the owner's stamp. The strike box
 	# times itself out here as it does on the owner.
 	var stamp := "%s|%s|%.3f" % [sync_skill_id, sync_skill_phase, sync_skill_at]
@@ -857,7 +848,6 @@ func apply_respawn(at: Vector3) -> void:
 	collision_layer = 0
 	_teleport_blind_left = SyncRules.TELEPORT_BLIND
 	velocity = Vector3.ZERO
-	stamina = stats.max_stamina
 	respawns_applied += 1
 	floor_snap_length = _default_snap
 	if movement != null:

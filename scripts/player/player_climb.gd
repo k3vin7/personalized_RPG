@@ -164,7 +164,8 @@ func _physics_process(delta: float) -> void:
 	if player.state != Player.State.CLIMB:
 		return
 
-	player.stamina = maxf(0.0, player.stamina - Tuning.server.stamina_climb_drain * delta)
+	# C-1b': the drain is the server's (ServerAuthority._watch_vitals, off the
+	# replicated CLIMB state); this reads the replica and lets go at empty.
 	if player.stamina <= 0.0:
 		detach(0.5)
 		return

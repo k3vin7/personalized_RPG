@@ -124,12 +124,15 @@ func press_throw() -> void:
 		return
 	_charge_left = 0.0
 	_charging = true
+	# C-1b': a notice, so the server drains the charge's stamina meanwhile.
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.CHARGE, {"on": true})
 
 
 func release_throw_key() -> void:
 	if not _charging:
 		return
 	_charging = false
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.CHARGE, {"on": false})
 	if not is_holding():
 		player.clear_predicted()
 		return
@@ -195,7 +198,7 @@ func drop() -> void:
 func escape_press() -> void:
 	if not is_held():
 		return
-	player.stamina = maxf(0.0, player.stamina - Tuning.server.stamina_escape_press)
+	# C-1b': the press's cost is taken by the server in _rule_escape.
 	player.begin_predicted(ServerAuthority.Intent.ESCAPE)
 	ServerAuthority.submit_intent(player, ServerAuthority.Intent.ESCAPE, {})
 
@@ -252,17 +255,14 @@ func _physics_process(delta: float) -> void:
 			load = 0.0
 	player.stats.held_weight = load
 
+	# C-1b': the hold's and the charge's drain are the server's
+	# (_enforce_holds, off the hold table and the CHARGE notice).
 	if _charging:
 		_charge_left += delta
-		player.stamina = maxf(0.0, player.stamina
-			- Tuning.server.stamina_charge_per_sec * delta)
 		if _charge_left >= Tuning.values.throw_hold_threshold:
 			# A throw now, whatever the charge ends up: show it, and keep
 			# showing it for as long as the key is down.
 			player.hold_predicted(ServerAuthority.Intent.THROW)
-	elif is_instance_valid(held):
-		player.stamina = maxf(0.0, player.stamina
-			- Tuning.server.stamina_hold_per_sec * delta)
 
 	var holder_peer := judge.holder_of(player)
 	var my_target := judge.held_by(player.get_multiplayer_authority())

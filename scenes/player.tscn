@@ -18,18 +18,15 @@ properties/3/replication_mode = 1
 properties/4/path = NodePath(".:sync_knock")
 properties/4/spawn = true
 properties/4/replication_mode = 1
-properties/5/path = NodePath(".:sync_stamina")
+properties/5/path = NodePath(".:sync_skill_id")
 properties/5/spawn = true
 properties/5/replication_mode = 1
-properties/6/path = NodePath(".:sync_skill_id")
+properties/6/path = NodePath(".:sync_skill_phase")
 properties/6/spawn = true
 properties/6/replication_mode = 1
-properties/7/path = NodePath(".:sync_skill_phase")
+properties/7/path = NodePath(".:sync_skill_at")
 properties/7/spawn = true
 properties/7/replication_mode = 1
-properties/8/path = NodePath(".:sync_skill_at")
-properties/8/spawn = true
-properties/8/replication_mode = 1
 
 [sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_2"]
 properties/0/path = NodePath(".:hp")
@@ -62,6 +59,9 @@ properties/8/replication_mode = 1
 properties/9/path = NodePath(".:sync_hit_damages")
 properties/9/spawn = true
 properties/9/replication_mode = 1
+properties/10/path = NodePath(".:stamina")
+properties/10/spawn = true
+properties/10/replication_mode = 1
 
 [node name="Player" type="CharacterBody3D"]
 script = ExtResource("1")

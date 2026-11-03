@@ -12,6 +12,7 @@ outcome = 0
 usable_while_holding = false
 tuning_prefix = "parry"
 weapon_id = "sword"
+reach = 1.2
 windup_lean_deg = 0.0
 recovery_lean_deg = -4.0
 strike_extent = 1.1

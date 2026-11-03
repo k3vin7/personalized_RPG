@@ -43,8 +43,8 @@ var presses_ignored := 0
 # ended on this machine, for the latency notes.
 var last_cast_unix := 0.0
 var last_fire_unix := 0.0
-# C-1b: what the casts have cost, and the parries the server answered.
-var stamina_spent := 0.0
+# C-1b: the parries the server answered. (What the casts cost is the
+# server's count: ServerAuthority.stamina_spent_by.)
 var parries_won := 0
 var parries_lost := 0
 # M-7: whether the cast in progress already sent its intent (at the start of
@@ -291,9 +291,9 @@ func cast_slot(index: int) -> bool:
 	if def == null or slot_locked(index) or slot_on_cooldown(index) or is_busy() or not player.is_grounded_state():
 		presses_ignored += 1
 		return false
-	# C-1b: the stamina column. An empty pool refuses the cast (the server
-	# refuses the intent the same way); otherwise the cost comes off now, the
-	# way the dash's does, from the owner's own pool.
+	# C-1b: the stamina column. An empty pool refuses the cast here, off the
+	# replica; the server refuses the intent the same way and (C-1b') takes
+	# the cost off its own copy, which is the one every screen shows.
 	var cost := def.value("stamina_cost")
 	if cost > 0.0 and player.stamina <= 0.0:
 		presses_ignored += 1
@@ -305,9 +305,6 @@ func cast_slot(index: int) -> bool:
 	_cast_def = def
 	_cast_slot = index
 	casts_started += 1
-	if cost > 0.0:
-		player.stamina = maxf(0.0, player.stamina - cost)
-		stamina_spent += cost
 	# Shown on the frame of the press, taken back if the server says no.
 	player.begin_predicted(def.server_intent())
 	# M-7: a strike's intent goes out now, at the start of the windup, aimed
