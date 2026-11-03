@@ -179,6 +179,7 @@ func run(world: Node3D) -> void:
 	await _stamina_checks()
 	await _kick_checks()
 	await _two_peer_checks()
+	await _facing_checks()
 	Tuning.values.smart_key_enabled = smart
 	expect(_judge.move_warnings == warnings, "no_move_warnings_during_c1d")
 	expect(_judge.move_corrections == corrections, "no_corrections_during_c1d")
@@ -426,6 +427,71 @@ func _two_peer_checks() -> void:
 	await _wait(0.5)
 
 
+# ------------------------------------------------- 7: the dash faces its way
+
+# The yaw a body shows when it faces `direction` (snap_facing's formula).
+static func _yaw_of(direction: Vector3) -> float:
+	return atan2(-direction.x, -direction.z)
+
+
+# Stand at `at` facing east, dash north, and read the yaw on the first dash
+# frame and at the end of the dash.
+func _dash_facing(at: Vector3) -> Dictionary:
+	var aim := at + Vector3(0.0, 0.0, -4.0)
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = at
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target()
+		_local.movement.cancel_armed()
+		_local.movement.set_aim_override(Vector3.INF)
+		_local.snap_facing(Vector3(1.0, 0.0, 0.0)))
+	await _wait(Tuning.server.dash_cooldown + 0.3)
+	var seen := {"before": _local.rotation.y, "first": 100.0, "last": 100.0, "dashed": false}
+	Net.queue_physics(func() -> void:
+		_local.movement.set_aim_override(aim)
+		seen["dashed"] = _local.movement.request_dash()
+		seen["first"] = _local.rotation.y)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var waited := 0.0
+	while _local.movement.is_dashing() and waited < 1.5:
+		seen["last"] = _local.rotation.y
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+	await _wait(0.3)
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	seen["want"] = _yaw_of(aim - at)
+	seen["after"] = _local.rotation.y
+	return seen
+
+
+func _facing_checks() -> void:
+	var want := _yaw_of(Vector3(0.0, 0.0, -4.0))
+	var host := await _dash_facing(HOME + Vector3(-4.0, 0.0, 0.0))
+	note("host dash north from facing east: %s" % [host])
+	expect(bool(host["dashed"]) and absf(angle_difference(float(host["before"]), want)) > 1.0,
+		"the_host_stood_facing_away_from_the_dash_before_it")
+	expect(absf(angle_difference(float(host["first"]), want)) < 0.05,
+		"the_host_faces_the_dash_direction_on_the_dash_frame")
+	expect(absf(angle_difference(float(host["last"]), want)) < 0.05 and absf(angle_difference(float(host["after"]), want)) < 0.05,
+		"and_still_faces_it_when_the_dash_ends")
+	# The client: its own screen, then this screen's replica of it.
+	var mate := _mate()
+	var spot := HOME + Vector3(4.0, 0.0, 0.0)
+	_reports.erase("facing")
+	client_dash_facing.rpc_id(_client_peer(), spot)
+	var client_side: Dictionary = _reports.get("facing", {}) if await _wait_report("facing", 12.0) else {}
+	await _wait(0.5)
+	var replica := mate.rotation.y if mate != null else 100.0
+	note("client dash north from facing east: %s | replica yaw here %.3f (want %.3f)" % [client_side, replica, want])
+	expect(bool(client_side.get("dashed", false)) and absf(angle_difference(float(client_side.get("first", 100.0)), want)) < 0.05,
+		"the_client_faces_its_dash_direction_on_its_own_screen")
+	expect(absf(angle_difference(float(client_side.get("after", 100.0)), want)) < 0.05,
+		"and_keeps_it_after_the_dash")
+	expect(absf(angle_difference(replica, want)) < 0.1, "the_hosts_replica_of_the_client_faces_the_same_way")
+
+
 # ------------------------------------------------------------------ RPCs
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -449,6 +515,13 @@ func client_park(point: Vector3) -> void:
 		_local.velocity = Vector3.ZERO
 		_local.movement.cancel_target()
 		_local.movement.set_aim_override(Vector3.INF))
+
+
+# Server -> client: stand at `at` facing east, dash north, report the yaws.
+@rpc("authority", "call_remote", "reliable")
+func client_dash_facing(at: Vector3) -> void:
+	var seen := await _dash_facing(at)
+	report.rpc_id(1, "facing", seen)
 
 
 # Server -> client: dash at `aim`, press `slot` `gap` seconds after the

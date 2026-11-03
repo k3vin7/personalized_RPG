@@ -965,6 +965,9 @@ func request_dash() -> bool:
 	# C-1b': the cost comes off on the server when the dash notice arrives
 	# (_rule_dash); this reads the replica to refuse an empty one.
 	_dash_direction = cursor_direction()
+	# The body faces where it dashes, at once: a dash is too short for the
+	# eased turn, and nothing else turns the body while it is in DASH.
+	player.snap_facing(_dash_direction)
 	_dash_total = float(plan["distance"])
 	_dash_left = _dash_total
 	_dash_cooldown_left = Tuning.server.dash_cooldown
