@@ -162,6 +162,34 @@ func _key_checks() -> void:
 	note("after: dash=%s slot1=%s slot2=%s" % [
 		_local.movement.dash_key_label(), _local.skills.key_label(0), _local.skills.key_label(1)])
 
+	# 5) The line-throw modifier is C, read while held; Shift (the dash) is not it.
+	var hold := InputEventKey.new()
+	hold.physical_keycode = KEY_C
+	hold.pressed = true
+	Input.parse_input_event(hold)
+	await get_tree().physics_frame
+	var c_held := _local.grab.line_throw_held()
+	var lift := InputEventKey.new()
+	lift.physical_keycode = KEY_C
+	lift.pressed = false
+	Input.parse_input_event(lift)
+	await get_tree().physics_frame
+	var c_lifted := _local.grab.line_throw_held()
+	hold = InputEventKey.new()
+	hold.physical_keycode = KEY_SHIFT
+	hold.pressed = true
+	Input.parse_input_event(hold)
+	await get_tree().physics_frame
+	var shift_held := _local.grab.line_throw_held()
+	lift = InputEventKey.new()
+	lift.physical_keycode = KEY_SHIFT
+	lift.pressed = false
+	Input.parse_input_event(lift)
+	await get_tree().physics_frame
+	_local.movement.cancel_armed()
+	note("line throw: C held=%s, lifted=%s, Shift held=%s (key %s)" % [c_held, c_lifted, shift_held, OS.get_keycode_string(PlayerGrab.LINE_THROW_KEY)])
+	expect(PlayerGrab.LINE_THROW_KEY == KEY_C and c_held and not c_lifted and not shift_held, "the_line_throw_modifier_is_c_and_not_shift")
+
 
 func _camera_checks() -> void:
 	var cam := _local.camera

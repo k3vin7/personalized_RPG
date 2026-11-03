@@ -401,7 +401,7 @@ func _rock_versus_player_check() -> void:
 	var hp_before := victim.hp
 	var stood := victim.global_position
 	# A straight line at the body. Stage E replaced the fixed 35 degree lob
-	# with an arc solved to the cursor and a line on shift, so the old trick of
+	# with an arc solved to the cursor and a line on C, so the old trick of
 	# setting throw_up_angle_deg to zero does nothing now -- the line is what
 	# "thrown flat at someone" means.
 	await tick_request(func() -> void:

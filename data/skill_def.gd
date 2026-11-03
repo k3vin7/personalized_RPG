@@ -29,7 +29,7 @@ enum Outcome {
 # M-6: how the key is read. PRESS_CAST is the cast flow (arm or cast on the
 # press, windup, ruling, recovery). HOLD_RELEASE is the grab's: the press is
 # the request (or, with something in hand, the start of a charge), the release
-# decides -- under the threshold a put-down, over it an arc, Shift a line. The
+# decides -- under the threshold a put-down, over it an arc, C a line. The
 # smart key and the left button play no part in it.
 enum InputMode {
 	PRESS_CAST,

@@ -274,7 +274,7 @@ func _one_key_checks() -> void:
 			rock.global_position.y])
 		expect(miss < 1.5, "the_arc_lands_near_the_cursor_at_%.0f_m" % distance)
 
-	# Shift is a straight line: much flatter and much faster than the arc.
+	# C held is a straight line: much flatter and much faster than the arc.
 	expect(await _take(rock), "took_the_rock_for_the_line")
 	var start := rock.global_position
 	_number = 0.0

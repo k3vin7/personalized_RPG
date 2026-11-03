@@ -278,7 +278,7 @@ func _hold_press(def: SkillDef) -> bool:
 
 
 # M-6: the key coming up. Only a hold-and-release skill cares: under the
-# threshold the load is put down, over it thrown in an arc, with Shift held
+# threshold the load is put down, over it thrown in an arc, with C held
 # thrown in a line. Everything about that is PlayerGrab's already.
 func release_slot(index: int) -> bool:
 	var def := slot_def(index)

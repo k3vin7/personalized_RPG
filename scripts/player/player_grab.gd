@@ -34,6 +34,16 @@ var _charge_left := 0.0
 var _freed_left := 0.0
 
 
+# The line-throw modifier: held when the throw key comes up, the load goes
+# in a straight line instead of an arc. C (2026-11-03, was Shift, which the
+# dash now has by default).
+const LINE_THROW_KEY := KEY_C
+
+
+func line_throw_held() -> bool:
+	return Input.is_physical_key_pressed(LINE_THROW_KEY)
+
+
 func setup(owner_player: Player) -> void:
 	player = owner_player
 	set_physics_process(true)
@@ -110,7 +120,7 @@ func grab() -> bool:
 #
 #   released before throw_hold_threshold  -> put it down
 #   held at least that long               -> an arc, landing where the cursor is
-#   shift held as well                    -> a straight line, cursor = heading
+#   LINE_THROW_KEY (C) held as well       -> a straight line, cursor = heading
 #
 # The charge runs from the threshold to throw_charge_max and scales how far an
 # arc can reach, or how hard a line is thrown. Moving while charging is fine --
@@ -140,7 +150,7 @@ func release_throw_key() -> void:
 		# A tap is a put-down.
 		ServerAuthority.submit_intent(player, ServerAuthority.Intent.DROP, {})
 		return
-	var line := Input.is_physical_key_pressed(KEY_SHIFT)
+	var line := line_throw_held()
 	var charge: float = clampf(
 		(_charge_left - Tuning.values.throw_hold_threshold)
 			/ maxf(Tuning.values.throw_charge_max - Tuning.values.throw_hold_threshold, 0.01),
