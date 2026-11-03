@@ -123,6 +123,11 @@ enum ArcPlane {
 # C-1c: a team mate in the air is launched rather than pushed (the shove's
 # co-op step), with the shove's angle. The shield bash's.
 @export var launches_airborne_ally: bool = false
+# C-1d: pressed within dash_combo_window of a dash's start, this skill is
+# the dash combo: cast from the dash itself (the body keeps dashing; the
+# ruling lands at the impact time) and stronger the earlier the press. The
+# punch's, the thrust's and the shield bash's.
+@export var dash_combo: bool = false
 # M-7: when the ruling lands, measured from the cast. 0 means "at the end of
 # the windup", which is every strike today; a bow or a boss swing can put it
 # elsewhere. The catch window closes at this moment.

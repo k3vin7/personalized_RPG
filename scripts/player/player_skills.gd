@@ -58,6 +58,8 @@ var blocks_broken := 0
 # stays AIRBORNE, and the swing is shown when the windup would have ended.
 var _air_cast_left := 0.0
 var _air_cast_def: SkillDef
+# C-1d: how many intents went out claiming a dash combo.
+var combos_claimed := 0
 # M-7: whether the cast in progress already sent its intent (at the start of
 # the windup) so _fire() does not send it again.
 var _sent_at_start := false
@@ -339,10 +341,10 @@ func cast_slot(index: int) -> bool:
 		if air_heading == Vector3.ZERO:
 			air_heading = -player.global_transform.basis.z
 		casts_started += 1
-		ServerAuthority.submit_intent(player, ServerAuthority.Intent.SKILL, {
+		ServerAuthority.submit_intent(player, ServerAuthority.Intent.SKILL, _combo_payload(def, {
 			"skill": def.id,
 			"direction": air_heading,
-		})
+		}))
 		casts_sent += 1
 		last_cast_unix = Time.get_unix_time_from_system()
 		_air_cast_def = def
@@ -376,10 +378,10 @@ func cast_slot(index: int) -> bool:
 		var heading := player.movement.shove_direction() if player.movement != null else -player.global_transform.basis.z
 		if heading != Vector3.ZERO:
 			player.snap_facing(heading)
-		ServerAuthority.submit_intent(player, ServerAuthority.Intent.SKILL, {
+		ServerAuthority.submit_intent(player, ServerAuthority.Intent.SKILL, _combo_payload(def, {
 			"skill": def.id,
 			"direction": heading,
-		})
+		}))
 		last_cast_unix = Time.get_unix_time_from_system()
 		_sent_at_start = true
 	var windup := def.value("windup")
@@ -499,8 +501,25 @@ func on_block_result(raised: bool) -> void:
 
 
 # C-1c: a skill that may be cast from the air, while the body is in it.
+# C-1d: and a combo skill from a dash, while the body is dashing.
 func _airborne_cast_allowed(def: SkillDef) -> bool:
-	return def != null and def.usable_airborne and player.state == Player.State.AIRBORNE
+	if def == null:
+		return false
+	if def.usable_airborne and player.state == Player.State.AIRBORNE:
+		return true
+	return def.dash_combo and player.state == Player.State.DASH
+
+
+# C-1d: the combo's gap, when this press is one: the owner's own time since
+# its dash started, inside the window. Carried on the intent; the server
+# rules on it.
+func _combo_payload(def: SkillDef, payload: Dictionary) -> Dictionary:
+	if def.dash_combo and player.movement != null:
+		var gap := player.movement.seconds_since_dash()
+		if gap >= 0.0 and gap <= Tuning.server.dash_combo_window:
+			payload["dash_gap"] = gap
+			combos_claimed += 1
+	return payload
 
 
 # C-1b: the server's word on a parry. A success ends the recovery now (the

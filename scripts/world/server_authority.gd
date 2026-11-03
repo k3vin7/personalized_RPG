@@ -664,6 +664,10 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 		Intent.CHARGE, Intent.BLOCK:
 			return payload.get("on") is bool
 		Intent.SKILL:
+			if payload.has("dash_gap"):
+				var gap: Variant = payload["dash_gap"]
+				if not (gap is float or gap is int) or not is_finite(float(gap)):
+					return false
 			return Skills.is_known(String(payload.get("skill", ""))) \
 				and _direction_of(payload) != Vector3.ZERO
 		Intent.RACE:
@@ -720,6 +724,13 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 	# its ground, which is the target's problem, not the pusher's.
 	if float(_shove_cooldown.get(peer, 0.0)) > 0.0:
 		return null
+	# C-1d: the shove keeps its own door (Intent.SHOVE), so its stamina
+	# column is taken here, the way _rule_skill takes the others'.
+	var shove_cost := Skills.get_def("shove").value("stamina_cost")
+	if shove_cost > 0.0 and actor.stamina <= 0.0:
+		print("PLAYGROUND_SKILL_REFUSED by=%s skill=shove why=no_stamina" % actor.name)
+		return null
+	spend_stamina(actor, shove_cost, "shove")
 	_shove_cooldown[peer] = Tuning.server.shove_cooldown
 
 	# A rectangle in front of the heading, shove_range deep and shove_width
@@ -2403,7 +2414,9 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=cooldown" % [actor.name, def.id])
 		return null
 	# C-1c: a skill that says so may be cast from the air (the shield slam).
-	if not actor.is_grounded_state() and not (def.usable_airborne and actor.state == Player.State.AIRBORNE):
+	# C-1d: a combo skill may be cast from the dash.
+	if not actor.is_grounded_state() and not (def.usable_airborne and actor.state == Player.State.AIRBORNE) \
+			and not (def.dash_combo and actor.state == Player.State.DASH):
 		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=state_%s" % [
 			actor.name, def.id, Player.State.keys()[actor.state]])
 		return null
@@ -2442,6 +2455,12 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 	# C-1b: the speed bonus (the thrust's) is read now, at the intent, off the
 	# speed the server saw this body moving at, and rides to the ruling.
 	var mult := 1.0
+	# C-1d: the dash combo. The gap is the owner's (its input interval, sent
+	# with the intent); the server checks it against its own record of when
+	# the dash notice arrived: a gap shorter than the arrival gap minus
+	# combo_jitter_allow is a claim the wire does not support, and refused.
+	if def.dash_combo and payload.has("dash_gap"):
+		mult *= _rule_dash_combo(actor, def, float(payload["dash_gap"]))
 	var bonus := def.value("speed_bonus")
 	if bonus > 0.0:
 		var seen := observed_h_speed(actor)
@@ -2450,6 +2469,39 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 			actor.name, def.id, seen, Tuning.server.base_move_speed, mult])
 	schedule_strike(actor, def, direction, mult)
 	return true
+
+
+# ------------------------------------------------------------ C-1d: the combo
+var combos_granted := 0
+var combos_refused := 0
+var last_combo := {}
+
+
+func _rule_dash_combo(actor: Player, def: SkillDef, claimed: float) -> float:
+	var peer := actor.get_multiplayer_authority()
+	var window: float = Tuning.server.dash_combo_window
+	var now := float(Time.get_ticks_msec()) / 1000.0
+	var arrival := now - float(_dash_seen.get(peer, -100.0))
+	var why := ""
+	if claimed < 0.0 or claimed > window:
+		why = "outside_window"
+	elif arrival > window + 1.0:
+		why = "no_dash"
+	elif claimed < arrival - Tuning.server.combo_jitter_allow:
+		why = "gap_shorter_than_the_wire"
+	last_combo = {"by": peer, "skill": def.id, "claimed": claimed, "arrival": arrival, "why": why}
+	if why != "":
+		combos_refused += 1
+		print("PLAYGROUND_DASH_COMBO_REFUSED by=%s skill=%s claimed=%.3f arrival=%.3f why=%s" % [
+			actor.name, def.id, claimed, arrival, why])
+		return 1.0
+	var top: float = Tuning.server.dash_combo_mult_max
+	var mult := 1.0 + (top - 1.0) * (1.0 - claimed / maxf(window, 0.001))
+	last_combo["mult"] = mult
+	combos_granted += 1
+	print("PLAYGROUND_DASH_COMBO by=%s skill=%s claimed=%.3f arrival=%.3f mult=%.3f" % [
+		actor.name, def.id, claimed, arrival, mult])
+	return mult
 
 
 # C-1b: the horizontal speed the server holds this body to be moving at: its

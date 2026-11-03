@@ -680,6 +680,28 @@ extends Resource
 		if Tuning.may_write(self):
 			parry_window = value
 
+@export_group("Dash combo")
+# C-1d: a combo skill (dash_combo on the SkillDef: the punch, the thrust,
+# the shield bash) pressed within dash_combo_window of the owner's dash
+# start is stronger, linearly: x dash_combo_mult_max at a gap of 0, x1 at
+# the window. The gap is the owner's own input interval, sent with the
+# intent (the work order: no latency compensation). The server also times
+# the arrival of the dash notice and the skill intent and refuses a claimed
+# gap shorter than that arrival gap minus combo_jitter_allow: a cheat check,
+# not a correction.
+@export var dash_combo_window: float = 0.15:
+	set(value):
+		if Tuning.may_write(self):
+			dash_combo_window = value
+@export var dash_combo_mult_max: float = 1.3:
+	set(value):
+		if Tuning.may_write(self):
+			dash_combo_mult_max = value
+@export var combo_jitter_allow: float = 0.05:
+	set(value):
+		if Tuning.may_write(self):
+			combo_jitter_allow = value
+
 @export_group("Shield")
 # C-1c: the shield's four, the tracker's rows as sliders. The raise is a
 # window, not a strike: up after raise_time, posture 0 -> 100% from then to

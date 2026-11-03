@@ -944,6 +944,14 @@ func dash_plan() -> Dictionary:
 	}
 
 
+var last_dash_msec := -100000
+
+
+# C-1d: seconds since this body's last dash started, on its own clock.
+func seconds_since_dash() -> float:
+	return float(Time.get_ticks_msec() - last_dash_msec) / 1000.0
+
+
 func request_dash() -> bool:
 	_disarm()
 	if player.is_incapacitated() or not player.is_grounded_state() or _dash_cooldown_left > 0.0:
@@ -960,6 +968,9 @@ func request_dash() -> bool:
 	_dash_total = float(plan["distance"])
 	_dash_left = _dash_total
 	_dash_cooldown_left = Tuning.server.dash_cooldown
+	# C-1d: when this dash started, for the combo's gap (the owner's own
+	# input interval, sent with the skill intent).
+	last_dash_msec = Time.get_ticks_msec()
 	cancel_target()
 	_clear_intent()
 	player.velocity.y = 0.0

@@ -25,3 +25,4 @@ arc_sweep_deg = 0.0
 arc_duration = 0.14
 trail = false
 feedback_big = true
+dash_combo = true

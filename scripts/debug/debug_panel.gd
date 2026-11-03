@@ -41,6 +41,7 @@ const GROUP_LABELS := {
 	"Combat": "전투 튜닝 (서버 승인) — 무기 공격력 · 방어력 · 치명타",
 	"Sword": "검 4기술 (서버 승인) — 찌르기 · 횡베기 · 종베기 · 흘리기",
 	"Shield": "방패 4기술 (서버 승인) — 들기 · 밀기 · 던지기 · 찍기",
+	"Dash combo": "돌진 조합 (서버 승인) — 창 · 배율 · 치트 허용 오차",
 }
 # A Korean name beside the field names that come up in the work order and the
 # feel questions. The field name stays: it is what the documents call it.
@@ -87,6 +88,9 @@ const FIELD_LABELS := {
 	"shield_throw_range": "방패 던지기 사거리",
 	"shield_weight": "방패 무게(임시)",
 	"shield_slam_height_bonus": "찍기 m당 피해 보정",
+	"dash_combo_window": "돌진 조합 창",
+	"dash_combo_mult_max": "돌진 조합 최대 배율(간격 0)",
+	"combo_jitter_allow": "조합 수신 간격 허용 오차(치트 검사)",
 	"shove_power": "밀치기 힘",
 	"grab_range": "잡기 거리",
 	"lift_per_strength": "근력당 들 수 있는 kg",
