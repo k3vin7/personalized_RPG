@@ -195,6 +195,11 @@ var stamina := 100.0
 var camera: QuarterCamera
 
 var _visual: Node3D
+# C-1f-2: the model and its clips, one layer behind the body. The capsule
+# and the cone are hidden while a model is loaded; everything the judge
+# reads (the collider, the race scale, the swing pivot, the trail) is here.
+var visual: CharacterVisual
+var _body_mesh_node: MeshInstance3D
 var _shadow: MeshInstance3D
 # The camera, the HUD bars and the debug panel: ours to free when we go.
 var _owned_views: Array[Node] = []
@@ -548,6 +553,8 @@ func _apply_body_size() -> void:
 	_body_mesh.height = h * 2.0
 	if _facing != null:
 		_facing.position = Vector3(0.0, 0.2 * body_scale(), -(r + 0.18))
+	if visual != null:
+		visual.set_body_scale(body_scale())
 	if _shadow != null:
 		(_shadow.mesh as QuadMesh).size = Vector2(r * 2.4, r * 2.4)
 	if _label != null:
@@ -903,20 +910,24 @@ func _apply_offhand(kind: int) -> void:
 	_block_shown = false
 	if kind == WeaponKinds.Kind.NONE:
 		return
-	_offhand_node = WeaponKinds.build_mesh(kind)
+	_offhand_node = CharacterVisual.build_weapon_mesh(kind)
 	_offhand_node.name = "OffHand"
-	_offhand_node.position = Vector3(-0.34, 0.1, -0.1)
-	_visual.add_child(_offhand_node)
+	if visual == null or not visual.attach_offhand(_offhand_node):
+		_offhand_node.position = Vector3(-0.34, 0.1, -0.1)
+		_visual.add_child(_offhand_node)
 
 
 # C-1c: the raised shield: forward and up, square to the heading.
 func show_block(raised: bool) -> void:
 	_block_shown = raised
+	if visual != null:
+		visual.set_block(raised)
 	if not is_instance_valid(_offhand_node):
 		return
-	_offhand_node.position = Vector3(-0.1, 0.35, -0.5) if raised else Vector3(-0.34, 0.1, -0.1)
-	_offhand_node.rotation_degrees = Vector3(0.0, 0.0, 0.0) if raised else Vector3(0.0, 0.0, 0.0)
 	_offhand_node.scale = Vector3(1.15, 1.15, 1.15) if raised else Vector3.ONE
+	if _offhand_node.get_parent() == _visual:
+		# No model: the stand-in shield is moved forward and up by hand.
+		_offhand_node.position = Vector3(-0.1, 0.35, -0.5) if raised else Vector3(-0.34, 0.1, -0.1)
 
 
 # The picture of the weapon. Only ever called with the server's value.
@@ -927,12 +938,14 @@ func _apply_weapon(kind: int) -> void:
 	_weapon_node = null
 	if kind == WeaponKinds.Kind.NONE:
 		return
-	_weapon_node = WeaponKinds.build_mesh(kind)
+	_weapon_node = CharacterVisual.build_weapon_mesh(kind)
 	_weapon_node.name = "HeldWeapon"
-	# At the hand, pointing the way the body faces. C-0: under the swing pivot,
-	# so a weapon skill's arc turns the weapon itself.
-	_weapon_node.position = Vector3(0.34, 0.1, -0.1)
-	_swing_pivot.add_child(_weapon_node)
+	# C-1f-2: on the model's hand bone, so the clip carries it. The swing
+	# pivot still turns through the SkillDef's arc for the trail and the
+	# limb bar; without a model the weapon hangs off the pivot as before.
+	if visual == null or not visual.attach_weapon(_weapon_node):
+		_weapon_node.position = Vector3(0.34, 0.1, -0.1)
+		_swing_pivot.add_child(_weapon_node)
 
 
 # Square on to the wall, facing into it, with no easing: the body is placed on
@@ -1133,6 +1146,7 @@ func _build_body() -> void:
 	capsule.height = BODY_HALF_HEIGHT * 2.0
 	body.mesh = capsule
 	_body_mesh = capsule
+	_body_mesh_node = body
 	_material = StandardMaterial3D.new()
 	_material.roughness = 0.7
 	body.material_override = _material
@@ -1202,6 +1216,16 @@ func _build_body() -> void:
 	_trail.material_override = trail_material
 	_trail.visible = false
 	add_child(_trail)
+
+	# C-1f-2: the model, under the same container the lean and the lying
+	# turn. With a model the capsule and the cone are not drawn.
+	visual = CharacterVisual.new()
+	visual.name = "CharacterVisual"
+	_visual.add_child(visual)
+	visual.setup(self)
+	if visual.model_loaded():
+		body.visible = false
+		facing.visible = false
 
 	_label = Label3D.new()
 	_label.position = Vector3(0.0, 1.45, 0.0)
@@ -1284,8 +1308,12 @@ func show_skill_phase(def: SkillDef, phase: String) -> void:
 		sync_skill_at = Time.get_unix_time_from_system()
 	if def == null or phase == "":
 		_skill_lean_deg = 0.0
+		if visual != null:
+			visual.show_phase(null, "")
 		_apply_predicted_pose()
 		return
+	if visual != null:
+		visual.show_phase(def, phase)
 	match phase:
 		"windup":
 			_skill_lean_deg = def.windup_lean_deg
@@ -1445,6 +1473,8 @@ func flash_hit(seconds: float) -> void:
 	_flash_left = maxf(_flash_left, seconds)
 	flashes_applied += 1
 	_apply_state_colour()
+	if visual != null:
+		visual.play_hit()
 
 
 func flash_left() -> float:
