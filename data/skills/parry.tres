@@ -22,6 +22,6 @@ range_shape = 0
 shape_angle_deg = 90.0
 arc_plane = 1
 arc_start_deg = 60.0
-arc_sweep_deg = 30.0
 arc_duration = 0.15
 trail = false
+arc_deg = 30.0

@@ -167,10 +167,10 @@ func _schema_checks() -> void:
 			all_ok = false
 			continue
 		var shape_ok := def.range_shape >= SkillDef.RangeShape.NONE and def.range_shape <= SkillDef.RangeShape.CIRCLE
-		var arc_ok := is_finite(def.arc_start_deg) and is_finite(def.arc_sweep_deg) and def.swing_time() > 0.0
+		var arc_ok := is_finite(def.arc_start()) and is_finite(def.arc_degrees()) and def.swing_time() > 0.0
 		note("%s: shape=%s angle=%.0f circle=%.1f telegraph=%s arc plane=%s start=%.0f sweep=%.0f duration=%.2f trail=%s big=%s" % [
 			id, SkillDef.RangeShape.keys()[def.range_shape], def.shape_angle_deg, def.circle_radius, def.telegraph,
-			SkillDef.ArcPlane.keys()[def.arc_plane], def.arc_start_deg, def.arc_sweep_deg, def.swing_time(), def.trail, def.feedback_big])
+			SkillDef.ArcPlane.keys()[def.arc_plane], def.arc_start(), def.arc_sign() * def.arc_degrees(), def.swing_time(), def.trail, def.feedback_big])
 		all_ok = all_ok and shape_ok and arc_ok
 	expect(all_ok, "every_skilldef_carries_a_valid_range_shape_and_swing_arc")
 	expect(Skills.get_def("grab").range_shape == SkillDef.RangeShape.NONE and not Skills.get_def("grab").shows_range(),

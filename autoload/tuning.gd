@@ -106,6 +106,10 @@ func limits_for(field: String) -> Vector2:
 	# C-1a: armour ships at 0 (no gear) and the formula is read out to 400.
 	if field.begins_with("armor_") and field != "armor_flat_pct":
 		return Vector2(0.0, 500.0)
+	# C-1g-a: a swing's arc is an angle; a full turn is the most it can mean
+	# (the user's call, 2026-11-04: 0..360 rather than four times 240).
+	if field.ends_with("_arc_deg"):
+		return Vector2(0.0, 360.0)
 	return Vector2(1.0 if field == "grabbed_escape_presses" else 0.0, maxf(value * 4.0, 1.0))
 
 

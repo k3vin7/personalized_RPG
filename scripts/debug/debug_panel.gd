@@ -74,9 +74,11 @@ const FIELD_LABELS := {
 	"grab_stamina": "들기 중 초당 스태미나",
 	"dummy_max_hp": "허수아비 HP",
 	"thrust_speed_bonus": "찌르기 속도 보정 계수",
-	"side_cut_angle": "횡베기 부채꼴 각도",
+	"side_cut_angle": "횡베기 부채꼴 각도 (바닥 표시, C-1g-c까지)",
+	"side_cut_arc_deg": "횡베기 호 (판정·연출·궤적, 좌우 합)",
 	"overhead_cut_width": "종베기 칼날 폭",
-	"overhead_cut_vertical_angle": "종베기 수직 각도",
+	"overhead_cut_arc_deg": "종베기 수직 호 (머리 위에서 앞으로)",
+	"swing_arc_margin_deg": "판정 호 - 애니 호 허용 여유",
 	"parry_window": "흘리기 판정 창",
 	"parry_recovery": "흘리기 실패 후딜",
 	"shield_raise_time": "방패 올림 시간",
@@ -396,14 +398,23 @@ func _build_ui() -> void:
 		var def := Skills.get_def(id)
 		if def == null:
 			continue
-		# C-0: the swing's arc joins the lean and the bar.
+		# C-0: the swing's arc joins the lean and the bar. C-1g-a: a sword
+		# skill's arc_deg is the server's (Tuning.server.<id>_arc_deg, in the
+		# Sword group above), so no local slider for it here.
 		for field in ["windup_lean_deg", "recovery_lean_deg", "strike_extent", "strike_height",
-				"arc_start_deg", "arc_sweep_deg", "arc_duration", "weapon_length_mult", "step_distance"]:
+				"arc_start_deg", "arc_deg", "arc_duration", "weapon_length_mult", "step_distance"]:
+			if field == "arc_deg" and def.tuning_prefix != "" \
+					and Tuning.is_server_field("%s_arc_deg" % def.tuning_prefix):
+				continue
+			if field == "arc_start_deg" and def.arc_centred:
+				continue
 			var current := float(def.get(field))
 			var limits := numeric_limits(field, current)
 			if field == "strike_height":
 				limits = Vector2(-1.0, 1.5)
-			elif field.begins_with("arc_") and field.ends_with("_deg"):
+			elif field == "arc_deg":
+				limits = Vector2(0.0, 360.0)
+			elif field == "arc_start_deg":
 				limits = Vector2(-180.0, 180.0)
 			elif field.ends_with("_deg"):
 				limits = Vector2(-45.0, 45.0)

@@ -198,14 +198,17 @@ func _table_checks() -> void:
 	var over := Skills.get_def("overhead_cut")
 	var parry := Skills.get_def("parry")
 	var thrust := Skills.get_def("thrust")
-	note("shapes: thrust %s width %.1f | side_cut %s %.0f deg skip_airborne %s | overhead %s width %.1f vertical %.0f deg | parry %s %.0f deg window %.2f" % [
+	# C-1g-a: the overhead cut's vertical fan (40) became the sweep's arc
+	# (overhead_cut_arc_deg 120); the side cut's ground fan (120) stays the
+	# range picture until C-1g-c, its ruling is the 240 sweep (C1g checks).
+	note("shapes: thrust %s width %.1f | side_cut %s %.0f deg skip_airborne %s | overhead %s width %.1f arc %.0f deg | parry %s %.0f deg window %.2f" % [
 		SkillDef.RangeShape.keys()[thrust.range_shape], thrust.value("width"),
 		SkillDef.RangeShape.keys()[side.range_shape], side.value("shape_angle_deg"), side.skip_airborne,
-		SkillDef.RangeShape.keys()[over.range_shape], over.value("width"), over.value("vertical_angle_deg"),
+		SkillDef.RangeShape.keys()[over.range_shape], over.value("width"), over.arc_degrees(),
 		SkillDef.RangeShape.keys()[parry.range_shape], parry.value("shape_angle_deg"), Tuning.server.parry_window])
 	expect(thrust.range_shape == SkillDef.RangeShape.LINE and absf(thrust.value("width") - 0.5) < 0.001
 		and side.range_shape == SkillDef.RangeShape.FAN and absf(side.value("shape_angle_deg") - 120.0) < 0.001 and side.skip_airborne
-		and over.range_shape == SkillDef.RangeShape.RECT and absf(over.value("vertical_angle_deg") - 40.0) < 0.001
+		and over.range_shape == SkillDef.RangeShape.RECT and absf(over.arc_degrees() - 120.0) < 0.001
 		and parry.range_shape == SkillDef.RangeShape.NONE and not parry.shows_range() and absf(parry.value("shape_angle_deg") - 90.0) < 0.001,
 		"the_shapes_are_the_c0_data_line_fan_narrow_rect_and_no_range_for_the_parry")
 	expect(absf(thrust.value("speed_bonus") - 0.3) < 0.001 and side.value("speed_bonus") == 0.0,
@@ -267,8 +270,9 @@ func _range_checks() -> void:
 		expect(String(strike.get("skill", "")) == id and int(strike.get("hits", 0)) == 0 and absf(dummy.hp - hp_before) < 0.01,
 			"%s_out_of_reach_misses" % id)
 		await _wait_idle()
-	# The side cut's fan: a body 1.5 m away but 80 degrees off the heading is
-	# outside 120 degrees.
+	# C-1g-a: the side cut sweeps 240 degrees (120 to each side), so a body
+	# 1.5 m away and 80 degrees off the heading is reached. (Until C-1g-a the
+	# 120 degree fan left it alone; the fan is the range picture now.)
 	await _stand_before(dummy, 1.5)
 	var off := dummy.home + Vector3(0.0, 0.0, 1.5).rotated(Vector3.UP, deg_to_rad(80.0))
 	await tick_request(func() -> void:
@@ -280,7 +284,7 @@ func _range_checks() -> void:
 	var hp_before := dummy.hp
 	var strike := await _cast_and_wait(1)
 	note("side cut with the scarecrow 80 deg off the heading at 1.5 m: %s | hp %.1f -> %.1f" % [strike, hp_before, dummy.hp])
-	expect(int(strike.get("hits", 0)) == 0 and absf(dummy.hp - hp_before) < 0.01, "the_side_cut_fan_is_120_degrees_not_a_disc")
+	expect(int(strike.get("hits", 0)) == 1 and hp_before - dummy.hp > 0.01, "the_side_cut_sweeps_240_degrees_a_body_80_deg_off_the_heading_is_hit")
 	await _wait_idle()
 	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
 
@@ -614,8 +618,8 @@ func _swing_is_wide(seen: Dictionary) -> bool:
 func _motion_checks() -> void:
 	var over := Skills.get_def("overhead_cut")
 	note("overhead cut data: arc %.0f -> %.0f deg over %.2f s, blade x%.2f" % [
-		over.arc_start_deg, over.arc_start_deg + over.arc_sweep_deg, over.swing_time(), over.weapon_length_mult])
-	expect(absf(over.arc_start_deg - 90.0) < 0.01 and absf(over.arc_sweep_deg + 120.0) < 0.01
+		over.arc_start(), over.arc_end(), over.swing_time(), over.weapon_length_mult])
+	expect(absf(over.arc_start() - 90.0) < 0.01 and absf(over.arc_end() + 30.0) < 0.01
 		and absf(over.weapon_length_mult - 1.3) < 0.001,
 		"the_overhead_cut_starts_overhead_sweeps_120_degrees_with_a_1_3_blade")
 	var dummy := _dummy()

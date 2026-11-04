@@ -332,7 +332,7 @@ func show_phase(def: SkillDef, phase: String) -> void:
 func _attack_clip_for(def: SkillDef) -> String:
 	if def.id == "shield_raise":
 		return clip_for("block")
-	if absf(def.arc_sweep_deg) < 0.01:
+	if def.is_thrust_motion():
 		return clip_for("thrust")
 	if def.arc_plane == SkillDef.ArcPlane.VERTICAL:
 		return clip_for("slash_v")

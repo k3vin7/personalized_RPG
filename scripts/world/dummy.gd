@@ -59,6 +59,10 @@ var _drawn_hit_ids: Array[int] = []
 
 var _settle_left := 0.0
 var _state_left := 0.0
+# C-1g-a harness hook: held still in the air for a check (the overhead cut's
+# target above the head). Server only; nothing in play sets it.
+var _pin_left := 0.0
+var _pin_at := Vector3.ZERO
 var _has_state := false
 var _excepted: Node3D = null
 var _blind_left := 0.0
@@ -289,6 +293,19 @@ func _physics_process(delta: float) -> void:
 			_refresh()
 		return
 
+	if _pin_left > 0.0:
+		_pin_left = maxf(0.0, _pin_left - delta)
+		global_position = _pin_at
+		velocity = Vector3.ZERO
+		_settle_left = RETURN_DELAY
+		sync_position = global_position
+		sync_hp = hp
+		_state_left -= delta
+		if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
+			_state_left = SyncRules.STATE_INTERVAL
+			push_state.rpc(global_position, hp, attack_phase, hit_ids, hit_damages)
+		return
+
 	if global_position.y < Tuning.server.kill_plane_y:
 		# Shoved off the plaza. Nothing respawns a scarecrow, so it comes
 		# back to its mark the way a rock does, blind for a moment so the
@@ -371,6 +388,20 @@ func _attack_step(delta: float) -> void:
 
 # M-7: caught mid-swing. The pattern stands still for `seconds`; the booked
 # strike is the judge's to cancel.
+# C-1g-a harness hook (host only): hold the scarecrow at `at` for `seconds`,
+# no gravity, no walk home. Placed blind for a moment like any teleport.
+func harness_pin(at: Vector3, seconds: float) -> void:
+	if not is_multiplayer_authority():
+		return
+	_pin_at = at
+	_pin_left = seconds
+	global_position = at
+	velocity = Vector3.ZERO
+	sync_position = at
+	_blind_left = SyncRules.TELEPORT_BLIND
+	collision_layer = 0
+
+
 func apply_catch_stun(seconds: float) -> void:
 	_phase_left = seconds
 	_set_attack_phase("stunned")

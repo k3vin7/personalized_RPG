@@ -536,7 +536,8 @@ extends Resource
 # number there is a temporary blue cell). A SkillDef with tuning_prefix
 # "thrust" reads thrust_windup, _recovery, _cooldown, _range, _width,
 # _damage (the coefficient on weapon_attack_sword), _power, _stamina,
-# _angle (a fan's width) and _vertical_angle (a vertical fan's).
+# _angle (the range shape's fan, until C-1g-c) and _arc_deg (C-1g-a: the
+# swing's arc, which the ruling, the picture and the trail share).
 @export var thrust_windup: float = 0.15:
 	set(value):
 		if Tuning.may_write(self):
@@ -591,11 +592,21 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			side_cut_range = value
-# The '폭' column: a horizontal fan this wide, in degrees.
+# The '폭' column: a horizontal fan this wide, in degrees. Since C-1g-a only
+# the range shape on the ground reads it (RangeShapes, via shape_angle_deg);
+# the ruling is the sweep below. C-1g-c points the shape at the arc too.
 @export var side_cut_angle: float = 120.0:
 	set(value):
 		if Tuning.may_write(self):
 			side_cut_angle = value
+# C-1g-a: the side cut's swing, degrees of horizontal arc centred on the
+# heading (240 = 120 to each side). The server sweeps the blade through it
+# over arc_duration and a body is hit when the blade reaches its bearing;
+# the swing drawn on every screen and its trail turn through the same arc.
+@export var side_cut_arc_deg: float = 240.0:
+	set(value):
+		if Tuning.may_write(self):
+			side_cut_arc_deg = value
 @export var side_cut_damage: float = 1.2:
 	set(value):
 		if Tuning.may_write(self):
@@ -631,12 +642,22 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			overhead_cut_width = value
-# The '폭' column: a vertical fan this wide. A target whose centre is inside
-# it (plus its own half height) is hit, on the ground or in the air.
-@export var overhead_cut_vertical_angle: float = 40.0:
+# C-1g-a: the overhead cut's swing, degrees of vertical arc from straight
+# up (arc_start_deg 90) down and forward: 120 ends 30 below horizontal. The
+# server sweeps the blade through it and a body whose vertical span the
+# blade crosses, inside overhead_cut_width across, is hit. Replaces the C-1b
+# vertical fan (overhead_cut_vertical_angle 40).
+@export var overhead_cut_arc_deg: float = 120.0:
 	set(value):
 		if Tuning.may_write(self):
-			overhead_cut_vertical_angle = value
+			overhead_cut_arc_deg = value
+# C-1g-a: how much wider the ruling's arc may be than the arc the model
+# actually draws (C-1g-b measures the clips). ruling >= drawn - margin, and
+# ruling <= drawn + margin. A check reads it; nothing is clamped by it.
+@export var swing_arc_margin_deg: float = 20.0:
+	set(value):
+		if Tuning.may_write(self):
+			swing_arc_margin_deg = value
 @export var overhead_cut_damage: float = 1.4:
 	set(value):
 		if Tuning.may_write(self):

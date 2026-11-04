@@ -106,11 +106,6 @@ enum ArcPlane {
 # The side cut's rule; everything else reaches a body in the air that is
 # inside its height band.
 @export var skip_airborne: bool = false
-# C-1b: a vertical fan this wide (degrees) replaces the flat height band: a
-# target whose centre is within half of it above or below the strike's pivot,
-# over the distance to it, plus its own half height, is hit. 0 keeps the
-# band. The overhead cut's.
-@export var vertical_angle_deg: float = 0.0
 # C-1b: damage x (1 + this x the caster's horizontal speed at the intent,
 # as the server saw it, / base_move_speed). The thrust's; 0 for the rest.
 @export var speed_bonus: float = 0.0
@@ -174,15 +169,34 @@ enum ArcPlane {
 @export_group("Swing")
 # C-0: the strike bar's arc. The pivot sits at strike_height on the body and
 # the bar (the held weapon, or a limb for a bare skill) hangs strike_extent off
-# it; over arc_duration seconds the pivot turns from arc_start_deg through
-# arc_sweep_deg in arc_plane, leaving a trail. Horizontal: positive is to the
-# body's left. Vertical: positive is up. A sweep of zero is a thrust, which
+# it; over arc_duration seconds the pivot turns from arc_start() through
+# arc_deg degrees in arc_plane, leaving a trail. Horizontal: positive is to
+# the body's left. Vertical: positive is up. An arc of zero is a thrust, which
 # pushes the bar out along the heading instead of turning it. arc_duration 0
-# means PlayerSkills.STRIKE_SHOW. The sword's four get their numbers in C-1b;
-# the bare four and the scarecrow's slam carry theirs here.
+# means PlayerSkills.STRIKE_SHOW.
+#
+# C-1g-a: arc_deg is THE angle of the swing. The ruling (judge_by_sweep), the
+# swing the body draws, the trail and (C-1g-c) the range shape all read it,
+# through value(): a sword skill's comes off Tuning.server.<prefix>_arc_deg
+# (side_cut_arc_deg 240, overhead_cut_arc_deg 120), so one slider moves all
+# of them. The direction is arc_reversed (the sign the old arc_sweep_deg
+# carried); arc_centred puts the arc symmetrically about the heading (the
+# side cut), otherwise it begins at arc_start_deg (the overhead cut's 90,
+# straight up).
 @export var arc_plane: ArcPlane = ArcPlane.HORIZONTAL
 @export var arc_start_deg: float = 0.0
-@export var arc_sweep_deg: float = 0.0
+@export var arc_deg: float = 0.0
+# True: the pivot turns the negative way (to the body's right, or downward).
+@export var arc_reversed: bool = false
+# True: the arc runs from +arc/2 to -arc/2 about the heading (or the other
+# way when reversed); arc_start_deg is ignored.
+@export var arc_centred: bool = false
+# C-1g-a: ruled as a sweep. Instead of one fan at the impact, the server
+# follows the blade through the swing (same arc, same easing, same clock as
+# the picture) and a body is hit the tick the blade reaches its bearing; one
+# hit per body per swing. The side cut (horizontal) and the overhead cut
+# (vertical). Off: the instant rectangle/fan/circle of M-1..C-1c.
+@export var judge_by_sweep: bool = false
 @export var arc_duration: float = 0.0
 @export var trail: bool = true
 # The held weapon is drawn this many times its length for the swing (the
@@ -214,7 +228,7 @@ const TUNING_SUFFIX := {
 	"catch_force": "catch_force",
 	"stamina_cost": "stamina",
 	"shape_angle_deg": "angle",
-	"vertical_angle_deg": "vertical_angle",
+	"arc_deg": "arc_deg",
 	"speed_bonus": "speed_bonus",
 	"height_bonus": "height_bonus",
 	"circle_radius": "radius",
@@ -256,6 +270,47 @@ func server_intent() -> int:
 # C-0: how long the strike bar's swing is shown.
 func swing_time() -> float:
 	return arc_duration if arc_duration > 0.0 else PlayerSkills.STRIKE_SHOW
+
+
+# C-1g-a: the swing's angle, degrees, through value() (a sword skill's is
+# the server's slider).
+func arc_degrees() -> float:
+	return value("arc_deg")
+
+
+# An arc of zero is a thrust: the bar is pushed out, not turned.
+func is_thrust_motion() -> bool:
+	return arc_degrees() < 0.01
+
+
+# +1 turns the positive way (left / up), -1 the other.
+func arc_sign() -> float:
+	return -1.0 if arc_reversed else 1.0
+
+
+# Where the pivot is at the start of the swing, degrees.
+func arc_start() -> float:
+	if arc_centred:
+		return -arc_sign() * arc_degrees() * 0.5
+	return arc_start_deg
+
+
+func arc_end() -> float:
+	return arc_start() + arc_sign() * arc_degrees()
+
+
+# The swing's easing: fast out of the start, settling at the end. One
+# function so the picture (Player._pose_swing) and the ruling
+# (ServerAuthority's sweep) put the blade in the same place at the same
+# progress.
+static func swing_eased(p: float) -> float:
+	var c := clampf(p, 0.0, 1.0)
+	return 1.0 - (1.0 - c) * (1.0 - c)
+
+
+# The pivot's angle at progress p (0..1), degrees.
+func swing_angle_deg(p: float) -> float:
+	return arc_start() + arc_sign() * arc_degrees() * swing_eased(p)
 
 
 # C-0: whether the key shows a shape on the ground before the cast.

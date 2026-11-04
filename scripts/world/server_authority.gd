@@ -208,6 +208,14 @@ var last_strike := {}
 # impact time -- which is what a catch (and later a parry) has to see.
 var _pending_strikes := {}
 var strikes_cancelled := 0
+# C-1g-a: the swings in progress, by caster: the blade followed through its
+# arc tick by tick, and the bodies it has reached so far.
+var _active_sweeps := {}
+var sweeps_started := 0
+var sweeps_cancelled := 0
+# The last finished sweep, for the checks: the skill, the caster, and each
+# hit in the order the blade reached it (name, bearing, ms since the start).
+var last_sweep := {}
 var catches := 0
 var last_catch := {}
 var last_refusal := ""
@@ -2681,6 +2689,8 @@ func _run_pending_strikes() -> void:
 			# C-1c: the throw of the off-hand weapon is a ruling of its own.
 			if def.outcome == SkillDef.Outcome.THROW_WEAPON and actor is Player:
 				_rule_weapon_throw(actor as Player, def, record["direction"])
+			elif def.judge_by_sweep and not def.is_thrust_motion():
+				_begin_sweep(actor, def, record["direction"], float(record.get("mult", 1.0)))
 			else:
 				_rule_strike(actor, def, record["direction"], float(record.get("mult", 1.0)))
 
@@ -2776,14 +2786,13 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0)
 	# body does not cross that height is not hit. A body on a knee-high step is
 	# still punched; one a ledge up is not kicked.
 	var strike_y := actor.global_position.y + def.strike_height * caster_scale
-	# C-1b: a FAN is a horizontal sector of the reach, shape_angle_deg wide;
-	# a vertical_angle_deg is a vertical fan in place of the flat height band.
+	# C-1b: a FAN is a horizontal sector of the reach, shape_angle_deg wide.
+	# (The vertical fan of C-1b went with C-1g-a: the overhead cut is a sweep.)
 	var fan := def.range_shape == SkillDef.RangeShape.FAN
 	# C-1c: a CIRCLE is a disc of circle_radius centred reach ahead.
 	var circle := def.range_shape == SkillDef.RangeShape.CIRCLE
 	var circle_radius := def.circle_radius_value()
 	var half_angle := def.value("shape_angle_deg") * 0.5
-	var vertical_half := def.value("vertical_angle_deg") * 0.5
 	# C-1c: the height bonus (the shield slam's), off the server's record of
 	# how far this body has fallen by now.
 	var height_bonus := def.value("height_bonus")
@@ -2792,10 +2801,7 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0)
 		var fallen := maxf(0.0, float(watch.get("peak", actor.global_position.y)) - actor.global_position.y)
 		mult *= 1.0 + height_bonus * fallen
 		print("PLAYGROUND_HEIGHT_BONUS by=%s skill=%s fallen=%.2f mult=%.3f" % [actor.name, def.id, fallen, mult])
-	var hits := 0
-	var downed := 0
-	var parried := 0
-	var skipped_airborne := 0
+	var tally := _new_tally()
 	for collision in actor.get_world_3d().direct_space_state.intersect_shape(params, 8):
 		var body := collision.get("collider") as Node3D
 		if body == null or body == actor:
@@ -2818,57 +2824,220 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0)
 				continue
 			if across > half_width + target_radius:
 				continue
-		if vertical_half > 0.0:
-			var rise := absf(body.global_position.y - strike_y)
-			if rise > tan(deg_to_rad(vertical_half)) * maxf(along, 0.3) + body_half_height(body):
-				continue
-		elif absf(body.global_position.y - strike_y) > strike_band(body):
+		if absf(body.global_position.y - strike_y) > strike_band(body):
 			continue
-		if body is Rock and holder_of(body) != 0:
-			continue
-		# C-1b: the side cut leaves a body off the ground alone.
-		if def.skip_airborne and is_airborne(body):
-			skipped_airborne += 1
-			print("PLAYGROUND_STRIKE_SKIPPED_AIRBORNE by=%s skill=%s target=%s" % [actor.name, def.id, body.name])
-			continue
-		# C-1b: an open parry on the target turns the blow; the attacker is
-		# dealt with inside, and nothing lands here.
-		if body is Player and _parry_turns(body as Player, actor, def):
-			parried += 1
-			continue
-		var is_ally := body is Player and caster != null and Tuning.server.same_party
-		var push := (forward + Vector3.UP * Tuning.server.shove_up_bias).normalized()
-		var ctx := {
-			"direction": push,
-			"source_strength": caster_strength,
-			"ally": is_ally,
-			"hit_y": strike_y,
-			"mult": mult,
-		}
-		# C-1c: the shield bash launches a team mate in the air the way the
-		# shove does (the co-op step), at the shove's angle, with the spring.
-		if def.launches_airborne_ally and is_ally and recently_airborne(body as Player):
-			var launch_angle := deg_to_rad(Tuning.server.shove_ally_launch_angle_deg)
-			ctx["direction"] = forward * cos(launch_angle) + Vector3.UP * sin(launch_angle)
-			ctx["spring"] = true
-			print("PLAYGROUND_SHOVE_LAUNCH by=%s target=%s angle=%.0f skill=%s" % [
-				actor.name, body.name, Tuning.server.shove_ally_launch_angle_deg, def.id])
-		# M-2: the knockdown is asked for here and ruled in _rule_hurt, like
-		# the stun: only a body on the ground goes down; in the air the push is
-		# all it gets. A body already down is put down again, for the full time.
-		if def.outcome == SkillDef.Outcome.DOWN:
-			ctx["down_request"] = true
-		# C-1a: the damage is apply_hit's; the push goes out with it.
-		var hit := apply_hit(actor, body, def, ctx)
-		hits += 1
-		if float(hit.get("down_apply", 0.0)) > 0.0:
-			downed += 1
-	last_strike = {"skill": def.id, "hits": hits, "downed": downed, "by": actor.name,
-		"parried": parried, "skipped_airborne": skipped_airborne, "mult": mult,
+		_land_strike(actor, def, body, forward, strike_y, caster_strength, mult, tally)
+	_finish_strike(actor, def, mult, tally)
+	return tally["hits"]
+
+
+func _new_tally() -> Dictionary:
+	return {"hits": 0, "downed": 0, "parried": 0, "skipped_airborne": 0, "order": []}
+
+
+# One body the blow has reached, by whichever geometry: the C-1b/C-1c rules
+# that sit between "in the shape" and the hit (a held rock, the side cut's
+# airborne rule, the parry, the ally launch, the knockdown request), then
+# apply_hit. Shared by the instant ruling and the sweep.
+func _land_strike(actor: Node3D, def: SkillDef, body: Node3D, forward: Vector3, strike_y: float,
+		caster_strength: float, mult: float, tally: Dictionary) -> bool:
+	var caster := actor as Player
+	if body is Rock and holder_of(body) != 0:
+		return false
+	# C-1b: the side cut leaves a body off the ground alone.
+	if def.skip_airborne and is_airborne(body):
+		tally["skipped_airborne"] = int(tally["skipped_airborne"]) + 1
+		print("PLAYGROUND_STRIKE_SKIPPED_AIRBORNE by=%s skill=%s target=%s" % [actor.name, def.id, body.name])
+		return false
+	# C-1b: an open parry on the target turns the blow; the attacker is
+	# dealt with inside, and nothing lands here.
+	if body is Player and _parry_turns(body as Player, actor, def):
+		tally["parried"] = int(tally["parried"]) + 1
+		return true
+	var is_ally := body is Player and caster != null and Tuning.server.same_party
+	var push := (forward + Vector3.UP * Tuning.server.shove_up_bias).normalized()
+	var ctx := {
+		"direction": push,
+		"source_strength": caster_strength,
+		"ally": is_ally,
+		"hit_y": strike_y,
+		"mult": mult,
+	}
+	# C-1c: the shield bash launches a team mate in the air the way the
+	# shove does (the co-op step), at the shove's angle, with the spring.
+	if def.launches_airborne_ally and is_ally and recently_airborne(body as Player):
+		var launch_angle := deg_to_rad(Tuning.server.shove_ally_launch_angle_deg)
+		ctx["direction"] = forward * cos(launch_angle) + Vector3.UP * sin(launch_angle)
+		ctx["spring"] = true
+		print("PLAYGROUND_SHOVE_LAUNCH by=%s target=%s angle=%.0f skill=%s" % [
+			actor.name, body.name, Tuning.server.shove_ally_launch_angle_deg, def.id])
+	# M-2: the knockdown is asked for here and ruled in _rule_hurt, like
+	# the stun: only a body on the ground goes down; in the air the push is
+	# all it gets. A body already down is put down again, for the full time.
+	if def.outcome == SkillDef.Outcome.DOWN:
+		ctx["down_request"] = true
+	# C-1a: the damage is apply_hit's; the push goes out with it.
+	var hit := apply_hit(actor, body, def, ctx)
+	tally["hits"] = int(tally["hits"]) + 1
+	if float(hit.get("down_apply", 0.0)) > 0.0:
+		tally["downed"] = int(tally["downed"]) + 1
+	return true
+
+
+func _finish_strike(actor: Node3D, def: SkillDef, mult: float, tally: Dictionary) -> void:
+	last_strike = {"skill": def.id, "hits": tally["hits"], "downed": tally["downed"], "by": actor.name,
+		"parried": tally["parried"], "skipped_airborne": tally["skipped_airborne"], "mult": mult,
 		"at_unix": Time.get_unix_time_from_system()}
 	print("PLAYGROUND_SKILL by=%s skill=%s hits=%d downed=%d parried=%d skipped_airborne=%d mult=%.3f" % [
-		actor.name, def.id, hits, downed, parried, skipped_airborne, mult])
-	return hits
+		actor.name, def.id, tally["hits"], tally["downed"], tally["parried"], tally["skipped_airborne"], mult])
+
+
+# ------------------------------------------------------------ C-1g-a: the sweep
+# The blade followed through its arc. The picture on every screen turns the
+# pivot from arc_start() through arc_deg over swing_time() with
+# SkillDef.swing_eased; this does the same on the server's clock from the
+# impact, and each tick asks which bodies the blade has reached since the
+# start. A body is hit the first tick the swept interval covers it, once per
+# swing. Horizontal (the side cut): the bearing of the body's CENTRE about
+# the heading, left positive -- no radius added, as the C-1b fan ruled (a
+# body standing at 130 degrees must not be reached by a 120 degree edge);
+# distance within reach plus its radius; the flat height band as before.
+# Vertical (the overhead cut): the pitch span of the body (its centre plus
+# and minus its HALF HEIGHT, over its distance ahead) against the swept
+# pitch, as the C-1b vertical fan did; within overhead_cut_width plus its
+# radius across; within reach ahead. The two are deliberately not unified
+# (the user's call, 2026-11-04): the side cut is read on the ground plan,
+# the overhead cut on the body's height.
+#
+# The arc is about where the body stands when the blade starts moving (the
+# impact), the same place every instant ruling reads the body. The cast step
+# carries the body on through the swing; the swept angles stay about the
+# origin, which is what "accumulate the blade's angle" means.
+
+func _begin_sweep(actor: Node3D, def: SkillDef, direction: Vector3, mult: float) -> void:
+	var forward := Vector3(direction.x, 0.0, direction.z)
+	if forward.length_squared() < 0.0001:
+		return
+	forward = forward.normalized()
+	var caster := actor as Player
+	var caster_strength := 0.0
+	if caster != null:
+		caster_strength = caster.stats.strength
+	elif actor is Dummy:
+		caster_strength = (actor as Dummy).strength()
+	var caster_scale := caster.body_scale() if caster != null else 1.0
+	_active_sweeps[actor] = {
+		"def": def,
+		"forward": forward,
+		"start_ms": Time.get_ticks_msec(),
+		"mult": mult,
+		"strength": caster_strength,
+		"origin": actor.global_position,
+		"strike_y": actor.global_position.y + def.strike_height * caster_scale,
+		"hit": {},
+		"tally": _new_tally(),
+	}
+	sweeps_started += 1
+	print("PLAYGROUND_SWEEP_BEGIN by=%s skill=%s arc=%.0f from=%.0f to=%.0f over=%.2fs" % [
+		actor.name, def.id, def.arc_degrees(), def.arc_start(), def.arc_end(), def.swing_time()])
+
+
+func _run_sweeps() -> void:
+	var now := Time.get_ticks_msec()
+	for actor: Variant in _active_sweeps.keys():
+		if not is_instance_valid(actor):
+			_active_sweeps.erase(actor)
+			continue
+		var record: Dictionary = _active_sweeps[actor]
+		var def: SkillDef = record["def"]
+		if actor is Player:
+			var caster := actor as Player
+			if caster.sync_dead or caster.state == Player.State.STUNNED \
+					or caster.state == Player.State.DOWNED or caster.state == Player.State.GRABBED \
+					or caster.state == Player.State.DEAD:
+				_active_sweeps.erase(actor)
+				sweeps_cancelled += 1
+				print("PLAYGROUND_SWEEP_CANCELLED by=%s skill=%s why=%s" % [
+					caster.name, def.id, Player.State.keys()[caster.state]])
+				continue
+		var p := float(now - int(record["start_ms"])) / 1000.0 / maxf(def.swing_time(), 0.001)
+		var start := def.arc_start()
+		var reached := def.swing_angle_deg(minf(p, 1.0))
+		var low := minf(start, reached)
+		var high := maxf(start, reached)
+		_sweep_tick(actor, record, low, high, now)
+		if p >= 1.0:
+			_active_sweeps.erase(actor)
+			var tally: Dictionary = record["tally"]
+			last_sweep = {"skill": def.id, "by": actor.name, "arc": def.arc_degrees(),
+				"from": start, "to": reached, "origin": record["origin"], "order": tally["order"]}
+			_finish_strike(actor, def, float(record["mult"]), tally)
+
+
+func _sweep_tick(actor: Node3D, record: Dictionary, low_deg: float, high_deg: float, now: int) -> void:
+	var def: SkillDef = record["def"]
+	var forward: Vector3 = record["forward"]
+	var right := Vector3(-forward.z, 0.0, forward.x)
+	var reach := def.value("reach")
+	var half_width := def.value("width") * 0.5
+	var strike_y := float(record["strike_y"])
+	var origin: Vector3 = record["origin"]
+	var hit: Dictionary = record["hit"]
+	var tally: Dictionary = record["tally"]
+	var vertical := def.arc_plane == SkillDef.ArcPlane.VERTICAL
+	var shape := SphereShape3D.new()
+	shape.radius = reach + 1.5
+	var params := PhysicsShapeQueryParameters3D.new()
+	params.shape = shape
+	params.transform = Transform3D(Basis.IDENTITY, origin)
+	params.collision_mask = Player.PLAYER_LAYER | Dummy.LAYER
+	if def.outcome == SkillDef.Outcome.DOWN:
+		params.collision_mask |= Layers.THROWABLE
+	params.collide_with_areas = false
+	params.exclude = [actor.get_rid()]
+	for collision in actor.get_world_3d().direct_space_state.intersect_shape(params, 16):
+		var body := collision.get("collider") as Node3D
+		if body == null or body == actor or hit.has(body):
+			continue
+		var offset := body.global_position - origin
+		var dy := body.global_position.y - strike_y
+		offset.y = 0.0
+		var along := offset.dot(forward)
+		var side_signed := -offset.dot(right)
+		var target_radius := body_radius(body)
+		var bearing := 0.0
+		if vertical:
+			# In the blade's plane, ahead, and the body's vertical span under
+			# the pitch the blade has swept.
+			if along <= -target_radius or along > reach + target_radius:
+				continue
+			if absf(side_signed) > half_width + target_radius:
+				continue
+			var ahead := maxf(along, 0.05)
+			var half := body_half_height(body)
+			var pitch_low := rad_to_deg(atan2(dy - half, ahead))
+			var pitch_high := rad_to_deg(atan2(dy + half, ahead))
+			if pitch_high < low_deg or pitch_low > high_deg:
+				continue
+			bearing = rad_to_deg(atan2(dy, ahead))
+		else:
+			# Within the blade's length, inside the height band, and the
+			# body's bearing inside the arc swept so far.
+			if offset.length() > reach + target_radius:
+				continue
+			if absf(dy) > strike_band(body):
+				continue
+			bearing = rad_to_deg(atan2(side_signed, along))
+			if bearing < low_deg or bearing > high_deg:
+				continue
+		hit[body] = true
+		if _land_strike(actor, def, body, forward, strike_y, float(record["strength"]), float(record["mult"]), tally):
+			(tally["order"] as Array).append({"target": body.name, "bearing": bearing,
+				"ms": now - int(record["start_ms"]), "swept_to": high_deg if def.arc_sign() > 0.0 else low_deg})
+
+
+func sweep_in_progress(actor: Node3D) -> bool:
+	return _active_sweeps.has(actor)
 
 
 # C-1b: off the ground, as the server sees it: a player's replicated state,
@@ -2968,6 +3137,7 @@ func _physics_process(delta: float) -> void:
 	_enforce_holds(delta)
 	_place_held_people(delta)
 	_run_pending_strikes()
+	_run_sweeps()
 	_expire_parries()
 	_tick_blocks()
 	_watch_vitals(delta)

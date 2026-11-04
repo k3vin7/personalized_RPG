@@ -18,7 +18,6 @@ colour = Color(1.0000, 0.8196, 0.4000, 1)
 range_shape = 2
 arc_plane = 0
 arc_start_deg = 0.0
-arc_sweep_deg = 0.0
 arc_duration = 0.12
 weapon_id = "bare"
 dash_combo = true

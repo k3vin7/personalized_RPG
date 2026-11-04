@@ -1368,14 +1368,14 @@ func _pose_swing(p: float) -> void:
 	if _swing_def == null or _swing_pivot == null:
 		return
 	var def := _swing_def
-	var eased := 1.0 - (1.0 - p) * (1.0 - p)
-	if absf(def.arc_sweep_deg) < 0.01:
+	if def.is_thrust_motion():
 		# A thrust: out along -Z (the body's forward), and part of the way back.
-		var push := def.strike_extent * 0.6 * sin(eased * PI)
+		var push := def.strike_extent * 0.6 * sin(SkillDef.swing_eased(p) * PI)
 		_swing_pivot.rotation = Vector3.ZERO
 		_swing_pivot.position = Vector3(0.0, def.strike_height * body_scale(), -push)
 		return
-	var angle := deg_to_rad(def.arc_start_deg + def.arc_sweep_deg * eased)
+	# C-1g-a: the same angle-at-progress the server's sweep rules with.
+	var angle := deg_to_rad(def.swing_angle_deg(p))
 	if def.arc_plane == SkillDef.ArcPlane.HORIZONTAL:
 		_swing_pivot.rotation = Vector3(0.0, angle, 0.0)
 	else:
