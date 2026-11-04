@@ -209,16 +209,24 @@ func _jump_checks() -> void:
 	expect(bool(plan.get("clamped", false)), "an_unreachable_cursor_is_reported_as_clamped")
 	expect(absf(float(beyond["travel"]) - reach) < 0.5, "it_jumped_as_far_as_the_budget_allows")
 	# The ring is what a person sees for that. Armed, it is on the limit.
+	# With the smart key off: on (the default since 2026-11-03, fc1eb7c)
+	# Space casts the jump at once and arms nothing, so there is no ring.
+	var smart_was: bool = Tuning.values.smart_key_enabled
+	Tuning.values.smart_key_enabled = false
 	await tick_request(func() -> void:
 		_local.movement.set_aim_override(_local.global_position + Vector3(20.0, 0.0, 0.0))
 		_local.movement.press_jump())
 	await _wait(0.3)
 	var indicator := _local.movement.aim_indicator()
+	note("armed jump with the smart key off: indicator=%s showing=%s clamped=%s" % [
+		indicator != null, indicator.is_showing() if indicator != null else false,
+		indicator.landing_is_clamped() if indicator != null else false])
 	expect(indicator != null and indicator.is_showing(), "the_ring_is_shown_for_an_armed_jump")
 	expect(indicator != null and indicator.landing_is_clamped(), "the_ring_marks_the_limit_not_the_cursor")
 	await tick_request(func() -> void:
 		_local.movement.cancel_armed()
 		_local.movement.set_aim_override(Vector3.INF))
+	Tuning.values.smart_key_enabled = smart_was
 
 	# Onto a step, which is the landing-higher case.
 	# A dot is not allowed in a node name, so the level's "Step_1.0" is called
