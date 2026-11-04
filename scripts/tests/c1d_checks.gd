@@ -438,6 +438,10 @@ static func _yaw_of(direction: Vector3) -> float:
 # frame and at the end of the dash.
 func _dash_facing(at: Vector3) -> Dictionary:
 	var aim := at + Vector3(0.0, 0.0, -4.0)
+	# The client's teleport goes through the same lead as client_park.
+	if not _judge.is_judge():
+		placed()
+		await Harness.forgive_lead(get_tree(), placed)
 	await tick_request(func() -> void:
 		placed()
 		_local.global_position = at
@@ -509,7 +513,7 @@ func report(key: String, value: Variant) -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_park(point: Vector3) -> void:
 	placed()
-	await Harness.forgive_lead(get_tree())
+	await Harness.forgive_lead(get_tree(), placed)
 	await tick_request(func() -> void:
 		_local.global_position = point
 		_local.velocity = Vector3.ZERO

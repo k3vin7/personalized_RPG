@@ -31,12 +31,18 @@ const HOME_WAIT := 8.0
 const REFILL_WAIT := 3.5
 
 
-# Client side: call after placed() and before the position write.
-static func forgive_lead(tree: SceneTree) -> void:
+# Client side: call after placed() and before the position write. `again`
+# (the check's placed()) is sent once more when the lead is over: the lead
+# is counted in physics frames, and on a loaded peer (C-1f-2's model and
+# clips on both screens) those run late enough that the first forgiveness
+# (two samples, 0.2 s) had expired before the teleport was synced.
+static func forgive_lead(tree: SceneTree, again := Callable()) -> void:
 	var waited := 0.0
 	while waited < FORGIVE_LEAD:
 		await tree.physics_frame
 		waited += STEP
+	if again.is_valid():
+		again.call()
 
 
 # Host side: the scarecrow on its mark, on the floor, and refilled.

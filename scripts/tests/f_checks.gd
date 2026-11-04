@@ -521,7 +521,7 @@ func client_climb(degrees: float) -> void:
 	var face := RING_CENTRE + outward * (RING_RADIUS + 0.3) + Vector3.UP * 1.5
 	var wall := _world.find_child("ClimbWall_%d" % roundi(degrees), true, false) as StaticBody3D
 	placed()
-	await Harness.forgive_lead(get_tree())
+	await Harness.forgive_lead(get_tree(), placed)
 	await tick_request(func() -> void:
 		_local.global_position = face + outward * (Player.BODY_RADIUS + 0.2)
 		_local.velocity = Vector3.ZERO

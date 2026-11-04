@@ -947,7 +947,7 @@ func report_feel(what: String, shown: int, applied: int) -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_park(point: Vector3) -> void:
 	placed()
-	await Harness.forgive_lead(get_tree())
+	await Harness.forgive_lead(get_tree(), placed)
 	await tick_request(func() -> void:
 		_local.global_position = point
 		_local.velocity = Vector3.ZERO
