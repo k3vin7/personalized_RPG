@@ -17,8 +17,9 @@ const CELL_SIZE := 0.25
 # The navigation bake runs in a thread; the readout waits on the real one.
 const SHOT_DELAY_DEFAULT := 3.0
 
-# The game's own tilt by default; override in the inspector to try another.
-@export var camera_pitch_degrees: float = QuarterCamera.PITCH_DEGREES
+# The game's own tilt (Tuning.values.camera_pitch_deg) when left at 0;
+# set another in the inspector to try it.
+@export var camera_pitch_degrees: float = 0.0
 
 @onready var _region: NavigationRegion3D = $NavRegion
 @onready var _readout: Label = $Hud/Readout
@@ -110,7 +111,8 @@ func _on_bake_finished() -> void:
 	Net.register_playground(_players_root, points, _spawner)
 	var local := _local_player()
 	if local != null and local.camera != null:
-		local.camera.set_pitch(camera_pitch_degrees)
+		if camera_pitch_degrees > 0.0:
+			local.camera.set_pitch(camera_pitch_degrees)
 	print("BLOCKOUT_TEST_SPAWN local=%s peer=%d has_peer=%s at=%s" % [
 		local != null, multiplayer.get_unique_id(), multiplayer.has_multiplayer_peer(),
 		local.global_position if local != null else Vector3.INF])

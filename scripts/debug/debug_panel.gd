@@ -43,9 +43,24 @@ const GROUP_LABELS := {
 	"Shield": "방패 4기술 (서버 승인) — 들기 · 밀기 · 던지기 · 찍기",
 	"Dash combo": "돌진 조합 (서버 승인) — 창 · 배율 · 치트 허용 오차",
 }
+# C-1g-e: local fields whose range is not "four times the default".
+const LOCAL_LIMITS := {
+	"camera_zoom": Vector2(0.0, 1.0),
+	"camera_near_mult": Vector2(0.1, 1.0),
+	"camera_pitch_deg": Vector2(10.0, 89.0),
+	"camera_near_pitch_deg": Vector2(20.0, 89.0),
+	"camera_zoom_step": Vector2(0.02, 0.5),
+}
 # A Korean name beside the field names that come up in the work order and the
 # feel questions. The field name stays: it is what the documents call it.
 const FIELD_LABELS := {
+	"camera_zoom": "카메라 줌 (1 멀리 · 0 가까이, 휠)",
+	"camera_distance": "카메라 거리 (줌 1)",
+	"camera_pitch_deg": "카메라 각 (줌 1, 지면 기준)",
+	"camera_near_mult": "최대 확대 거리 배수",
+	"camera_near_pitch_deg": "각 하한 (줌 0, 지면 기준)",
+	"camera_zoom_step": "휠 한 칸 줌 폭",
+	"camera_zoom_smoothing": "줌 따라가는 속도",
 	"gravity": "중력",
 	"base_move_speed": "기본 이속",
 	"base_jump_height": "기본 점프 높이",
@@ -336,7 +351,7 @@ func _build_ui() -> void:
 				Tuning.notify_changed()))
 		elif typeof(value) == TYPE_FLOAT or typeof(value) == TYPE_INT:
 			var integer := typeof(value) == TYPE_INT
-			var limits := numeric_limits(name_text, float(value))
+			var limits: Vector2 = LOCAL_LIMITS.get(name_text, numeric_limits(name_text, float(value)))
 			local.add_child(_slider(
 				name_text,
 				float(value),

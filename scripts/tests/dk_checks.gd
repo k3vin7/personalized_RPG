@@ -212,13 +212,16 @@ func _camera_checks() -> void:
 	expect(cam != null, "the_local_body_has_its_camera")
 	if cam == null:
 		return
-	# Let the follow settle on a still body.
+	# Let the follow settle on a still body. C-1g-e: the far view (zoom 1,
+	# the default) is the tilt and distance the game always had.
+	cam.set_zoom_now(1.0)
 	await _wait(1.0)
-	var pitch := deg_to_rad(QuarterCamera.PITCH_DEGREES)
-	var wanted := _local.global_position + Vector3(0.0, sin(pitch), cos(pitch)) * QuarterCamera.DISTANCE
+	var far_pitch := QuarterCamera.pitch_deg_for(1.0)
+	var pitch := deg_to_rad(far_pitch)
+	var wanted := _local.global_position + Vector3(0.0, sin(pitch), cos(pitch)) * QuarterCamera.distance_for(1.0)
 	var gap := cam.global_position.distance_to(wanted)
-	note("camera tilt %.2f deg, offset gap %.3f m" % [rad_to_deg(-cam.rotation.x), gap])
-	expect(absf(rad_to_deg(-cam.rotation.x) - QuarterCamera.PITCH_DEGREES) < 0.01, "the_game_keeps_its_55_degree_tilt")
+	note("camera tilt %.2f deg (far %.0f), offset gap %.3f m" % [rad_to_deg(-cam.rotation.x), far_pitch, gap])
+	expect(absf(rad_to_deg(-cam.rotation.x) - far_pitch) < 0.01 and absf(far_pitch - 55.0) < 0.01, "the_game_keeps_its_55_degree_tilt")
 	expect(gap < 0.05, "the_camera_sits_at_the_same_offset_as_before")
 
 

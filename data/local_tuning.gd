@@ -43,6 +43,22 @@ extends Resource
 # Q W E R A S D F; any key can be put on any slot from the debug panel.
 @export var slot_keys: PackedInt32Array = PackedInt32Array([81, 87, 69, 82, 65, 83, 68, 70])
 
+@export_group("Camera")
+# C-1g-e: the scroll zoom, all drawn, nothing judged. camera_zoom is the
+# level (1 = the far quarter view as it was, 0 = nearest); the wheel moves it
+# by camera_zoom_step and the view eases after it at camera_zoom_smoothing.
+# Distance and tilt interpolate together: at 1, camera_distance at
+# camera_pitch_deg (18 m, 55 deg, the values QuarterCamera carried as
+# constants until now); at 0, camera_near_mult x the distance at
+# camera_near_pitch_deg (9 m lying down at 35 deg). No rotation.
+@export var camera_zoom: float = 1.0
+@export var camera_distance: float = 18.0
+@export var camera_pitch_deg: float = 55.0
+@export var camera_near_mult: float = 0.5
+@export var camera_near_pitch_deg: float = 35.0
+@export var camera_zoom_step: float = 0.1
+@export var camera_zoom_smoothing: float = 10.0
+
 @export_group("Hit feedback")
 # C-0: the hit feedback set (결정 #79). All drawn, none judged: a peer that
 # turns these to zero sees nothing different happen to anyone. Six sliders and
