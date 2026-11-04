@@ -32,6 +32,9 @@ var spawn_points: Array[Vector3] = []
 var _region: NavigationRegion3D
 var _spawner: MultiplayerSpawner
 var _players_root: Node3D
+# T-1b: the terrain test region and the mesh being baked for it.
+var _terrain: TestTerrain
+var _pending_nav_mesh: NavigationMesh
 var _boundary: TimeBoundary
 # Set by the host over RPC, read by the client's half of the stage 7 checks.
 var _escape_drill := false
@@ -51,6 +54,9 @@ func _ready() -> void:
 	_build_walls()
 	_build_occluders()
 	_build_time_boundary()
+	# T-1b: the terrain test region, east of the arena, before the bake so its
+	# faces go into the navigation mesh.
+	_terrain = TestTerrain.build(self)
 
 	# The arena, east (Regions.ARENA): every scarecrow lives there, on open
 	# ground with nothing else in it, so a shove, a lift or a throw at one is
@@ -172,12 +178,23 @@ func _bake_navigation() -> void:
 	# vertical, and every wall here is 0.6 m thick, which agent_radius erodes
 	# away entirely, so no polygon forms on top of one either.
 	nav_mesh.geometry_collision_mask = WORLD_LAYER | WALL_LAYER | CLIMBABLE_LAYER | NAV_BRIDGE_LAYER
-	_region.navigation_mesh = nav_mesh
-	_region.bake_finished.connect(_on_bake_finished)
-	_region.call_deferred("bake_navigation_mesh", true)
+	# T-1b: the terrain's collision is node-less (PhysicsServer shapes), so
+	# the parser cannot see it; its faces are added to the parsed scene by
+	# hand and the bake runs from that, off the thread as before.
+	var source := NavigationMeshSourceGeometryData3D.new()
+	NavigationServer3D.parse_source_geometry_data(nav_mesh, source, self)
+	if _terrain != null and _terrain.built:
+		var faces := _terrain.nav_faces()
+		source.add_faces(faces, Transform3D.IDENTITY)
+		print("PLAYGROUND_NAV_TERRAIN faces=%d" % (faces.size() / 3))
+	_pending_nav_mesh = nav_mesh
+	NavigationServer3D.bake_from_source_geometry_data_async(nav_mesh, source, _on_bake_finished)
 
 
 func _on_bake_finished() -> void:
+	if _pending_nav_mesh != null:
+		_region.navigation_mesh = _pending_nav_mesh
+		_pending_nav_mesh = null
 	print("PLAYGROUND_NAV_READY polygons=%d" % _region.navigation_mesh.get_polygon_count())
 	Net.register_playground(_players_root, spawn_points, _spawner)
 	Net.playground_ready.emit(self)
@@ -209,6 +226,12 @@ func _run_smoke() -> void:
 		# Lives through the host-disconnect scene change to verify cleanup.
 		get_tree().root.add_child(checks)
 		checks.run(self)
+		return
+	if Net.auto_only == "T1b":
+		var t1b := preload("res://scripts/tests/t1b_checks.gd").new()
+		t1b.name = "T1bChecks"
+		get_tree().root.add_child(t1b)
+		t1b.run(self)
 		return
 	if Net.auto_only == "T1a":
 		var t1a := preload("res://scripts/tests/t1a_checks.gd").new()

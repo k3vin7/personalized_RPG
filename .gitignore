@@ -1,2 +1,4 @@
 .godot/
 .DS_Store
+# Godot copies a GDExtension DLL to ~name while it is loaded (editor hot reload); never source.
+addons/terrain_3d/bin/~*

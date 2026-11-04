@@ -54,6 +54,9 @@ const LOCAL_LIMITS := {
 # A Korean name beside the field names that come up in the work order and the
 # feel questions. The field name stays: it is what the documents call it.
 const FIELD_LABELS := {
+	"walk_slope_max_deg": "걷기 가능 경사 한계 (넘으면 미끄러짐)",
+	"terrain_collision_radius": "클라 지형 충돌 반경 (몸 주변)",
+	"terrain_collision_shape_size": "클라 지형 충돌 조각 크기",
 	"camera_zoom": "카메라 줌 (1 멀리 · 0 가까이, 휠)",
 	"camera_distance": "카메라 거리 (줌 1)",
 	"camera_pitch_deg": "카메라 각 (줌 1, 지면 기준)",

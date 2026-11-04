@@ -22,6 +22,14 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			base_move_speed = value
+# T-1b: the steepest ground a body can stand and walk on, degrees from
+# flat (CharacterBody3D.floor_max_angle, every body, every tick). Steeper
+# is not floor: the body slides down it under gravity. Climbing is the mesh
+# walls' (CLIMBABLE layer); terrain is never climbed.
+@export var walk_slope_max_deg: float = 40.0:
+	set(value):
+		if Tuning.may_write(self):
+			walk_slope_max_deg = value
 # The vertical half of the leap budget: v_cap is built from this and the move
 # speed. Since stage C-2 it is not the standing jump's height on its own -- a
 # standing jump spends the whole budget upward and goes higher than this.

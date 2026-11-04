@@ -59,6 +59,14 @@ extends Resource
 @export var camera_zoom_step: float = 0.1
 @export var camera_zoom_smoothing: float = 10.0
 
+@export_group("Terrain")
+# T-1b: a client's terrain collision is a patch around its own body
+# (Terrain3D DYNAMIC_GAME; the server builds the whole region). Metres of
+# radius, and the size of each shape. Drawn/physics-local only: the server
+# rules on its own full collision.
+@export var terrain_collision_radius: float = 64.0
+@export var terrain_collision_shape_size: float = 16.0
+
 @export_group("Hit feedback")
 # C-0: the hit feedback set (결정 #79). All drawn, none judged: a peer that
 # turns these to zero sees nothing different happen to anyone. Six sliders and

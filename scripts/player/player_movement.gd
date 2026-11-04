@@ -414,6 +414,10 @@ func _physics_process(delta: float) -> void:
 	if player.state == Player.State.DEAD:
 		# Nothing moves while dead; the body waits where it fell.
 		return
+	# T-1b: the walkable slope is the server's number, applied every tick so
+	# the slider shows at once; steeper ground is not floor and the body
+	# slides down it in the air step.
+	player.floor_max_angle = deg_to_rad(Tuning.server.walk_slope_max_deg)
 	if player.state == Player.State.GRABBED:
 		# Someone else's hands decide where this body is.
 		return
