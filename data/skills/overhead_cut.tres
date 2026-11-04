@@ -26,3 +26,4 @@ arc_duration = 0.2
 trail = true
 weapon_length_mult = 1.3
 feedback_big = true
+step_distance = 0.4

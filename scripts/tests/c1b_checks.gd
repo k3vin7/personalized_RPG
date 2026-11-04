@@ -159,6 +159,7 @@ func run(world: Node3D) -> void:
 	await _speed_checks()
 	await _parry_checks()
 	await _motion_checks()
+	await _step_checks()
 	await _stamina_checks()
 	await _two_peer_checks()
 	Tuning.values.smart_key_enabled = smart
@@ -645,6 +646,78 @@ func _motion_checks() -> void:
 	await _wait(0.3)
 
 
+# ------------------------------------------- 7b: a cut out of a walk
+
+# Walk south at full speed, then cut to the east. What is measured: the
+# body's own southward speed on the frame after the press (the old slide
+# carried the walk 1.2 m into the swing), how far south it still went,
+# and how far east the cut's own step took it.
+func _walking_cut() -> Dictionary:
+	await _take_sword()
+	var side := Skills.get_def("side_cut")
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(Vector3.INF)
+		_local.movement.set_target(_local.global_position + Vector3(0.0, 0.0, -8.0)))
+	await _wait(0.6)
+	var walk_speed := -_local.velocity.z
+	var at_press := {}
+	Net.queue_physics(func() -> void:
+		var here := _local.global_position
+		_local.movement.set_aim_override(here + Vector3(6.0, 0.0, 0.0))
+		at_press["cast"] = _local.skills.press_slot(1)
+		at_press["from"] = here)
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	var south_after := -_local.velocity.z
+	await _wait(side.value("windup") + side.swing_time() + 0.3)
+	var from: Vector3 = at_press.get("from", _local.global_position)
+	var moved := _local.global_position - from
+	await _wait_idle()
+	await tick_request(func() -> void:
+		_local.movement.cancel_target()
+		_local.movement.set_aim_override(Vector3.INF))
+	return {"cast": at_press.get("cast", false), "walk_speed": walk_speed,
+		"south_after": south_after, "south": -moved.z, "east": moved.x, "step": side.step_distance}
+
+
+func _cut_is_clean(seen: Dictionary) -> bool:
+	return bool(seen.get("cast", false)) and float(seen.get("walk_speed", 0.0)) > 3.0 \
+		and absf(float(seen.get("south_after", 9.0))) < 0.01 \
+		and absf(float(seen.get("south", 9.0))) < 0.1 \
+		and absf(float(seen.get("east", 9.0)) - float(seen.get("step", 0.0))) < 0.1
+
+
+func _step_checks() -> void:
+	var side := Skills.get_def("side_cut")
+	note("side cut step %.2f m over windup %.2f + swing %.2f" % [side.step_distance, side.value("windup"), side.swing_time()])
+	expect(side.step_distance > 0.0, "the_side_cut_has_a_step")
+	var mate := _mate()
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = HOME
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target())
+	client_park.rpc_id(_client_peer(), HOME + Vector3(-3.0, 0.0, 0.0))
+	await _wait(0.9)
+	var own := await _walking_cut()
+	note("a cut out of a walk on this screen: %s" % [own])
+	expect(_cut_is_clean(own), "the_walk_stops_on_the_press_and_the_cut_steps_its_own_distance_toward_the_aim")
+	# The other peer does the same from 3 m west; this screen reads the
+	# replica's drift south and step east over the same window.
+	var replica_from := mate.global_position
+	_reports.erase("step")
+	client_walking_cut.rpc_id(_client_peer())
+	var theirs: Dictionary = _reports.get("step", {}) if await _wait_report("step") else {}
+	var replica_moved := mate.global_position - replica_from
+	note("a cut out of a walk by the client: its screen %s | replica here moved south %.2f east %.2f (walked 8 m south before the press)" % [
+		theirs, -replica_moved.z, replica_moved.x])
+	expect(_cut_is_clean(theirs), "the_clients_own_screen_stops_and_steps_the_same")
+	_reports.erase("weapon")
+	client_take_weapon.rpc_id(_client_peer(), WeaponKinds.Kind.NONE)
+	await _wait_report("weapon")
+	await _wait(0.3)
+
+
 # ------------------------------------------------- 8: the other peer
 
 func _two_peer_checks() -> void:
@@ -798,6 +871,15 @@ func client_overhead_motion(aim: Vector3) -> void:
 	var seen := await _overhead_motion(aim)
 	Tuning.values.smart_key_enabled = was
 	report.rpc_id(1, "motion", seen)
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_walking_cut() -> void:
+	var was: bool = Tuning.values.smart_key_enabled
+	Tuning.values.smart_key_enabled = true
+	var seen := await _walking_cut()
+	Tuning.values.smart_key_enabled = was
+	report.rpc_id(1, "step", seen)
 
 
 # Server -> client: cast `slot` at a point; report what it cost.

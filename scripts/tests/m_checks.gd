@@ -227,15 +227,18 @@ func _windup_checks() -> void:
 	expect(_local.state == Player.State.CASTING, "the_press_put_the_body_in_casting")
 	expect(_local.skills.casts_sent == sent, "nothing_went_out_before_the_windup_ran")
 	var stood := _local.global_position
+	# The order goes the other way from the aim (2026-11-04): what the body
+	# may move is the punch's own step, toward the aim, and nothing else.
 	await tick_request(func() -> void:
-		_local.movement.set_target(HOME + Vector3(3.0, 0.0, 0.0))
+		_local.movement.set_target(HOME + Vector3(-3.0, 0.0, 0.0))
 		_local.movement.press_jump()
 		_local.movement.press_dash())
 	await _wait(0.5)
-	var moved := Vector2(_local.global_position.x - stood.x, _local.global_position.z - stood.z).length()
-	note("during the windup: moved %.3f m, state now %s, casts sent %d -> %d" % [
-		moved, Player.State.keys()[_local.state], sent, _local.skills.casts_sent])
-	expect(moved < 0.1, "a_move_order_in_the_windup_moved_nothing")
+	var moved := _local.global_position - stood
+	note("during the windup: moved x %.3f z %.3f m (the punch's own step %.2f toward +x), state now %s, casts sent %d -> %d" % [
+		moved.x, moved.z, punch.step_distance, Player.State.keys()[_local.state], sent, _local.skills.casts_sent])
+	expect(absf(moved.x - punch.step_distance) < 0.1 and absf(moved.z) < 0.1,
+		"a_move_order_in_the_windup_moved_nothing_but_the_skills_own_step")
 	expect(_local.state != Player.State.AIRBORNE and _local.state != Player.State.DASH,
 		"nor_did_a_jump_or_a_dash")
 	expect(_local.skills.casts_sent == sent + 1, "the_cast_went_out_when_the_windup_ended")

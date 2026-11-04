@@ -22,3 +22,4 @@ arc_sweep_deg = 0.0
 arc_duration = 0.12
 weapon_id = "bare"
 dash_combo = true
+step_distance = 0.3

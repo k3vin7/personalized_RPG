@@ -398,7 +398,7 @@ func _build_ui() -> void:
 			continue
 		# C-0: the swing's arc joins the lean and the bar.
 		for field in ["windup_lean_deg", "recovery_lean_deg", "strike_extent", "strike_height",
-				"arc_start_deg", "arc_sweep_deg", "arc_duration", "weapon_length_mult"]:
+				"arc_start_deg", "arc_sweep_deg", "arc_duration", "weapon_length_mult", "step_distance"]:
 			var current := float(def.get(field))
 			var limits := numeric_limits(field, current)
 			if field == "strike_height":
@@ -411,6 +411,8 @@ func _build_ui() -> void:
 				limits = Vector2(0.0, 1.0)
 			elif field == "weapon_length_mult":
 				limits = Vector2(0.5, 2.0)
+			elif field == "step_distance":
+				limits = Vector2(0.0, 1.5)
 			visuals.add_child(_slider(
 				"%s.%s" % [id, field],
 				current,

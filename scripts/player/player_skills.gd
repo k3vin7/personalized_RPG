@@ -374,8 +374,8 @@ func cast_slot(index: int) -> bool:
 	# now; the server books the ruling for the impact time. The shove and the
 	# grab keep their own entries, called when the (zero) windup ends.
 	_sent_at_start = false
+	var heading := player.movement.shove_direction() if player.movement != null else -player.global_transform.basis.z
 	if def.server_intent() == ServerAuthority.Intent.SKILL:
-		var heading := player.movement.shove_direction() if player.movement != null else -player.global_transform.basis.z
 		if heading != Vector3.ZERO:
 			player.snap_facing(heading)
 		ServerAuthority.submit_intent(player, ServerAuthority.Intent.SKILL, _combo_payload(def, {
@@ -384,6 +384,12 @@ func cast_slot(index: int) -> bool:
 		}))
 		last_cast_unix = Time.get_unix_time_from_system()
 		_sent_at_start = true
+	# 2026-11-04: the walk stops on the press, and the skill's own step (if
+	# it has one) goes toward the aim over the windup and the swing. After
+	# the intent, so the speed the server reads at the intent (the thrust's
+	# C-1b bonus) is the speed the body was pressed at, not the stop.
+	if player.movement != null:
+		player.movement.begin_cast_step(heading, def.step_distance, def.value("windup") + def.swing_time())
 	var windup := def.value("windup")
 	if windup > 0.0:
 		_phase_left = windup
@@ -434,6 +440,8 @@ func _finish() -> void:
 	var def := _cast_def
 	_cast_def = null
 	_cast_slot = -1
+	if player.movement != null:
+		player.movement.cancel_cast_step()
 	player.show_skill_phase(null, "")
 	if def != null and def.value("recovery") > 0.0 and player.state == Player.State.RECOVERING:
 		player.change_state(Player.State.IDLE)
@@ -542,6 +550,8 @@ func on_interrupted() -> void:
 	_cast_slot = -1
 	_armed_slot = -1
 	_phase_left = 0.0
+	if player.movement != null:
+		player.movement.cancel_cast_step()
 	player.show_skill_phase(null, "")
 	player.clear_predicted()
 

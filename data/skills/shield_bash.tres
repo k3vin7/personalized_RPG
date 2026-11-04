@@ -26,3 +26,4 @@ arc_duration = 0.14
 trail = false
 feedback_big = true
 dash_combo = true
+step_distance = 0.4

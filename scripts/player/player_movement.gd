@@ -69,6 +69,13 @@ var _head_stand_left := 0.0
 var _head_body: Node3D
 # How long the body is still carrying a push rather than its own move order.
 var _pushed_left := 0.0
+# 2026-11-04: the cast step. A press drops the walk (the body does not
+# slide into the swing on its old speed) and, for skills with a
+# step_distance, walks that far toward the aim over the windup and the
+# swing. Velocity and time left; nothing here is the server's.
+var _step_velocity := Vector3.ZERO
+var _step_left := 0.0
+var cast_steps := 0
 # 5-chapter smart key. With it off, a key arms the action and shows where it
 # would go; the left button casts. Jump and dash share this, and a basic attack
 # is meant to join them without a second mechanism.
@@ -410,10 +417,16 @@ func _physics_process(delta: float) -> void:
 	if player.state == Player.State.GRABBED:
 		# Someone else's hands decide where this body is.
 		return
-	if player.is_casting() or player.state == Player.State.DOWNED:
-		# M-1: standing still through the windup and the recovery; M-2: lying
-		# through a knockdown. Physics still runs -- gravity, a push -- only
-		# the orders stop.
+	if player.is_casting():
+		# M-1: no orders through the windup and the recovery. The body
+		# stands, or takes the skill's own step (2026-11-04); a push still
+		# carries it.
+		_dash_cooldown_left = maxf(0.0, _dash_cooldown_left - delta)
+		_cast_step(delta)
+		return
+	if player.state == Player.State.DOWNED:
+		# M-2: lying through a knockdown. Physics still runs -- gravity, a
+		# push -- only the orders stop.
 		_dash_cooldown_left = maxf(0.0, _dash_cooldown_left - delta)
 		_stunned_step(delta)
 		return
@@ -746,6 +759,51 @@ func jump_launch_velocity() -> Vector3:
 		return launch
 	var plan := jump_plan(cursor_jump_target())
 	return plan["launch"] as Vector3
+
+
+# Called on the press (PlayerSkills.cast_slot). The walk stops here, on
+# this frame, not over the 10 m/s^2 rub a stun gets: a swing out of a run
+# used to carry 1.2 m into it. Then, for `seconds`, the body walks
+# `distance` along `direction` -- the step into the cut. A push that is
+# still carrying the body is left alone (it is not the walk).
+func begin_cast_step(direction: Vector3, distance: float, seconds: float) -> void:
+	_step_left = 0.0
+	_step_velocity = Vector3.ZERO
+	if _pushed_left <= 0.0:
+		player.velocity.x = 0.0
+		player.velocity.z = 0.0
+	var flat := Vector3(direction.x, 0.0, direction.z)
+	if distance <= 0.0 or seconds <= 0.0 or flat.length_squared() < 0.0001:
+		return
+	_step_velocity = flat.normalized() * (distance / seconds)
+	_step_left = seconds
+	cast_steps += 1
+
+
+func cancel_cast_step() -> void:
+	_step_left = 0.0
+	_step_velocity = Vector3.ZERO
+
+
+func cast_step_left() -> float:
+	return _step_left
+
+
+func _cast_step(delta: float) -> void:
+	if _pushed_left > 0.0 or not player.is_on_floor():
+		# Carrying a push, or off the ground: the stun's physics, as before.
+		_step_left = 0.0
+		_stunned_step(delta)
+		return
+	if _step_left > 0.0:
+		_step_left = maxf(0.0, _step_left - delta)
+		player.velocity.x = _step_velocity.x
+		player.velocity.z = _step_velocity.z
+	else:
+		player.velocity.x = 0.0
+		player.velocity.z = 0.0
+	player.velocity.y = -0.5
+	player.move_and_slide()
 
 
 func _stunned_step(delta: float) -> void:

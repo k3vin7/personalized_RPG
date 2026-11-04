@@ -189,6 +189,11 @@ enum ArcPlane {
 # trail follows), and its own length again after. 1 is the weapon as it
 # is. The overhead cut's 1.3 (2026-11-03).
 @export var weapon_length_mult: float = 1.0
+# 2026-11-04: a cast drops the walk on the press (no sliding into the
+# swing) and instead takes this many metres toward the aim, spread over
+# the windup and the swing. 0 stands still. The body's own move, under
+# the move check like any other; the ruling reads the body where it is.
+@export var step_distance: float = 0.0
 
 @export_group("Feedback")
 # C-0: a hit by this skill shakes the camera as well as the rest of the hit
