@@ -5,7 +5,7 @@ extends Node
 # the clients hold the same heights without a data file. One 64 x 64 m
 # Terrain3D region east of the arena (Regions.TERRAIN): flat ground, a gentle
 # hill (max slope 30 deg, walkable), a steep bank (51 deg, slides), a plateau
-# with a near-vertical edge (79 deg, the drop for the fall check) and a flat
+# with a near-vertical edge (83 deg, the drop for the fall check) and a flat
 # "forest floor" painted dirt. Three textures tell grass, dirt and rock
 # apart; nothing more (no art).
 #
@@ -18,7 +18,15 @@ extends Node
 # LocalTuning. Both read the same heights, so the ruling and the picture
 # stand on the same ground.
 
+# T-1c: two regions side by side along x, (2,0) and (3,0): x 128..256, z
+# 0..64. The seam at x 192 is what the boundary checks walk across.
 const SIZE := 64
+const SIZE_X := 128
+# A low bump astride the seam, so the seam has a slope on it: height is
+# continuous across the two regions or it is not.
+const SEAM_BUMP_CENTRE := Vector2(192.0, 20.0)
+const SEAM_BUMP_RADIUS := 10.0
+const SEAM_BUMP_HEIGHT := 2.0
 const HILL_CENTRE := Vector2(150.0, 40.0)
 const HILL_RADIUS := 16.0
 const HILL_HEIGHT := 6.0
@@ -35,8 +43,18 @@ const BANK_Z1 := 24.0
 const BANK_SOFT := 2.0
 const PLATEAU_CENTRE := Vector2(176.0, 16.0)
 const PLATEAU_RADIUS := 8.0
-const PLATEAU_EDGE := 1.5
+# One metre: on the 1 m height grid the rim is then a single cell dropping
+# the full 8 m (83 deg), a face everywhere. At 1.5 m the second cell of the
+# rim came out at 70 deg and a body falling onto it slid the last 2.7 m.
+const PLATEAU_EDGE := 1.0
 const PLATEAU_HEIGHT := 8.0
+# The chute: on the plateau's east side (within CHUTE_HALF_DEG of +x) the rim
+# is a 55 deg slide from the top down to CHUTE_BREAK_HEIGHT over CHUTE_RUN
+# metres, then a 79 deg face the last metre: a slide that ends in a drop.
+const CHUTE_HALF_DEG := 14.0
+const CHUTE_RUN := 2.1
+const CHUTE_BREAK_HEIGHT := 5.0
+const CHUTE_DROP_RUN := 1.0
 # Painted dirt (texture 2): the forest floor.
 const FOREST_X0 := 128.0
 const FOREST_X1 := 144.0
@@ -60,6 +78,9 @@ static func height_at(x: float, z: float) -> float:
 	var hill_r := Vector2(x, z).distance_to(HILL_CENTRE)
 	if hill_r < HILL_RADIUS:
 		h = maxf(h, HILL_HEIGHT * 0.5 * (1.0 + cos(PI * hill_r / HILL_RADIUS)))
+	var bump_r := Vector2(x, z).distance_to(SEAM_BUMP_CENTRE)
+	if bump_r < SEAM_BUMP_RADIUS:
+		h = maxf(h, SEAM_BUMP_HEIGHT * 0.5 * (1.0 + cos(PI * bump_r / SEAM_BUMP_RADIUS)))
 	# The bank.
 	var bank := 0.0
 	if x >= BANK_X0 and x <= BANK_X3:
@@ -78,7 +99,16 @@ static func height_at(x: float, z: float) -> float:
 	h = maxf(h, bank)
 	# The plateau: flat top, a steep rim PLATEAU_EDGE wide.
 	var plat_r := Vector2(x, z).distance_to(PLATEAU_CENTRE)
-	if plat_r < PLATEAU_RADIUS + PLATEAU_EDGE:
+	var plat_bearing := rad_to_deg(atan2(z - PLATEAU_CENTRE.y, x - PLATEAU_CENTRE.x))
+	if absf(plat_bearing) <= CHUTE_HALF_DEG:
+		if plat_r < PLATEAU_RADIUS + CHUTE_RUN + CHUTE_DROP_RUN:
+			var chute := PLATEAU_HEIGHT
+			if plat_r > PLATEAU_RADIUS + CHUTE_RUN:
+				chute = CHUTE_BREAK_HEIGHT * (1.0 - (plat_r - PLATEAU_RADIUS - CHUTE_RUN) / CHUTE_DROP_RUN)
+			elif plat_r > PLATEAU_RADIUS:
+				chute = PLATEAU_HEIGHT - (PLATEAU_HEIGHT - CHUTE_BREAK_HEIGHT) * (plat_r - PLATEAU_RADIUS) / CHUTE_RUN
+			h = maxf(h, chute)
+	elif plat_r < PLATEAU_RADIUS + PLATEAU_EDGE:
 		var t := clampf((plat_r - PLATEAU_RADIUS) / PLATEAU_EDGE, 0.0, 1.0)
 		h = maxf(h, PLATEAU_HEIGHT * (1.0 - t))
 	return h
@@ -130,14 +160,14 @@ func _build() -> void:
 		assets.set_texture_asset(TEX_ROCK, _texture_asset("Rock", Color(0.48, 0.47, 0.45)))
 		assets.set_texture_asset(TEX_DIRT, _texture_asset("Dirt", Color(0.45, 0.33, 0.22)))
 	var data: Object = terrain.get("data")
-	var image := Image.create_empty(SIZE, SIZE, false, Image.FORMAT_RF)
+	var image := Image.create_empty(SIZE_X, SIZE, false, Image.FORMAT_RF)
 	var o := origin()
-	for ix in SIZE:
+	for ix in SIZE_X:
 		for iz in SIZE:
 			image.set_pixel(ix, iz, Color(height_at(o.x + ix, o.z + iz), 0.0, 0.0, 1.0))
 	data.import_images([image, null, null], o, 0.0, 1.0)
 	# The forest floor: dirt as the base texture, the auto shader off there.
-	for ix in SIZE:
+	for ix in SIZE_X:
 		for iz in SIZE:
 			var x := o.x + ix
 			var z := o.z + iz
@@ -150,8 +180,8 @@ func _build() -> void:
 	terrain.set("collision_layer", Layers.WORLD)
 	terrain.set("collision_mask", 0)
 	built = true
-	print("PLAYGROUND_TERRAIN built regions=%d at %s origin=%s region_size=%d" % [
-		data.get_region_count(), data.get("region_locations"), o, int(terrain.get("region_size"))])
+	print("PLAYGROUND_TERRAIN built regions=%d at %s origin=%s region_size=%d span_x=%d" % [
+		data.get_region_count(), data.get("region_locations"), o, int(terrain.get("region_size")), SIZE_X])
 
 
 static func _texture_asset(label: String, colour: Color) -> Resource:

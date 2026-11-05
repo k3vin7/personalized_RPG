@@ -51,6 +51,10 @@ var _retries := 0
 var _drag_left := 0.0
 var _jump_buffer_left := 0.0
 var _coyote_left := 0.0
+# T-1b: physics frames in a row with no ground under a sliding body before
+# the slide becomes a fall (contacts flicker on a heightmap).
+var _slide_lost_frames := 0
+const SLIDE_LOST_FRAMES := 2
 var _catch_buffer_left := 0.0
 var _aim_override := Vector3.INF
 var _intent_direction := Vector3.ZERO
@@ -465,6 +469,8 @@ func _physics_process(delta: float) -> void:
 		_dash_step(delta)
 	elif player.state == Player.State.AIRBORNE:
 		_air_step(delta)
+	elif player.state == Player.State.SLIDING:
+		_slide_step(delta)
 	else:
 		_ground_step(delta)
 
@@ -525,11 +531,50 @@ func _ground_step(delta: float) -> void:
 	if _stand_on_head(delta):
 		return
 	if not player.is_on_floor():
-		# Walked off something. Coyote time is already running, so a jump
-		# pressed a frame late still goes.
-		player.change_state(Player.State.AIRBORNE)
+		# Walked off something, or onto ground too steep to stand on. Coyote
+		# time is already running, so a jump pressed a frame late still goes.
+		if _on_steep_ground():
+			_slide_lost_frames = 0
+			player.change_state(Player.State.SLIDING)
+		else:
+			player.change_state(Player.State.AIRBORNE)
 		return
 	_try_attach_climb()
+
+
+# T-1b: in contact with ground steeper than the walk limit (so not floor)
+# but no steeper than slide_max_deg (so not a wall or a cliff face). Godot
+# reports such a contact as a wall; its normal's tilt from up is the slope.
+func _on_steep_ground() -> bool:
+	if not player.is_on_wall():
+		return false
+	var normal := player.get_wall_normal()
+	var tilt := rad_to_deg(acos(clampf(normal.dot(Vector3.UP), -1.0, 1.0)))
+	return tilt <= Tuning.server.slide_max_deg
+
+
+# T-1b: sliding. Gravity pulls, the slope decides the direction; no orders
+# are taken. Flat enough ground ends it as a landing without a fall; losing
+# contact (the slope ends in a drop, or turns into a cliff face) begins a
+# fall from here.
+func _slide_step(delta: float) -> void:
+	_clear_head_stand()
+	_face_cursor(delta)
+	player.velocity.y -= Tuning.server.gravity * delta
+	player.floor_snap_length = 0.0
+	player.move_and_slide()
+	if player.is_on_floor():
+		player.floor_snap_length = player.default_snap_length()
+		player.velocity.x = 0.0
+		player.velocity.z = 0.0
+		player.change_state(Player.State.MOVE if _has_target else Player.State.IDLE)
+		return
+	if _on_steep_ground():
+		_slide_lost_frames = 0
+		return
+	_slide_lost_frames += 1
+	if _slide_lost_frames >= SLIDE_LOST_FRAMES:
+		player.change_state(Player.State.AIRBORNE)
 
 
 # DOC (stage D): a player's head is a surface -- you land on it and you can
@@ -870,6 +915,11 @@ func _air_step(delta: float) -> void:
 	if player.is_on_floor():
 		player.floor_snap_length = player.default_snap_length()
 		player.change_state(Player.State.MOVE if _has_target else Player.State.IDLE)
+	elif _on_steep_ground():
+		# T-1b: landed on a slope too steep to stand on: the drop ends here
+		# (the fall rule resolves on this change) and the slide begins.
+		_slide_lost_frames = 0
+		player.change_state(Player.State.SLIDING)
 
 
 # DOC: ground only, cursor aimed, and never while already dashing or airborne.

@@ -22,8 +22,9 @@ extends RefCounted
 const HUB := Vector3.ZERO
 const OBSTACLE := Vector3(-44.0, 0.0, 0.0)
 const ARENA := Vector3(54.0, 0.0, 0.0)
-# T-1b: the Terrain3D test region, one 64 x 64 m region east of the arena
-# (x 128..192, z 0..64; Terrain3D region location (2, 0) at region size 64).
+# T-1b: the Terrain3D test region east of the arena: two 64 x 64 m regions
+# (x 128..256, z 0..64; Terrain3D locations (2, 0) and (3, 0), region size
+# 64, the seam at x 192 -- T-1c).
 # Nothing joins it to the arena: the checks teleport there. TestTerrain
 # holds its shape.
 const TERRAIN := Vector3(128.0, 0.0, 0.0)

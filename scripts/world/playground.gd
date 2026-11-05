@@ -35,6 +35,7 @@ var _players_root: Node3D
 # T-1b: the terrain test region and the mesh being baked for it.
 var _terrain: TestTerrain
 var _pending_nav_mesh: NavigationMesh
+var _boundary_pieces: BoundaryPieces
 var _boundary: TimeBoundary
 # Set by the host over RPC, read by the client's half of the stage 7 checks.
 var _escape_drill := false
@@ -57,6 +58,9 @@ func _ready() -> void:
 	# T-1b: the terrain test region, east of the arena, before the bake so its
 	# faces go into the navigation mesh.
 	_terrain = TestTerrain.build(self)
+	# T-1c: the boundary pieces, under the navigation region so their baked
+	# bodies are parsed into the mesh like every other wall.
+	_boundary_pieces = BoundaryPieces.build(_region)
 
 	# The arena, east (Regions.ARENA): every scarecrow lives there, on open
 	# ground with nothing else in it, so a shove, a lift or a throw at one is
@@ -157,7 +161,9 @@ func _ready() -> void:
 		marker.position = point
 		add_child(marker)
 
-	_bake_navigation()
+	# T-1c: deferred, behind the CSG mesh builds and the boundary pieces' bake
+	# queued above, so the parser sees their bodies.
+	call_deferred("_bake_navigation")
 
 
 func _bake_navigation() -> void:
@@ -226,6 +232,12 @@ func _run_smoke() -> void:
 		# Lives through the host-disconnect scene change to verify cleanup.
 		get_tree().root.add_child(checks)
 		checks.run(self)
+		return
+	if Net.auto_only == "T1c":
+		var t1c := preload("res://scripts/tests/t1c_checks.gd").new()
+		t1c.name = "T1cChecks"
+		get_tree().root.add_child(t1c)
+		t1c.run(self)
 		return
 	if Net.auto_only == "T1b":
 		var t1b := preload("res://scripts/tests/t1b_checks.gd").new()

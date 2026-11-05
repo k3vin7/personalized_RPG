@@ -55,6 +55,7 @@ const LOCAL_LIMITS := {
 # feel questions. The field name stays: it is what the documents call it.
 const FIELD_LABELS := {
 	"walk_slope_max_deg": "걷기 가능 경사 한계 (넘으면 미끄러짐)",
+	"slide_max_deg": "미끄러짐 상한 (넘으면 낙하)",
 	"terrain_collision_radius": "클라 지형 충돌 반경 (몸 주변)",
 	"terrain_collision_shape_size": "클라 지형 충돌 조각 크기",
 	"camera_zoom": "카메라 줌 (1 멀리 · 0 가까이, 휠)",

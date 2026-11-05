@@ -30,6 +30,13 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			walk_slope_max_deg = value
+# T-1b: ground steeper than walk_slope_max_deg but no steeper than this is
+# slid down (State.SLIDING, grounded: no fall is tracked). Steeper than
+# this is a face, not ground: a body against it is falling.
+@export var slide_max_deg: float = 75.0:
+	set(value):
+		if Tuning.may_write(self):
+			slide_max_deg = value
 # The vertical half of the leap budget: v_cap is built from this and the move
 # speed. Since stage C-2 it is not the standing jump's height on its own -- a
 # standing jump spends the whole budget upward and goes higher than this.

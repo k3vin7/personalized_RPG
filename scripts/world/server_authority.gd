@@ -134,6 +134,8 @@ const FORCE_MEMORY := 1.5
 # One sample is forgiven after a teleport the server knows about (a respawn, or
 # a harness placing a body). Two, because a sample straddles the jump.
 const MOVE_FORGIVE_SAMPLES := 2
+# T-1c: what harness_forgive_move() grants a client's placed body; see there.
+const HARNESS_FORGIVE_REMOTE := 30
 # N-2: this many samples over the cap in a row, and the owner is put back on the
 # last position the check accepted. Two, like the forgiveness: one sample over
 # is what an honest landing or a packet's worth of lag looks like.
@@ -1978,7 +1980,11 @@ func harness_forgive_move() -> void:
 	if not Net.auto_smoke:
 		print("PLAYGROUND_HARNESS_FORGIVE_REFUSED sender=%d" % sender)
 		return
-	forgive_move(sender, "")
+	# The same allowance a remote body's respawn gets (30 samples, above):
+	# the teleport it covers lands a round trip plus the client's own frame
+	# lag after this message, and two samples (0.22 s) were not enough under
+	# load (D and C0 warned at 137 and 79 m/s on a client park, 2026-11-04).
+	forgive_move(sender, "", HARNESS_FORGIVE_REMOTE)
 
 
 # What this body's own strength could do, split by axis: a cap that mixed them

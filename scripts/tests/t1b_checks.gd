@@ -16,6 +16,8 @@ const HILL_TOP := Vector3(150.0, 0.0, 40.0)
 const HILL_SIDE := Vector3(150.0, 0.0, 48.0)        # 8 m south of the top: 30.5 deg
 const BANK_MID := Vector3(138.0, 0.0, 16.0)         # on the 51 deg ramp, 2.5 m up
 const PLATEAU_EDGE := Vector3(169.0, 0.0, 16.0)     # 7 m west of the plateau centre, on top
+const RIM := Vector3(176.0, 0.0, 7.6)               # 8.4 m north of the centre: on the 83 deg rim, 4.8 m up
+const CHUTE := Vector3(185.0, 0.0, 16.0)            # 9 m east of the centre: on the 55 deg chute, 6.6 m up
 const ROCK_SPOT := Vector3(140.0, 0.0, 50.0)        # the forest floor
 const SAMPLES := [
 	Vector3(133.0, 0.0, 32.0), Vector3(150.0, 0.0, 40.0), Vector3(150.0, 0.0, 48.0), Vector3(138.0, 0.0, 16.0),
@@ -178,7 +180,7 @@ func _data_checks() -> void:
 	note("terrain: regions %d, collision %s (mode %d), walk slope %.0f deg, nav polygons %d" % [
 		data.get_region_count(), _terrain.configured_as, _terrain.collision_mode(), Tuning.server.walk_slope_max_deg,
 		(_world.get_node("NavigationRegion3D") as NavigationRegion3D).navigation_mesh.get_polygon_count()])
-	expect(data.get_region_count() == 1, "one_64m_region_is_loaded")
+	expect(data.get_region_count() == 2, "two_64m_regions_are_loaded")
 	expect(_terrain.collision_mode() == 3, "the_server_built_full_collision")
 	var worst := 0.0
 	var rows := []
@@ -197,7 +199,7 @@ func _data_checks() -> void:
 	var footprint := []
 	var first_hit := INF
 	var last_hit := -INF
-	for x in [96.0, 110.0, 120.0, 126.0, 127.0, 128.0, 129.0, 160.0, 190.0, 191.0, 192.0, 193.0, 200.0, 224.0]:
+	for x in [96.0, 110.0, 120.0, 126.0, 127.0, 128.0, 129.0, 160.0, 190.0, 191.0, 192.0, 193.0, 200.0, 224.0, 254.0, 255.0, 256.0, 262.0]:
 		var at := Vector3(x, 20.0, 40.0)
 		var query := PhysicsRayQueryParameters3D.create(at, at + Vector3.DOWN * 60.0, Layers.TERRAIN)
 		var hit := _local.get_world_3d().direct_space_state.intersect_ray(query)
@@ -221,9 +223,10 @@ func _data_checks() -> void:
 	# 64 vertices span 63 cells, and the shape stops a cell short of the
 	# region's last row: solid from about x 129 to x 190 (z 1 to 62). T-1d's
 	# edge rule has to keep the raised rim inside that.
-	expect(first_hit <= 129.0 and last_hit >= 190.0, "the_region_itself_is_solid_from_x129_to_x190_one_cell_in_from_each_edge")
-	expect(first_hit >= 127.0 and last_hit <= 192.0 and is_nan(data.get_height(Vector3(120.0, 0.0, 40.0))),
-		"outside_the_region_there_is_no_ground_and_no_collision")
+	expect(first_hit <= 129.0 and last_hit >= 254.0, "the_regions_are_solid_from_x129_to_x254_one_cell_in_from_each_outer_edge")
+	expect(first_hit >= 127.0 and last_hit <= 256.0 and is_nan(data.get_height(Vector3(120.0, 0.0, 40.0)))
+		and is_nan(data.get_height(Vector3(262.0, 0.0, 40.0))),
+		"outside_the_regions_there_is_no_ground_and_no_collision")
 	_reports.erase("heights")
 	client_heights.rpc_id(_client_peer())
 	if await _wait_report("heights"):
@@ -234,7 +237,7 @@ func _data_checks() -> void:
 			diff = maxf(diff, absf(float(served[index]) - float(data.get_height(SAMPLES[index]))))
 		note("client: regions %s collision %s, heights %s | worst host-client diff %.5f" % [
 			theirs.get("regions"), theirs.get("collision"), served, diff])
-		expect(int(theirs.get("regions", 0)) == 1 and diff < 0.0001, "the_client_holds_the_same_heights_as_the_server")
+		expect(int(theirs.get("regions", 0)) == 2 and diff < 0.0001, "the_client_holds_the_same_heights_as_the_server")
 		expect(String(theirs.get("collision", "")) == "DYNAMIC_GAME" and int(theirs.get("mode", -1)) == 1,
 			"and_builds_dynamic_collision_around_its_own_body")
 
@@ -302,19 +305,36 @@ func _move_checks() -> void:
 # ------------------------------------------------- 3: the slope limit
 
 func _slide_from(spot: Vector3, label: String) -> Dictionary:
-	# Measured from the spot the body was placed on, not from where it is
-	# 0.6 s later: a slide down the bank is over in under a second.
-	await _park(spot)
+	# Measured from the spot the body was placed on. The states the body
+	# passes through are collected (SLIDING vs AIRBORNE is the point), and
+	# the fall record and HP before and after say whether a fall was charged.
+	var fall_before := _local.last_fall_height
+	var hp_before := _local.hp
+	var seen := {}
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = _stand(spot)
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target()
+		_local.movement.cancel_armed()
+		_local.movement.set_aim_override(Vector3.INF))
 	var start := _stand(spot)
-	await _wait(1.6)
+	var waited := 0.0
+	while waited < 2.2:
+		await get_tree().physics_frame
+		waited += get_physics_process_delta_time()
+		seen[Player.State.keys()[_local.state]] = true
 	var moved := _flat(_local.global_position, start)
 	var dropped := start.y - _local.global_position.y
+	note("%s: states %s, fall record %.2f -> %.2f, hp %.0f -> %.0f" % [
+		label, seen.keys(), fall_before, _local.last_fall_height, hp_before, _local.hp])
 	var normal := _local.get_floor_normal() if _local.is_on_floor() else _local.get_wall_normal() if _local.is_on_wall() else Vector3.ZERO
 	note("%s: after 2 s moved %.2f m, dropped %.2f m, on_floor=%s on_wall=%s floor_angle %.1f contact normal %s floor_max %.1f, at %s gap %.3f, state %s (limit %.0f deg)" % [
 		label, moved, dropped, _local.is_on_floor(), _local.is_on_wall(),
 		rad_to_deg(_local.get_floor_angle()) if _local.is_on_floor() else -1.0, normal, rad_to_deg(_local.floor_max_angle),
 		_local.global_position, _ground_gap(_local), Player.State.keys()[_local.state], Tuning.server.walk_slope_max_deg])
-	return {"moved": moved, "dropped": dropped}
+	return {"moved": moved, "dropped": dropped, "states": seen,
+		"fell": absf(_local.last_fall_height - fall_before) > 0.001, "hp_lost": hp_before - _local.hp}
 
 
 func _slope_checks() -> void:
@@ -325,6 +345,34 @@ func _slope_checks() -> void:
 	expect(float(stood["moved"]) < 0.3, "the_body_stands_on_the_30_deg_slope_under_the_40_deg_limit")
 	var slid := await _slide_from(BANK_MID, "on the %.0f deg bank" % bank_deg)
 	expect(float(slid["moved"]) > 1.0 and float(slid["dropped"]) > 0.8, "and_slides_down_the_51_deg_bank")
+	expect((slid["states"] as Dictionary).has("SLIDING") and not (slid["states"] as Dictionary).has("AIRBORNE")
+		and not bool(slid["fell"]) and _local.state == Player.State.IDLE,
+		"the_slide_is_sliding_not_airborne_grounded_and_no_fall_is_recorded")
+	await _wait_idle()
+	# The 83 deg rim is past slide_max_deg: a face, so a fall from the start.
+	var rim := await _slide_from(RIM, "on the 83 deg rim 4.8 m up (slide_max %.0f)" % Tuning.server.slide_max_deg)
+	expect(not (rim["states"] as Dictionary).has("SLIDING") and (rim["states"] as Dictionary).has("AIRBORNE")
+		and bool(rim["fell"]) and absf(_local.last_fall_height - 4.8) < 0.6,
+		"the_83_deg_rim_is_a_fall_from_where_the_body_was_put")
+	await _wait_idle()
+	# The chute: 55 deg slide from 6.6 m down to the 5 m break, then a 79 deg
+	# face (5 m over one cell) that is past slide_max_deg.
+	# face. The fall counts from the break, not from the top. The fall floor
+	# is lowered to 1 m for this so the damage shows the height.
+	var min_was: float = Tuning.server.fall_damage_min_height
+	Tuning.server.fall_damage_min_height = 1.0
+	await _wait(0.2)
+	var chute := await _slide_from(CHUTE, "on the 55 deg chute 6.6 m up, break at %.0f m" % TestTerrain.CHUTE_BREAK_HEIGHT)
+	var from_break := maxf(0.0, (_local.last_fall_height - 1.0) * Tuning.server.fall_damage_per_meter)
+	var from_top := (6.6 - 1.0) * Tuning.server.fall_damage_per_meter
+	note("chute: fall height %.2f (break at %.1f, top at 6.6), hp lost %.1f (from the break %.1f, from the top would be %.1f)" % [
+		_local.last_fall_height, TestTerrain.CHUTE_BREAK_HEIGHT, float(chute["hp_lost"]), from_break, from_top])
+	Tuning.server.fall_damage_min_height = min_was
+	await _wait(0.2)
+	expect((chute["states"] as Dictionary).has("SLIDING") and (chute["states"] as Dictionary).has("AIRBORNE")
+		and bool(chute["fell"]) and _local.last_fall_height < 5.8 and _local.last_fall_height > 3.0
+		and absf(float(chute["hp_lost"]) - from_break) < 0.6,
+		"a_slide_that_ends_in_a_drop_counts_the_fall_from_the_break_not_the_top")
 	await _wait_idle()
 	# The slider: at 25 the hill side is too steep.
 	var was: float = Tuning.server.walk_slope_max_deg

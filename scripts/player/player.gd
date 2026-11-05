@@ -22,6 +22,11 @@ enum State {
 	# M-2: knocked down. Lying for down_time, then getup_time standing up.
 	DOWNED,
 	DEAD,
+	# T-1b: on ground too steep to stand on (walk_slope_max_deg) but not so
+	# steep it is a fall (slide_max_deg): the body slides down it, in contact.
+	# Grounded for the fall rule: no fall is tracked while sliding, and a
+	# fall that starts where the slide loses contact counts from there.
+	SLIDING,
 }
 
 # Names kept for the call sites; the numbers live in Layers and nowhere else.
@@ -84,6 +89,7 @@ const STATE_COLORS := {
 	State.RECOVERING: "c9b26b",
 	State.DOWNED: "b07a7a",
 	State.DEAD: "4b535c",
+	State.SLIDING: "a8c7e0",
 }
 
 signal state_changed(new_state: int)
@@ -439,7 +445,9 @@ func _update_fall_tracking(previous: int, new_state: int) -> void:
 	if previous != State.AIRBORNE:
 		return
 	if new_state == State.IDLE or new_state == State.MOVE or new_state == State.DASH \
-			or new_state == State.GRABBING:
+			or new_state == State.GRABBING or new_state == State.SLIDING:
+		# T-1b: landing on a steep slope is a landing (the drop ends there);
+		# the slide that follows tracks nothing.
 		_resolve_fall_damage()
 	# Caught a wall, grabbed, stunned or dead: nothing landed, so nothing hurts.
 
@@ -516,6 +524,10 @@ func default_snap_length() -> float:
 # carrying something, and every one of them was written as "is this body
 # grounded" -- so a holder that was not grounded was a holder that could not
 # act.
+func is_sliding() -> bool:
+	return state == State.SLIDING
+
+
 func is_grounded_state() -> bool:
 	return state == State.IDLE or state == State.MOVE or state == State.GRABBING \
 		or state == State.CASTING or state == State.RECOVERING
