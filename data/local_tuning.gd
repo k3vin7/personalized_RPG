@@ -59,6 +59,21 @@ extends Resource
 @export var camera_zoom_step: float = 0.1
 @export var camera_zoom_smoothing: float = 10.0
 
+@export_group("Model")
+# 2026-11-06: which gait the model draws for a moving body. Drawn only; the
+# body's speed is the server's. The walk clip is the default picture: the run
+# clip shows once the measured pace passes visual_run_speed, and comes back to
+# the walk once it drops under visual_walk_back_speed (a band, so a replica's
+# eased position does not flicker across one line). 9 / 7 m/s against the
+# 6 m/s base move speed: a plain body walks, a boosted one (ratio multiplier
+# up to 2.0) runs. Until 2026-11-06 the two were 2.5 / 1.2 in code, so every
+# body ran. visual_stride_max caps how fast a gait clip may be played to
+# match the body's pace (the walk clip's own pace is about 1 m/s, so at 6 m/s
+# it plays at this cap and the feet slide).
+@export var visual_run_speed: float = 9.0
+@export var visual_walk_back_speed: float = 7.0
+@export var visual_stride_max: float = 2.0
+
 @export_group("Terrain")
 # T-1b: a client's terrain collision is a patch around its own body
 # (Terrain3D DYNAMIC_GAME; the server builds the whole region). Metres of

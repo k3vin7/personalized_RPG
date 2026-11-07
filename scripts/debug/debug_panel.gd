@@ -50,6 +50,9 @@ const LOCAL_LIMITS := {
 	"camera_pitch_deg": Vector2(10.0, 89.0),
 	"camera_near_pitch_deg": Vector2(20.0, 89.0),
 	"camera_zoom_step": Vector2(0.02, 0.5),
+	"visual_run_speed": Vector2(0.0, 20.0),
+	"visual_walk_back_speed": Vector2(0.0, 20.0),
+	"visual_stride_max": Vector2(1.0, 8.0),
 }
 # A Korean name beside the field names that come up in the work order and the
 # feel questions. The field name stays: it is what the documents call it.
@@ -65,6 +68,9 @@ const FIELD_LABELS := {
 	"camera_near_pitch_deg": "각 하한 (줌 0, 지면 기준)",
 	"camera_zoom_step": "휠 한 칸 줌 폭",
 	"camera_zoom_smoothing": "줌 따라가는 속도",
+	"visual_run_speed": "달리기 그림 시작 속도 (m/s, 아래는 걷기)",
+	"visual_walk_back_speed": "걷기 그림 복귀 속도 (m/s)",
+	"visual_stride_max": "보행 클립 최대 배속",
 	"gravity": "중력",
 	"base_move_speed": "기본 이속",
 	"base_jump_height": "기본 점프 높이",

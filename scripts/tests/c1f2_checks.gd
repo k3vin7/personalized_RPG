@@ -163,7 +163,8 @@ func _model_checks() -> void:
 	var capsule := _local.half_height() * 2.0
 	note("model: %d bones, scale %.3f, measured height %.2f m against the capsule's %.2f m; capsule mesh visible=%s, cone visible=%s" % [
 		bones, visual.model_scale, height, capsule, _local._body_mesh_node.visible, _local._facing.visible])
-	expect(bones == 23, "the_knight_rig_has_its_23_bones")
+	var want_bones := int(CharacterVisual.profile()["bones"])
+	expect(bones == want_bones, "the_%s_rig_has_its_%d_bones" % [CharacterVisual.profile_name(), want_bones])
 	expect(absf(height - capsule) < capsule * 0.06, "the_model_stands_as_tall_as_the_capsule")
 	expect(not _local._body_mesh_node.visible and not _local._facing.visible, "the_capsule_and_the_cone_are_not_drawn")
 	expect(absf(_local._body_shape.height - capsule) < 0.001 and absf(_local._body_shape.radius - _local.radius()) < 0.001,
@@ -171,16 +172,25 @@ func _model_checks() -> void:
 	# The props: the sword on the right hand bone, the shield on the left.
 	await _take(WeaponKinds.Kind.SWORD)
 	var sword := _local._weapon_node
-	var on_hand := sword != null and sword.get_parent() is BoneAttachment3D \
-		and (sword.get_parent() as BoneAttachment3D).bone_name == CharacterVisual.HAND_BONE
+	var on_hand := _hangs_off(sword, CharacterVisual.HAND_BONE)
 	await _take(WeaponKinds.Kind.SHIELD)
 	var shield := _local._offhand_node
-	var on_offhand := shield != null and shield.get_parent() is BoneAttachment3D \
-		and (shield.get_parent() as BoneAttachment3D).bone_name == CharacterVisual.OFFHAND_BONE
+	var on_offhand := _hangs_off(shield, CharacterVisual.OFFHAND_BONE)
 	note("sword parent %s, shield parent %s" % [
 		sword.get_parent().name if sword != null else "none", shield.get_parent().name if shield != null else "none"])
 	expect(on_hand and on_offhand, "the_sword_and_the_shield_hang_off_the_hand_bones")
 	await _take(WeaponKinds.Kind.NONE)
+
+
+# A prop hangs off `bone` when a BoneAttachment3D for it is among its parents
+# (the grip node that undoes the model scale sits between, since 2026-11-06).
+static func _hangs_off(prop: Node, bone: String) -> bool:
+	var node := prop
+	while node != null:
+		if node is BoneAttachment3D:
+			return (node as BoneAttachment3D).bone_name == bone
+		node = node.get_parent()
+	return false
 
 
 # ------------------------------------------------- 2: state -> clip

@@ -216,6 +216,12 @@ func _start_smoke_when_ready() -> void:
 		await get_tree().create_timer(0.05).timeout
 		if _players_root.get_child_count() >= 2:
 			break
+	# Harness only. The spawns leave with the host's next network flush
+	# while an RPC leaves at once: sent in the same frame as the second
+	# spawn, begin_smoke reached the client before its own body did (the
+	# auth handshake lets a client connect during the host's bake, so both
+	# spawns and the start can land in one frame -- V-1, 2026-11-07).
+	await get_tree().create_timer(0.5).timeout
 	begin_smoke.rpc()
 	_run_smoke()
 
