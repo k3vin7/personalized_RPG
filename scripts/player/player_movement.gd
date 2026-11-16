@@ -520,6 +520,10 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if not player.is_local():
 		return
+	# Only the ground step sets it, so any other step (a push, a flight, a
+	# hold) ends the lip's hold on the body at once.
+	_was_on_step = _on_step
+	_on_step = false
 	if player.state == Player.State.DEAD:
 		# Nothing moves while dead; the body waits where it fell.
 		return
@@ -552,7 +556,7 @@ func _physics_process(delta: float) -> void:
 	_intent_left = maxf(0.0, _intent_left - delta)
 	if _intent_left == 0.0:
 		_intent_direction = Vector3.ZERO
-	if player.is_on_floor():
+	if player.is_on_floor() or _was_on_step:
 		_coyote_left = COYOTE_TIME
 	else:
 		_coyote_left = maxf(0.0, _coyote_left - delta)
@@ -602,6 +606,7 @@ func _ground_step(delta: float) -> void:
 		_launch_jump()
 		return
 
+	var pushed := _pushed_left > 0.0
 	if _pushed_left > 0.0:
 		# Still carrying a push. The move order does not get to overwrite it;
 		# it rubs off against the ground instead, and a fresh click cancels it
@@ -627,7 +632,10 @@ func _ground_step(delta: float) -> void:
 		player.change_state(Player.State.MOVE)
 	elif not _has_target and player.state == Player.State.MOVE:
 		player.change_state(Player.State.IDLE)
-	if player.is_on_floor():
+	# On the ground, or rolling over a lip's edge on the step below (where the
+	# engine's own floor flag is stale or says wall).
+	var grounded := player.is_on_floor() or _was_on_step
+	if grounded:
 		player.velocity.y = -0.5
 	else:
 		player.velocity.y -= Tuning.server.gravity * delta
@@ -635,13 +643,19 @@ func _ground_step(delta: float) -> void:
 	# the body off the ground between steps.
 	player.floor_snap_length = float(Tuning.server.mount_floor_snap) if player.is_mounted() \
 		else player.default_snap_length()
-	player.move_and_slide()
+	# The lip: only under the body's own orders. A push keeps its physics.
+	if grounded and not pushed and _step_up(delta):
+		_on_step = true
+	else:
+		player.move_and_slide()
+		if grounded and not pushed and not player.is_on_floor() and _step_down():
+			_on_step = true
 	# Asked before the airborne transition below: a body balanced on another
 	# body's head loses floor contact constantly, and letting that read as
 	# "walked off something" is what cut the stomp short.
 	if _stand_on_head(delta):
 		return
-	if not player.is_on_floor():
+	if not player.is_on_floor() and not _on_step:
 		# Walked off something, or onto ground too steep to stand on. Coyote
 		# time is already running, so a jump pressed a frame late still goes.
 		if _on_steep_ground():
@@ -651,6 +665,133 @@ func _ground_step(delta: float) -> void:
 			player.change_state(Player.State.AIRBORNE)
 		return
 	_try_attach_climb()
+
+
+# ------------------------------------------------------------------ the lip
+#
+# A capsule meets a lip's edge with the round of its foot, and the contact is
+# steeper than walk_slope_max_deg for anything over a few centimetres (0.1 m
+# under a 0.4 m radius is 41 degrees), so the engine calls it a wall and the
+# body stops. Here the body is carried over instead: raised, moved on by this
+# step's own motion, and lowered until it rests again -- which, while the
+# foot is still short of the edge, is on the edge itself. Step after step
+# that is the foot rolling over the corner; the body never leaves contact,
+# never goes faster along the ground than it was ordered to, and its state
+# does not change. Down is the same roll the other way.
+#
+# What makes a lip a lip is asked of the world, not of the contact: a ray
+# just past the edge has to find walkable ground no more than step_height
+# above the feet. A taller face gives the ray nothing and stays a wall.
+
+const STEP_MARGIN := 0.02
+const STEP_PROBE := 0.05
+# Counted for the checks: physics steps spent going over a lip, each way.
+var steps_up := 0
+var steps_down := 0
+var _on_step := false
+var _was_on_step := false
+
+
+func is_on_step() -> bool:
+	return _on_step
+
+
+func _feet_y() -> float:
+	return player.global_position.y - player.half_height()
+
+
+# Walkable terrain under the ray, or {}.
+func _step_ground(from: Vector3, to: Vector3) -> Dictionary:
+	var query := PhysicsRayQueryParameters3D.create(from, to, Layers.TERRAIN)
+	query.collide_with_areas = false
+	var found := player.get_world_3d().direct_space_state.intersect_ray(query)
+	if found.is_empty():
+		return {}
+	if (found["normal"] as Vector3).y < cos(player.floor_max_angle):
+		return {}
+	return found
+
+
+# True when this step's motion met a lip and the body was carried onto it.
+func _step_up(delta: float) -> bool:
+	var height: float = Tuning.server.step_height
+	if height <= 0.0:
+		return false
+	var motion := Vector3(player.velocity.x, 0.0, player.velocity.z) * delta
+	if motion.length_squared() < 0.00000001:
+		return false
+	var from := player.global_transform
+	var hit := KinematicCollision3D.new()
+	if not player.test_move(from, motion, hit):
+		return false
+	if hit.get_normal().y >= cos(player.floor_max_angle):
+		# A slope the body can walk: the engine's own.
+		return false
+	if PhysicsServer3D.body_get_collision_layer(hit.get_collider_rid()) & Layers.TERRAIN == 0:
+		# A body, a rock, a scarecrow: nothing is stepped onto but the world.
+		return false
+	var feet := _feet_y()
+	var contact := hit.get_position()
+	var past := contact + motion.normalized() * STEP_PROBE
+	var top := _step_ground(Vector3(past.x, feet + height + STEP_MARGIN, past.z), Vector3(past.x, feet, past.z))
+	if top.is_empty():
+		return false
+	var rise: float = (top["position"] as Vector3).y - feet
+	if rise < 0.01:
+		return false
+	var lift := Vector3.UP * (rise + STEP_MARGIN)
+	if player.test_move(from, lift):
+		# No room overhead.
+		return false
+	var raised := from.translated(lift)
+	var forward := motion
+	var ahead := KinematicCollision3D.new()
+	if player.test_move(raised, motion, ahead):
+		forward = ahead.get_travel()
+		if forward.length_squared() < motion.length_squared() * 0.01:
+			# Something stands on the lip.
+			return false
+	var over := raised.translated(forward)
+	var down := -lift
+	var rest := KinematicCollision3D.new()
+	if player.test_move(over, down, rest):
+		down = rest.get_travel()
+	player.global_position = over.origin + down
+	steps_up += 1
+	return true
+
+
+# After a ground step that left the floor: true when walkable ground is no
+# more than step_height under the feet and the body was lowered to rest.
+func _step_down() -> bool:
+	var height: float = Tuning.server.step_height
+	if height <= 0.0:
+		return false
+	var from := player.global_transform
+	var feet := _feet_y()
+	var at := from.origin
+	if _step_ground(Vector3(at.x, feet + 0.05, at.z), Vector3(at.x, feet - height - STEP_MARGIN, at.z)).is_empty():
+		return false
+	var rest := KinematicCollision3D.new()
+	if not player.test_move(from, Vector3.DOWN * (height + STEP_MARGIN), rest):
+		return false
+	player.global_position = at + rest.get_travel()
+	steps_down += 1
+	return true
+
+
+# Walks straight at the point without asking the navigation: for ground the
+# bake has not seen (the checks' own boxes and map pieces).
+func order_straight(world_point: Vector3) -> void:
+	_clear_intent()
+	_pushed_left = 0.0
+	_target = world_point
+	_has_target = true
+	_path = PackedVector3Array([player.global_position, world_point])
+	_path_index = 1
+	_pending_frames = 0
+	_path_dirty = false
+	_retries = 0
 
 
 # Riding: the horse moves where it faces. The heading turns toward the order
@@ -1013,7 +1154,7 @@ func cast_step_left() -> float:
 
 
 func _cast_step(delta: float) -> void:
-	if _pushed_left > 0.0 or not player.is_on_floor():
+	if _pushed_left > 0.0 or not (player.is_on_floor() or _was_on_step):
 		# Carrying a push, or off the ground: the stun's physics, as before.
 		_step_left = 0.0
 		_stunned_step(delta)
@@ -1026,7 +1167,13 @@ func _cast_step(delta: float) -> void:
 		player.velocity.x = 0.0
 		player.velocity.z = 0.0
 	player.velocity.y = -0.5
+	# The lip: the skill's own step is the body's own feet, like a walk.
+	if _step_up(delta):
+		_on_step = true
+		return
 	player.move_and_slide()
+	if not player.is_on_floor() and _step_down():
+		_on_step = true
 
 
 func _stunned_step(delta: float) -> void:
@@ -1310,12 +1457,27 @@ func _dash_step(delta: float) -> void:
 	player.velocity.x = _dash_direction.x * frame_speed
 	player.velocity.z = _dash_direction.z * frame_speed
 	player.velocity.y -= Tuning.server.gravity * delta
+	# The lip: a dash is the body's own feet on the ground, so it goes over
+	# what a walk goes over.
+	var grounded := player.is_on_floor() or _was_on_step
+	if grounded and _step_up(delta):
+		_on_step = true
+		player.velocity.y = -0.5
+		if _dash_left <= 0.0:
+			_end_dash()
+		return
 	player.move_and_slide()
 	# A wall ends it on the spot, and so does running out of ground.
 	if player.is_on_wall() or _dash_left <= 0.0:
+		if not player.is_on_floor() and grounded and _step_down():
+			_on_step = true
 		_end_dash()
 	elif not player.is_on_floor():
-		_end_dash()
+		if grounded and _step_down():
+			_on_step = true
+			player.velocity.y = -0.5
+		else:
+			_end_dash()
 
 
 func _end_dash() -> void:
@@ -1323,7 +1485,7 @@ func _end_dash() -> void:
 	_dash_total = 0.0
 	player.velocity.x = 0.0
 	player.velocity.z = 0.0
-	player.change_state(Player.State.IDLE if player.is_on_floor() else Player.State.AIRBORNE)
+	player.change_state(Player.State.IDLE if player.is_on_floor() or _on_step else Player.State.AIRBORNE)
 
 
 func cursor_direction() -> Vector3:

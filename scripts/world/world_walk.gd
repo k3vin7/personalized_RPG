@@ -115,6 +115,8 @@ func _on_bake_finished() -> void:
 			_walk_check(local)
 		elif argument == "--ride-check":
 			_ride_check(local)
+		elif argument == "--click-check":
+			_click_check(local)
 		elif argument.begins_with("--shot="):
 			_take_shots(argument.trim_prefix("--shot="))
 
@@ -272,6 +274,61 @@ func _travel(local: Player, to: Vector3, limit: float, via: Array[Vector3] = [])
 	out["line"] = line
 	out["short"] = Vector2(to.x - local.global_position.x, to.z - local.global_position.z).length()
 	return out
+
+
+# --click-check: what a right click's order does at the plaza disc (radius 5
+# at the origin, 0.1 m above the floor): onto its middle, and across it.
+func _click_check(local: Player) -> void:
+	await get_tree().create_timer(1.5).timeout
+	var judge := ServerAuthority.instance
+	var nav := _region.navigation_mesh
+	print("WORLD_CLICK_CHECK bake agent_max_climb=%.2f cell_height=%.2f cell_size=%.2f agent_radius=%.2f step_height=%.2f" % [
+		nav.agent_max_climb, nav.cell_height, nav.cell_size, nav.agent_radius, Tuning.server.step_height])
+	var floor_y := local.global_position.y
+	var cases := [
+		["onto the middle of the disc", Vector3(0.0, floor_y, 8.0), Vector3(0.0, floor_y + 0.1, 0.0)],
+		["across the disc", Vector3(0.0, floor_y, 8.0), Vector3(0.0, floor_y, -8.0)],
+		["onto the disc from the side", Vector3(-8.0, floor_y, 0.5), Vector3(2.0, floor_y + 0.1, 0.5)],
+	]
+	for case: Array in cases:
+		var from: Vector3 = case[1]
+		var to: Vector3 = case[2]
+		judge.forgive_move(multiplayer.get_unique_id(), "click_check")
+		local.movement.cancel_target()
+		local.global_position = from
+		local.velocity = Vector3.ZERO
+		await get_tree().create_timer(1.0).timeout
+		var start := local.global_position
+		var ups := local.movement.steps_up
+		local.movement.set_target(to)
+		var waited := 0.0
+		var step := 1.0 / float(Engine.physics_ticks_per_second)
+		var y_max := start.y
+		var off_line := 0.0
+		var air := 0
+		var path := PackedVector3Array()
+		var line := Vector2(to.x - start.x, to.z - start.z).normalized()
+		while waited < 10.0:
+			await get_tree().physics_frame
+			waited += step
+			var here := local.global_position
+			y_max = maxf(y_max, here.y)
+			var rel := Vector2(here.x - start.x, here.z - start.z)
+			off_line = maxf(off_line, absf(rel.x * line.y - rel.y * line.x))
+			if local.state != Player.State.IDLE and local.state != Player.State.MOVE:
+				air += 1
+			if local.movement._path.size() > path.size():
+				path = local.movement._path.duplicate()
+			if waited > 0.5 and not local.movement.has_target():
+				break
+		var end := local.global_position
+		var length := Vector2(to.x - start.x, to.z - start.z).length()
+		print("WORLD_CLICK_CHECK %s: from=(%.2f, %.2f, %.2f) click=(%.2f, %.2f) end=(%.2f, %.2f, %.2f) short_of_click=%.2f seconds=%.2f straight_would_be=%.2f rose=%.3f end_rise=%.3f off_line=%.2f not_ground_steps=%d lip_steps=%d path=%s" % [
+			case[0], start.x, start.y, start.z, to.x, to.z, end.x, end.y, end.z,
+			Vector2(to.x - end.x, to.z - end.z).length(), waited, length / local.get_move_speed(),
+			y_max - start.y, end.y - start.y, off_line, air, local.movement.steps_up - ups, path])
+	print("WORLD_CLICK_CHECK done warnings=%d corrections=%d" % [judge.move_warnings, judge.move_corrections])
+	get_tree().quit()
 
 
 func _ride_check(local: Player) -> void:

@@ -37,6 +37,12 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			slide_max_deg = value
+# The tallest lip a body walks (or rides) straight over, up or down, metres.
+# Taller is a wall on the way up and a drop on the way down. 0 turns it off.
+@export var step_height: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			step_height = value
 # The vertical half of the leap budget: v_cap is built from this and the move
 # speed. Since stage C-2 it is not the standing jump's height on its own -- a
 # standing jump spends the whole budget upward and goes higher than this.
