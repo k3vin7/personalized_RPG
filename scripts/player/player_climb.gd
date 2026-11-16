@@ -57,6 +57,9 @@ func is_climbing() -> bool:
 # Catching costs no stamina. The cost is in hanging there, which drains the same
 # way a climb from the ground does.
 func attach(body: CollisionObject3D, contact: Vector3, normal: Vector3) -> bool:
+	if not Tuning.server.climb_enabled:
+		# On hold (2026-11-17): no wall is taken hold of.
+		return false
 	if player.state != Player.State.IDLE and player.state != Player.State.MOVE and player.state != Player.State.AIRBORNE:
 		return false
 	var flat := Vector3(normal.x, 0.0, normal.z)

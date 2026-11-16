@@ -120,6 +120,13 @@ func _apply_view(zoom: float) -> void:
 # The wheel. Up is closer. Anything the UI took (the panel's own scroll) does
 # not reach here.
 func _unhandled_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key != null and key.pressed and not key.echo and key.physical_keycode == LOOK_KEY:
+		looking_around = not looking_around
+		_pan = Vector3.ZERO
+		print("PLAYGROUND_LOOK_AROUND on=%s" % looking_around)
+		get_viewport().set_input_as_handled()
+		return
 	var button := event as InputEventMouseButton
 	if button == null or not button.pressed:
 		return
@@ -132,6 +139,31 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	wheel_steps += 1
 	Tuning.notify_changed()
+
+
+# Looking around (2026-11-17): F2 on, the arrow keys slide the view over the
+# ground away from the body; F2 off, it is back on the body. The body is not
+# moved and nothing is sent anywhere.
+const LOOK_KEY := KEY_F2
+const PAN_FAST := 3.0
+var looking_around := false
+var _pan := Vector3.ZERO
+
+
+# The arrow keys as a flat direction on the screen: up is away from the view.
+func _pan_input() -> Vector3:
+	var forward := get_camera_flat_forward()
+	var right := Vector3(-forward.z, 0.0, forward.x)
+	var out := Vector3.ZERO
+	if Input.is_physical_key_pressed(KEY_UP):
+		out += forward
+	if Input.is_physical_key_pressed(KEY_DOWN):
+		out -= forward
+	if Input.is_physical_key_pressed(KEY_RIGHT):
+		out += right
+	if Input.is_physical_key_pressed(KEY_LEFT):
+		out -= right
+	return out.normalized() if out.length_squared() > 0.0 else Vector3.ZERO
 
 
 func set_target(value: Node3D) -> void:
@@ -156,7 +188,10 @@ func _process(delta: float) -> void:
 	# Position only. The character drifts a little off centre while moving and
 	# recentres when it stops, which is the follow lag showing itself honestly
 	# rather than as a change of angle.
-	var wanted := target.global_position + _offset
+	if looking_around:
+		_pan += _pan_input() * Tuning.values.camera_pan_speed * delta \
+			* (PAN_FAST if Input.is_physical_key_pressed(KEY_SHIFT) else 1.0)
+	var wanted := target.global_position + _offset + _pan
 	if _smoothed == Vector3.INF:
 		_smoothed = global_position
 	_smoothed = _smoothed.lerp(wanted, 1.0 - exp(-follow_smoothing * delta))

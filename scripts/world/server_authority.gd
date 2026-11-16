@@ -828,7 +828,8 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 		# A team mate in the air is reached for -- that is the co-op launch, a
 		# body at the top of its jump pushed on across a gap -- so the band is
 		# for what stands on the ground.
-		if not (body is Player and recently_airborne(body as Player)) 				and height_off(body, actor.global_position.y) > shove_band(actor):
+		var reach_up: bool = Tuning.server.coop_launch_enabled and body is Player and recently_airborne(body as Player)
+		if not reach_up and height_off(body, actor.global_position.y) > shove_band(actor):
 			continue
 		# 4-chapter: a team mate is another player while the debug toggle says
 		# they are in the same party. The playground is all field, so there is
@@ -836,7 +837,7 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 		var is_ally := body is Player and Tuning.server.same_party
 		var push := forward
 		var launched := false
-		if is_ally and recently_airborne(body as Player):
+		if is_ally and Tuning.server.coop_launch_enabled and recently_airborne(body as Player):
 			# A team mate already in the air is launched, not shoved: this is
 			# what makes one player a step for another.
 			var angle := deg_to_rad(Tuning.server.shove_ally_launch_angle_deg)
@@ -3135,7 +3136,8 @@ func _land_strike(actor: Node3D, def: SkillDef, body: Node3D, forward: Vector3, 
 	}
 	# C-1c: the shield bash launches a team mate in the air the way the
 	# shove does (the co-op step), at the shove's angle, with the spring.
-	if def.launches_airborne_ally and is_ally and recently_airborne(body as Player):
+	if def.launches_airborne_ally and is_ally and Tuning.server.coop_launch_enabled \
+			and recently_airborne(body as Player):
 		var launch_angle := deg_to_rad(Tuning.server.shove_ally_launch_angle_deg)
 		ctx["direction"] = forward * cos(launch_angle) + Vector3.UP * sin(launch_angle)
 		ctx["spring"] = true

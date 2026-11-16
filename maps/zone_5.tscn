@@ -27,17 +27,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, 4)
 
 [node name="stairs" type="CSGCombiner3D" parent="building_center/town hall" unique_id=668090225]
 
-[node name="CSGBox3D2" type="CSGBox3D" parent="building_center/town hall/stairs" unique_id=963642680]
-transform = Transform3D(0.70710677, 0, 0.70710677, 0, 1, 0, -0.70710677, 0, 0.70710677, -11.700001, 1, 11.7)
-size = Vector3(1, 1, 5)
-
-[node name="CSGBox3D4" type="CSGBox3D" parent="building_center/town hall/stairs" unique_id=1217653656]
-transform = Transform3D(0.70710677, 0, 0.70710677, 0, 1, 0, -0.70710677, 0, 0.70710677, -12.400001, 1.25, 12.4)
-size = Vector3(1, 1.5, 5)
-
-[node name="CSGBox3D3" type="CSGBox3D" parent="building_center/town hall/stairs" unique_id=1260178125]
-transform = Transform3D(0.70710677, 0, 0.70710677, 0, 1, 0, -0.70710677, 0, 0.70710677, -11.000001, 0.75, 11)
-size = Vector3(1, 0.5, 5)
+[node name="ramp" type="CSGBox3D" parent="building_center/town hall/stairs" unique_id=963642680]
+transform = Transform3D(-0.6280644, 0.3248606, -0.70710677, 0.4594223, 0.8882165, 0, 0.6280644, -0.3248606, -0.70710677, -11.834182, 0.8058912, 11.834182)
+size = Vector3(3.2649655, 1, 5)
 
 [node name="pedestal" type="CSGBox3D" parent="building_center/town hall" unique_id=1146113880]
 transform = Transform3D(0.70710677, 0, -0.70710677, 0, 1, 0, 0.70710677, 0, 0.70710677, -18.707108, 1.25, 18.707108)
@@ -424,17 +416,9 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 106)
 [node name="stairs" type="CSGCombiner3D" parent="building_NW/training school" unique_id=526998303]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -16.199997)
 
-[node name="stairs2" type="CSGBox3D" parent="building_NW/training school/stairs" unique_id=611034029]
-transform = Transform3D(0, 0, 0.99999994, 0, 1, 0, -0.99999994, 0, 0, -6.1690807e-06, 1, -1.300003)
-size = Vector3(1, 1, 6)
-
-[node name="stairs3" type="CSGBox3D" parent="building_NW/training school/stairs" unique_id=1553287879]
-transform = Transform3D(0, 0, 0.99999994, 0, 1, 0, -0.99999994, 0, 0, -2.8014183e-06, 1.25, -0.3100586)
-size = Vector3(1, 1.5, 6)
-
-[node name="stairs4" type="CSGBox3D" parent="building_NW/training school/stairs" unique_id=447201291]
-transform = Transform3D(0, 0, 0.99999994, 0, 1, 0, -0.99999994, 0, 0, -4.142523e-06, 0.75, -2.2899475)
-size = Vector3(1, 0.5, 6)
+[node name="ramp" type="CSGBox3D" parent="building_NW/training school/stairs" unique_id=611034029]
+transform = Transform3D(0, 0, -1, 0.4961389, 0.8682431, 0, 0.8682431, -0.4961389, 0, 0, 1.0658784, -1.3019305)
+size = Vector3(4.0311289, 1, 6)
 
 [node name="front door" type="CSGCombiner3D" parent="building_NW/training school" unique_id=604243633]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -45)

@@ -33,10 +33,16 @@ extends Resource
 # throw pose until it is let go.
 @export var throw_hold_threshold: float = 0.5
 @export var throw_charge_max: float = 1.0
-# The dash key, as a physical keycode. Default Shift (2026-11-03, was C);
-# any key from the debug panel, the way the slot keys are. Written into the
-# InputMap's "dash" action by PlayerMovement.apply_dash_binding().
-@export var dash_key: int = KEY_SHIFT
+# The dash key, as a physical keycode. Default Space (2026-11-17, was Shift,
+# before that C; Shift is left empty); any key from the debug panel, the way
+# the slot keys are. Written into the InputMap's "dash" action by
+# PlayerMovement.apply_dash_binding().
+@export var dash_key: int = KEY_SPACE
+# The jump key, its own value since 2026-11-17 (it was Space in the project's
+# input map). Empty while the jump is on hold; any key from the debug panel.
+# Written into the InputMap's "jump" action by apply_jump_binding(). Getting
+# out of a hold is Space whatever this is (PlayerMovement.ESCAPE_KEY).
+@export var jump_key: int = 0
 # The horse: one key summons and mounts, the same key gets off. Default Z;
 # any key from the debug panel. Written into the InputMap's "mount" action
 # by PlayerMovement.apply_mount_binding().
@@ -62,6 +68,10 @@ extends Resource
 @export var camera_near_pitch_deg: float = 35.0
 @export var camera_zoom_step: float = 0.1
 @export var camera_zoom_smoothing: float = 10.0
+# 2026-11-17: looking around. F2 lets go of the body and the arrow keys slide
+# the view over the ground at this many metres a second (Shift: three times
+# that); F2 again goes back to the body. Drawn only.
+@export var camera_pan_speed: float = 40.0
 
 @export_group("Model")
 # 2026-11-06: which gait the model draws for a moving body. Drawn only; the

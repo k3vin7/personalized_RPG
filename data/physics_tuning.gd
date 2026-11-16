@@ -72,6 +72,27 @@ extends Resource
 		if Tuning.may_write(self):
 			jump_ledge_margin = value
 
+# 2026-11-17: the jump, the climb and the co-op launch are on hold. Nothing
+# was removed: each is behind its switch, and with the switch on it is what
+# it was. Off by default.
+# The jump: in place, to the cursor, out of a dash, off a ledge (coyote).
+@export var jump_enabled: bool = false:
+	set(value):
+		if Tuning.may_write(self):
+			jump_enabled = value
+# Taking hold of a wall (from the ground or in the air) and climbing it.
+@export var climb_enabled: bool = false:
+	set(value):
+		if Tuning.may_write(self):
+			climb_enabled = value
+# The co-op launch: a team mate in the air reached for and sent up at
+# shove_ally_launch_angle_deg by a shove or a shield bash. Off, a team mate
+# in the air is shoved like anything else, inside the same height band.
+@export var coop_launch_enabled: bool = false:
+	set(value):
+		if Tuning.may_write(self):
+			coop_launch_enabled = value
+
 @export_group("Strength to weight")
 # v4: the ratio a multiplier of 1.0 stands at. A human at training 0, bare, is
 # 60 strength over 80 kg = 0.75, so every _base value below is what that human

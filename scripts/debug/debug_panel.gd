@@ -61,6 +61,9 @@ const FIELD_LABELS := {
 	"walk_slope_max_deg": "걷기 가능 경사 한계 (넘으면 미끄러짐)",
 	"slide_max_deg": "미끄러짐 상한 (넘으면 낙하)",
 	"step_height": "걸어서 넘는 턱 높이 (m, 0 = 끔)",
+	"jump_enabled": "점프 허용 (보류 중 · 기본 꺼짐)",
+	"climb_enabled": "등반 · 벽잡기 허용 (보류 중 · 기본 꺼짐)",
+	"coop_launch_enabled": "협동 발사(아군 발판) 허용 (보류 중 · 기본 꺼짐)",
 	"terrain_collision_radius": "클라 지형 충돌 반경 (몸 주변)",
 	"terrain_collision_shape_size": "클라 지형 충돌 조각 크기",
 	"camera_zoom": "카메라 줌 (1 멀리 · 0 가까이, 휠)",
@@ -70,6 +73,7 @@ const FIELD_LABELS := {
 	"camera_near_pitch_deg": "각 하한 (줌 0, 지면 기준)",
 	"camera_zoom_step": "휠 한 칸 줌 폭",
 	"camera_zoom_smoothing": "줌 따라가는 속도",
+	"camera_pan_speed": "둘러보기 속도 (F2 · 방향키, m/s · Shift 3배)",
 	"visual_run_speed": "달리기 그림 시작 속도 (m/s, 아래는 걷기)",
 	"visual_walk_back_speed": "걷기 그림 복귀 속도 (m/s)",
 	"visual_stride_max": "보행 클립 최대 배속",
@@ -184,6 +188,8 @@ var _rebind_dash := false
 var _dash_button: Button
 var _rebind_mount := false
 var _mount_button: Button
+var _rebind_jump := false
+var _jump_button: Button
 var _arc: MeshInstance3D
 # Off by default (2026-11-03): the line drawn from the feet along the jump
 # the cursor would get was always on and read as clutter. The panel's
@@ -214,6 +220,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		_rebind_dash = false
 		_refresh_dash_button()
 		# The key may have come off a slot.
+		_refresh_slot_buttons()
+		get_viewport().set_input_as_handled()
+		return
+	if _rebind_jump and event is InputEventKey and event.is_pressed() and not event.is_echo():
+		if is_instance_valid(player) and player.movement != null:
+			player.movement.rebind_jump((event as InputEventKey).physical_keycode)
+		_rebind_jump = false
+		_refresh_dash_button()
 		_refresh_slot_buttons()
 		get_viewport().set_input_as_handled()
 		return
@@ -369,6 +383,12 @@ func _build_ui() -> void:
 		_rebind_mount = true
 		_refresh_dash_button())
 	keys.add_child(_mount_button)
+	_jump_button = Button.new()
+	_jump_button.name = "JumpKey"
+	_jump_button.pressed.connect(func() -> void:
+		_rebind_jump = true
+		_refresh_dash_button())
+	keys.add_child(_jump_button)
 	_refresh_dash_button()
 	_slot_buttons.clear()
 	for index in PlayerSkills.SLOT_COUNT:
@@ -385,7 +405,7 @@ func _build_ui() -> void:
 	var local := _section(column, "조작 설정 (이 컴퓨터만)", false)
 	for name_text in Tuning.field_names(Tuning.values):
 		# Keycodes are not sliders: the dash key has its button above.
-		if name_text == "dash_key" or name_text == "mount_key":
+		if name_text == "dash_key" or name_text == "mount_key" or name_text == "jump_key":
 			continue
 		var value: Variant = Tuning.values.get(name_text)
 		if typeof(value) == TYPE_BOOL:
@@ -619,6 +639,12 @@ func _refresh_dash_button() -> void:
 		_mount_button.text = "말 소환/내리기: 키를 누르세요…"
 	else:
 		_mount_button.text = "말 소환/내리기: %s  — 키 변경" % player.movement.mount_key_label()
+	if _jump_button == null:
+		return
+	if _rebind_jump:
+		_jump_button.text = "점프: 키를 누르세요…"
+	else:
+		_jump_button.text = "점프 (보류 중): %s  — 키 변경" % player.movement.jump_key_label()
 
 
 func numeric_limits(field: String, value: float) -> Vector2:

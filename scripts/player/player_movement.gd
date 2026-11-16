@@ -116,6 +116,7 @@ func setup(owner_player: Player) -> void:
 	player.add_owned_view(_indicator)
 	apply_dash_binding()
 	apply_mount_binding()
+	apply_jump_binding()
 	set_physics_process(true)
 
 
@@ -151,6 +152,7 @@ func rebind_dash(physical_keycode: int) -> void:
 	if player.skills != null:
 		player.skills.release_key(physical_keycode)
 	_release_mount_key(physical_keycode)
+	_release_jump_key(physical_keycode)
 	Tuning.values.dash_key = physical_keycode
 	apply_dash_binding()
 	Tuning.notify_changed()
@@ -161,7 +163,8 @@ func rebind_dash(physical_keycode: int) -> void:
 # whether it did. Does not notify: the caller's own write does.
 func release_key(physical_keycode: int) -> bool:
 	var mount_released := _release_mount_key(physical_keycode)
-	return _release_dash_key(physical_keycode) or mount_released
+	var jump_released := _release_jump_key(physical_keycode)
+	return _release_dash_key(physical_keycode) or mount_released or jump_released
 
 
 func _release_dash_key(physical_keycode: int) -> bool:
@@ -171,6 +174,61 @@ func _release_dash_key(physical_keycode: int) -> bool:
 	apply_dash_binding()
 	print("PLAYGROUND_KEY_RELEASED from=dash key=%s" % OS.get_keycode_string(physical_keycode))
 	return true
+
+
+# ------------------------------------------------------------- the jump key
+
+const JUMP_ACTION := "jump"
+# Getting out of someone's hands, and letting go of a wall: Space, whatever
+# the dash and the jump are bound to. While held it is the only thing Space
+# does -- the dash on the same key does not go out.
+const ESCAPE_KEY := KEY_SPACE
+
+
+func jump_key_label() -> String:
+	var key := int(Tuning.values.jump_key)
+	return OS.get_keycode_string(key) if key != 0 else PlayerSkills.EMPTY_KEY_LABEL
+
+
+# Writes this peer's jump key into the InputMap. The project's own entry
+# (Space) is taken off: Space is the dash's default now.
+func apply_jump_binding() -> void:
+	if not InputMap.has_action(JUMP_ACTION):
+		InputMap.add_action(JUMP_ACTION)
+	InputMap.action_erase_events(JUMP_ACTION)
+	if int(Tuning.values.jump_key) == 0:
+		return
+	var key := InputEventKey.new()
+	key.physical_keycode = int(Tuning.values.jump_key) as Key
+	InputMap.action_add_event(JUMP_ACTION, key)
+
+
+# Any key for the jump. One key, one meaning, as for the dash.
+func rebind_jump(physical_keycode: int) -> void:
+	if physical_keycode == 0:
+		return
+	if player.skills != null:
+		player.skills.release_key(physical_keycode)
+	_release_dash_key(physical_keycode)
+	_release_mount_key(physical_keycode)
+	Tuning.values.jump_key = physical_keycode
+	apply_jump_binding()
+	Tuning.notify_changed()
+	print("PLAYGROUND_JUMP_KEY key=%s" % OS.get_keycode_string(physical_keycode))
+
+
+func _release_jump_key(physical_keycode: int) -> bool:
+	if int(Tuning.values.jump_key) != physical_keycode:
+		return false
+	Tuning.values.jump_key = 0
+	apply_jump_binding()
+	print("PLAYGROUND_KEY_RELEASED from=jump key=%s" % OS.get_keycode_string(physical_keycode))
+	return true
+
+
+static func _is_escape_press(event: InputEvent) -> bool:
+	var key := event as InputEventKey
+	return key != null and key.pressed and not key.echo and key.physical_keycode == ESCAPE_KEY
 
 
 # ------------------------------------------------------------ the mount key
@@ -207,6 +265,7 @@ func rebind_mount(physical_keycode: int) -> void:
 	if player.skills != null:
 		player.skills.release_key(physical_keycode)
 	_release_dash_key(physical_keycode)
+	_release_jump_key(physical_keycode)
 	Tuning.values.mount_key = physical_keycode
 	apply_mount_binding()
 	Tuning.notify_changed()
@@ -285,8 +344,13 @@ func press_jump() -> void:
 		# the key off (the default) a press in the air only armed a jump that
 		# could never be cast, so a body could no longer take hold of a wall.
 		_disarm()
-		_jump_buffer_left = JUMP_BUFFER
-		_catch_buffer_left = CATCH_BUFFER
+		if Tuning.server.jump_enabled:
+			_jump_buffer_left = JUMP_BUFFER
+		if Tuning.server.climb_enabled:
+			_catch_buffer_left = CATCH_BUFFER
+		return
+	if not Tuning.server.jump_enabled:
+		# On hold (2026-11-17): the key arms nothing and casts nothing.
 		return
 	if Tuning.values.smart_key_enabled:
 		cast_jump()
@@ -300,8 +364,10 @@ func cast_jump() -> void:
 	if player.is_mounted():
 		mounted_presses_dropped += 1
 		return
-	_jump_buffer_left = JUMP_BUFFER
-	_catch_buffer_left = CATCH_BUFFER
+	if Tuning.server.jump_enabled:
+		_jump_buffer_left = JUMP_BUFFER
+	if Tuning.server.climb_enabled:
+		_catch_buffer_left = CATCH_BUFFER
 
 
 func request_jump() -> void:
@@ -457,7 +523,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	if player.grab != null and player.grab.is_held():
 		# Held in someone's hands: Space is the only input that still does
 		# anything, and it means "let me go".
-		if event.is_action_pressed("jump"):
+		if _is_escape_press(event):
 			Net.queue_physics(player.grab.escape_press)
 		get_viewport().set_input_as_handled()
 		return
@@ -469,7 +535,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			var camera := player.camera.camera
 			player.climb.aim_at(camera.project_ray_origin(mouse), camera.project_ray_normal(mouse))
 			get_viewport().set_input_as_handled()
-		elif event.is_action_pressed("jump"):
+		elif event.is_action_pressed("jump") or _is_escape_press(event):
 			Net.queue_physics(player.climb.detach)
 			get_viewport().set_input_as_handled()
 		return
@@ -1089,6 +1155,10 @@ func jump_plan(aim: Vector3) -> Dictionary:
 
 
 func _launch_jump() -> void:
+	if not Tuning.server.jump_enabled:
+		# On hold: a press buffered before the switch went off goes nowhere.
+		_jump_buffer_left = 0.0
+		return
 	_jump_buffer_left = 0.0
 	_catch_buffer_left = 0.0
 	_coyote_left = 0.0
@@ -1288,6 +1358,10 @@ const TOP_SURFACE := 0.6
 # The click path and anything else that wants a climb go through here, so a
 # test exercises exactly what the button does.
 func order_climb(body: CollisionObject3D, contact: Vector3, normal: Vector3) -> void:
+	if not Tuning.server.climb_enabled:
+		# On hold: a click on a wall face orders nothing.
+		_clear_climb_request()
+		return
 	_climb_wall = body
 	_climb_point = contact
 	_climb_normal = normal
@@ -1310,6 +1384,8 @@ func climb_request_distance() -> float:
 # Sliding down a face separates and re-touches from frame to frame, so the
 # contact list is empty on most of them and a press would be thrown away.
 func try_air_catch() -> bool:
+	if not Tuning.server.climb_enabled:
+		return false
 	if player.state != Player.State.AIRBORNE or player.climb == null:
 		return false
 	var space := player.get_world_3d().direct_space_state
@@ -1338,6 +1414,8 @@ func _clear_climb_request() -> void:
 
 # Close enough to the spot that was clicked on the wall, so take hold of it.
 func _try_attach_climb() -> void:
+	if not Tuning.server.climb_enabled:
+		return
 	if _climb_wall == null or player.climb == null:
 		return
 	if climb_request_distance() > Tuning.server.climb_attach_distance:
