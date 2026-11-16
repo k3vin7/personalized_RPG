@@ -1,5 +1,9 @@
 [gd_scene format=3 uid="uid://dwfx4x32t4g6k"]
 
+[sub_resource type="StandardMaterial3D" id="mat_dungeon"]
+transparency = 1
+albedo_color = Color(0.6, 0.2, 0.9, 0.5)
+
 [node name="zone5" type="Node3D" unique_id=1059632899]
 
 [node name="floor_center" type="CSGCombiner3D" parent="." unique_id=765998394]
@@ -418,7 +422,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -16.199997)
 
 [node name="ramp" type="CSGBox3D" parent="building_NW/training school/stairs" unique_id=611034029]
 transform = Transform3D(0, 0, -1, 0.4961389, 0.8682431, 0, 0.8682431, -0.4961389, 0, 0, 1.0658784, -1.3019305)
-size = Vector3(4.0311289, 1, 6)
+size = Vector3(4.031129, 1, 6)
 
 [node name="front door" type="CSGCombiner3D" parent="building_NW/training school" unique_id=604243633]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -45)
@@ -566,6 +570,29 @@ size = Vector3(10, 3, 8)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13, 4, 1)
 size = Vector3(10, 3, 8)
 
+[node name="floor3" type="CSGCombiner3D" parent="building_NW/training school/main school" unique_id=685058959]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 6, 0)
+
+[node name="hall" type="CSGBox3D" parent="building_NW/training school/main school/floor3" unique_id=1647746787]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, -3)
+size = Vector3(16, 3, 16)
+
+[node name="room1" type="CSGBox3D" parent="building_NW/training school/main school/floor3" unique_id=1950636966]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 4, -7)
+size = Vector3(10, 3, 8)
+
+[node name="room2" type="CSGBox3D" parent="building_NW/training school/main school/floor3" unique_id=702592397]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 4, 1)
+size = Vector3(10, 3, 8)
+
+[node name="room3" type="CSGBox3D" parent="building_NW/training school/main school/floor3" unique_id=79905145]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13, 4, -7)
+size = Vector3(10, 3, 8)
+
+[node name="room4" type="CSGBox3D" parent="building_NW/training school/main school/floor3" unique_id=2094570817]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13, 4, 1)
+size = Vector3(10, 3, 8)
+
 [node name="dormitory" type="CSGBox3D" parent="building_NW/training school" unique_id=1916525338]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 24, 2, -47.5)
 size = Vector3(12, 3, 30)
@@ -710,3 +737,13 @@ size = Vector3(3, 1, 15)
 [node name="route3" type="CSGBox3D" parent="floor_S/house6" unique_id=1878921104]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 0, -34)
 size = Vector3(8, 1, 3)
+
+[node name="dungeon_1" type="CSGBox3D" parent="." unique_id=1172582865]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -98, 2, 118)
+size = Vector3(3, 4, 0.3)
+material = SubResource("mat_dungeon")
+
+[node name="dungeon_2" type="CSGBox3D" parent="." unique_id=1352476634]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -67, 2.5, -68)
+size = Vector3(3, 4, 0.3)
+material = SubResource("mat_dungeon")

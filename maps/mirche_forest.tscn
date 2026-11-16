@@ -1,5 +1,27 @@
 [gd_scene format=3 uid="uid://cg4gk0i8rfy35"]
 
+[sub_resource type="StandardMaterial3D" id="mat_bear"]
+albedo_color = Color(1, 0.55, 0.1, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_wolf"]
+albedo_color = Color(0.9, 0.15, 0.15, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_wolf_alpha"]
+albedo_color = Color(0.5, 0.05, 0.05, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_mark"]
+albedo_color = Color(0.05, 0.05, 0.05, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_bear_cub"]
+albedo_color = Color(1, 0.78, 0.5, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_bear_father"]
+albedo_color = Color(0.75, 0.35, 0, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_dungeon"]
+transparency = 1
+albedo_color = Color(0.6, 0.2, 0.9, 0.5)
+
 [node name="Node3D" type="Node3D" unique_id=1869865343]
 
 [node name="mirche forest floor" type="CSGBox3D" parent="." unique_id=1856364715]
@@ -46,144 +68,182 @@ height = 10.0
 [node name="path_entry" type="CSGBox3D" parent="trees" unique_id=2061102186]
 transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 105, 4.5, 71.5)
 operation = 2
-size = Vector3(6, 10, 59)
+size = Vector3(14, 10, 59)
 
 [node name="path_ab_1" type="CSGBox3D" parent="trees" unique_id=1306797473]
 transform = Transform3D(-0.3939, 0, -0.9191, 0, 1, 0, 0.9191, 0, -0.3939, 87.5, 4.5, 37.5)
 operation = 2
-size = Vector3(6, 10, 44.0789)
+size = Vector3(14, 10, 44.0789)
 
 [node name="path_ab_2" type="CSGBox3D" parent="trees" unique_id=338087221]
 transform = Transform3D(-0.3714, 0, -0.9285, 0, 1, 0, 0.9285, 0, -0.3714, 57.5, 4.5, 25)
 operation = 2
-size = Vector3(6, 10, 32.9258)
+size = Vector3(14, 10, 32.9258)
 
 [node name="path_ac_1" type="CSGBox3D" parent="trees" unique_id=1441971141]
 transform = Transform3D(-0.7071, 0, 0.7071, 0, 1, 0, -0.7071, 0, -0.7071, 122.5, 4.5, 27.5)
 operation = 2
-size = Vector3(6, 10, 55.4975)
+size = Vector3(14, 10, 55.4975)
 
 [node name="path_ac_2" type="CSGBox3D" parent="trees" unique_id=190034028]
 transform = Transform3D(-0.8321, 0, 0.5547, 0, 1, 0, -0.5547, 0, -0.8321, 145, 4.5, 2.5)
 operation = 2
-size = Vector3(6, 10, 24.0278)
+size = Vector3(14, 10, 24.0278)
 
 [node name="path_cd_1" type="CSGBox3D" parent="trees" unique_id=468587841]
 transform = Transform3D(-0.7071, 0, -0.7071, 0, 1, 0, 0.7071, 0, -0.7071, 135, 4.5, -20)
 operation = 2
-size = Vector3(6, 10, 48.4264)
+size = Vector3(14, 10, 48.4264)
 
 [node name="path_cd_2" type="CSGBox3D" parent="trees" unique_id=2062071255]
 transform = Transform3D(-0.3714, 0, -0.9285, 0, 1, 0, 0.9285, 0, -0.3714, 107.5, 4.5, -40)
 operation = 2
-size = Vector3(6, 10, 32.9258)
+size = Vector3(14, 10, 32.9258)
 
 [node name="path_dboss_1" type="CSGBox3D" parent="trees" unique_id=1587791705]
 transform = Transform3D(-0.4961, 0, -0.8682, 0, 1, 0, 0.8682, 0, -0.4961, 78.93743, 4.5, -54.17863)
 operation = 2
-size = Vector3(6, 10, 43)
+size = Vector3(3, 10, 43)
 
 [node name="path_dboss_2" type="CSGBox3D" parent="trees" unique_id=324515382]
 transform = Transform3D(-0.1961, 0, -0.9806, 0, 1, 0, 0.9806, 0, -0.1961, 46.766953, 4.5, -67.64659)
 operation = 2
-size = Vector3(6, 10, 30)
+size = Vector3(3, 10, 30)
 
 [node name="side_b" type="CSGBox3D" parent="trees" unique_id=1890377295]
 transform = Transform3D(0.3511, 0, -0.9363, 0, 1, 0, 0.9363, 0, 0.3511, 25, 4.5, 27.5)
 operation = 2
-size = Vector3(3, 10, 45.72)
+size = Vector3(14, 10, 45.72)
 
-[node name="side_c" type="CSGBox3D" parent="trees" unique_id=512723551]
-transform = Transform3D(-0.6247, 0, 0.7809, 0, 1, 0, -0.7809, 0, -0.6247, 162.5, 4.5, -15)
+[node name="clearing_bears" type="CSGCylinder3D" parent="trees" unique_id=1945063986]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -96, 4.5, -20)
 operation = 2
-size = Vector3(3, 10, 35.0156)
+radius = 50.0
+height = 10.0
 
-[node name="clearing_a_low" type="CSGCylinder3D" parent="trees" unique_id=731045281]
+[node name="path_b_bears" type="CSGBox3D" parent="trees" unique_id=412773241]
+transform = Transform3D(-0.35898, 0, -0.93335, 0, 1, 0, 0.93335, 0, -0.35898, -27.5, 4.5, 22.5)
+operation = 2
+size = Vector3(14, 10, 69.64194)
+
+[node name="path_north_bears" type="CSGBox3D" parent="trees" unique_id=152403391]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -89, 4.5, 63)
+operation = 2
+size = Vector3(14, 10, 70)
+
+[node name="path_c_east" type="CSGBox3D" parent="trees" unique_id=603089859]
+transform = Transform3D(-0.29568, 0, 0.95529, 0, 1, 0, -0.95529, 0, -0.29568, 171, 4.5, -11.5)
+operation = 2
+size = Vector3(14, 10, 43.9659)
+
+[node name="clearing_a_low" type="CSGCylinder3D" parent="trees" unique_id=534435884]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 110.65685, 6, 39.34315)
 operation = 2
 radius = 13.0
 height = 7.0
 
-[node name="clearing_b_low" type="CSGCylinder3D" parent="trees" unique_id=731045282]
+[node name="clearing_b_low" type="CSGCylinder3D" parent="trees" unique_id=561717829]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50.65685, 6, 14.34315)
 operation = 2
 radius = 12.0
 height = 7.0
 
-[node name="clearing_c_low" type="CSGCylinder3D" parent="trees" unique_id=731045283]
+[node name="clearing_c_low" type="CSGCylinder3D" parent="trees" unique_id=837533626]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 155.65685, 6, -10.65685)
 operation = 2
 radius = 14.0
 height = 7.0
 
-[node name="clearing_d_low" type="CSGCylinder3D" parent="trees" unique_id=731045284]
+[node name="clearing_d_low" type="CSGCylinder3D" parent="trees" unique_id=745830382]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 100.65685, 6, -50.65685)
 operation = 2
 radius = 12.0
 height = 7.0
 
-[node name="clearing_boss_low" type="CSGCylinder3D" parent="trees" unique_id=731045285]
+[node name="clearing_boss_low" type="CSGCylinder3D" parent="trees" unique_id=564927189]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 37.65685, 6, -67.65685)
 operation = 2
 radius = 20.0
 height = 7.0
 
-[node name="path_entry_low" type="CSGBox3D" parent="trees" unique_id=731045286]
+[node name="path_entry_low" type="CSGBox3D" parent="trees" unique_id=840236593]
 transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 107.82843, 6, 68.67157)
 operation = 2
-size = Vector3(11.657, 7, 59)
+size = Vector3(19.65685, 7, 59)
 
-[node name="path_ab_1_low" type="CSGBox3D" parent="trees" unique_id=731045287]
+[node name="path_ab_1_low" type="CSGBox3D" parent="trees" unique_id=1098657286]
 transform = Transform3D(-0.3939, 0, -0.9191, 0, 1, 0, 0.9191, 0, -0.3939, 90.32843, 6, 34.67157)
 operation = 2
-size = Vector3(13.427, 7, 44.0789)
+size = Vector3(21.42745, 7, 44.0789)
 
-[node name="path_ab_2_low" type="CSGBox3D" parent="trees" unique_id=731045288]
+[node name="path_ab_2_low" type="CSGBox3D" parent="trees" unique_id=230540327]
 transform = Transform3D(-0.3714, 0, -0.9285, 0, 1, 0, 0.9285, 0, -0.3714, 60.32843, 6, 22.17157)
 operation = 2
-size = Vector3(13.353, 7, 32.9258)
+size = Vector3(21.35334, 7, 32.9258)
 
-[node name="path_ac_1_low" type="CSGBox3D" parent="trees" unique_id=731045289]
+[node name="path_ac_1_low" type="CSGBox3D" parent="trees" unique_id=123228633]
 transform = Transform3D(-0.7071, 0, 0.7071, 0, 1, 0, -0.7071, 0, -0.7071, 125.32843, 6, 24.67157)
 operation = 2
-size = Vector3(6, 7, 55.4975)
+size = Vector3(14, 7, 55.4975)
 
-[node name="path_ac_2_low" type="CSGBox3D" parent="trees" unique_id=731045290]
+[node name="path_ac_2_low" type="CSGBox3D" parent="trees" unique_id=2014418162]
 transform = Transform3D(-0.8321, 0, 0.5547, 0, 1, 0, -0.5547, 0, -0.8321, 147.82843, 6, -0.32843)
 operation = 2
-size = Vector3(7.569, 7, 24.0278)
+size = Vector3(15.56921, 7, 24.0278)
 
-[node name="path_cd_1_low" type="CSGBox3D" parent="trees" unique_id=731045291]
+[node name="path_cd_1_low" type="CSGBox3D" parent="trees" unique_id=1700291824]
 transform = Transform3D(-0.7071, 0, -0.7071, 0, 1, 0, 0.7071, 0, -0.7071, 137.82843, 6, -22.82843)
 operation = 2
-size = Vector3(14, 7, 48.4264)
+size = Vector3(21.99992, 7, 48.4264)
 
-[node name="path_cd_2_low" type="CSGBox3D" parent="trees" unique_id=731045292]
+[node name="path_cd_2_low" type="CSGBox3D" parent="trees" unique_id=859366336]
 transform = Transform3D(-0.3714, 0, -0.9285, 0, 1, 0, 0.9285, 0, -0.3714, 110.32843, 6, -42.82843)
 operation = 2
-size = Vector3(13.353, 7, 32.9258)
+size = Vector3(21.35334, 7, 32.9258)
 
-[node name="path_dboss_1_low" type="CSGBox3D" parent="trees" unique_id=731045293]
+[node name="path_dboss_1_low" type="CSGBox3D" parent="trees" unique_id=729866679]
 transform = Transform3D(-0.4961, 0, -0.8682, 0, 1, 0, 0.8682, 0, -0.4961, 81.76586, 6, -57.00706)
 operation = 2
-size = Vector3(13.718, 7, 43)
+size = Vector3(10.71765, 7, 43)
 
-[node name="path_dboss_2_low" type="CSGBox3D" parent="trees" unique_id=731045294]
-transform = Transform3D(-0.1961, 0, -0.9806, 0, 1, 0, 0.9806, 0, -0.1961, 49.595383, 6, -70.47502)
+[node name="path_dboss_2_low" type="CSGBox3D" parent="trees" unique_id=710889966]
+transform = Transform3D(-0.1961, 0, -0.9806, 0, 1, 0, 0.9806, 0, -0.1961, 49.59538, 6, -70.47502)
 operation = 2
-size = Vector3(12.656, 7, 30)
+size = Vector3(9.65642, 7, 30)
 
-[node name="side_b_low" type="CSGBox3D" parent="trees" unique_id=731045295]
+[node name="side_b_low" type="CSGBox3D" parent="trees" unique_id=1134220572]
 transform = Transform3D(0.3511, 0, -0.9363, 0, 1, 0, 0.9363, 0, 0.3511, 27.82843, 6, 24.67157)
 operation = 2
-size = Vector3(6.31, 7, 45.72)
+size = Vector3(17.3104, 7, 45.72)
 
-[node name="side_c_low" type="CSGBox3D" parent="trees" unique_id=731045296]
-transform = Transform3D(-0.6247, 0, 0.7809, 0, 1, 0, -0.7809, 0, -0.6247, 165.32843, 6, -17.82843)
+[node name="clearing_bears_low" type="CSGCylinder3D" parent="trees" unique_id=354170663]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -90.34315, 6, -25.65685)
 operation = 2
-size = Vector3(3.884, 7, 35.0156)
+radius = 50.0
+height = 7.0
+
+[node name="path_b_bears_low" type="CSGBox3D" parent="trees" unique_id=2079358099]
+transform = Transform3D(-0.35898, 0, -0.93335, 0, 1, 0, 0.93335, 0, -0.35898, -24.67157, 6, 19.67157)
+operation = 2
+size = Vector3(21.31052, 7, 69.64194)
+
+[node name="path_north_bears_low" type="CSGBox3D" parent="trees" unique_id=1193822988]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, -86.17157, 6, 60.17157)
+operation = 2
+size = Vector3(19.65685, 7, 70)
+
+[node name="path_c_east_low" type="CSGBox3D" parent="trees" unique_id=1676964103]
+transform = Transform3D(-0.29568, 0, 0.95529, 0, 1, 0, -0.95529, 0, -0.29568, 173.82843, 6, -14.32843)
+operation = 2
+size = Vector3(17.73132, 7, 43.9659)
+
+[node name="bears_island" type="CSGCylinder3D" parent="trees" unique_id=956914996]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -92, 4.5, -18)
+radius = 12.0
+height = 8.0
 
 [node name="bears" type="Node3D" parent="." unique_id=421139077]
+visible = false
 
 [node name="bear_1" type="CSGCylinder3D" parent="bears" unique_id=681440759]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 105, 0.6, 45)
@@ -214,3 +274,185 @@ height = 0.2
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 29, 0.6, -61)
 radius = 10.0
 height = 0.2
+
+[node name="state_common" type="Node3D" parent="." unique_id=1111381550]
+
+[node name="bear_home_1" type="CSGCylinder3D" parent="state_common" unique_id=470353764]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -63, 1.3, -20)
+radius = 1.5
+height = 1.6
+material = SubResource("mat_bear")
+
+[node name="bear_home_2" type="CSGCylinder3D" parent="state_common" unique_id=376075938]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -79.5, 1.3, 8.57884)
+radius = 1.5
+height = 1.6
+material = SubResource("mat_bear")
+
+[node name="bear_home_3" type="CSGCylinder3D" parent="state_common" unique_id=747983112]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -112.5, 1.3, 8.57884)
+radius = 1.5
+height = 1.6
+material = SubResource("mat_bear")
+
+[node name="bear_home_4" type="CSGCylinder3D" parent="state_common" unique_id=1510566884]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -129, 1.3, -20)
+radius = 1.5
+height = 1.6
+material = SubResource("mat_bear")
+
+[node name="bear_home_5" type="CSGCylinder3D" parent="state_common" unique_id=1526872913]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -112.5, 1.3, -48.57884)
+radius = 1.5
+height = 1.6
+material = SubResource("mat_bear")
+
+[node name="bear_home_6" type="CSGCylinder3D" parent="state_common" unique_id=1255589775]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -79.5, 1.3, -48.57884)
+radius = 1.5
+height = 1.6
+material = SubResource("mat_bear")
+
+[node name="state_normal" type="Node3D" parent="." unique_id=1358161868]
+
+[node name="wolf_pack_a" type="Node3D" parent="state_normal" unique_id=2016448804]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 105, 0, 45)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_normal/wolf_pack_a" unique_id=1263836852]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_normal/wolf_pack_a" unique_id=2056164256]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_3" type="CSGCylinder3D" parent="state_normal/wolf_pack_a" unique_id=389561434]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_b" type="Node3D" parent="state_normal" unique_id=1409204241]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 45, 0, 20)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_normal/wolf_pack_b" unique_id=605125153]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_normal/wolf_pack_b" unique_id=2063154966]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_3" type="CSGCylinder3D" parent="state_normal/wolf_pack_b" unique_id=1890881828]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_c" type="Node3D" parent="state_normal" unique_id=1298282767]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 150, 0, -5)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_normal/wolf_pack_c" unique_id=455183766]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_normal/wolf_pack_c" unique_id=1351580117]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_3" type="CSGCylinder3D" parent="state_normal/wolf_pack_c" unique_id=1433266307]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_d" type="Node3D" parent="state_normal" unique_id=1579535094]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 95, 0, -45)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_normal/wolf_pack_d" unique_id=1609633776]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_normal/wolf_pack_d" unique_id=1513168728]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_3" type="CSGCylinder3D" parent="state_normal/wolf_pack_d" unique_id=516606895]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_alpha_home" type="CSGCylinder3D" parent="state_normal" unique_id=1247707727]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 35, 1.25, -70)
+radius = 1.5
+height = 1.5
+material = SubResource("mat_wolf_alpha")
+
+[node name="wolf_alpha_guard_1" type="CSGCylinder3D" parent="state_normal" unique_id=308188589]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 32, 1, -70)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_alpha_guard_2" type="CSGCylinder3D" parent="state_normal" unique_id=370620840]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 38, 1, -70)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="state_event" type="Node3D" parent="." unique_id=251132179]
+visible = false
+
+[node name="mark_claw" type="CSGCylinder3D" parent="state_event" unique_id=1421095349]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 105, 0.65, 45)
+height = 0.3
+material = SubResource("mat_mark")
+
+[node name="mark_bones" type="CSGCylinder3D" parent="state_event" unique_id=265889523]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 150, 0.65, -5)
+height = 0.3
+material = SubResource("mat_mark")
+
+[node name="bear_cub" type="CSGCylinder3D" parent="state_event" unique_id=287881769]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 93.5, 0.9, -45)
+radius = 0.7
+height = 0.8
+material = SubResource("mat_bear_cub")
+
+[node name="bear_mother" type="CSGCylinder3D" parent="state_event" unique_id=354351665]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 96.5, 1.3, -45)
+radius = 1.5
+height = 1.6
+material = SubResource("mat_bear")
+
+[node name="bear_father" type="CSGCylinder3D" parent="state_event" unique_id=385192953]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 35, 1.5, -70)
+radius = 2.0
+material = SubResource("mat_bear_father")
+
+[node name="brush_block" type="CSGCylinder3D" parent="state_event" unique_id=1188687306]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 84.5816, 0.65, -50.9532)
+height = 0.3
+material = SubResource("mat_mark")
+
+[node name="dungeon_5" type="CSGBox3D" parent="." unique_id=492134675]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -94, 2.5, -34)
+size = Vector3(3, 4, 0.3)
+material = SubResource("mat_dungeon")

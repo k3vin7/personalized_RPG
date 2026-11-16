@@ -1,5 +1,9 @@
 [gd_scene format=3 uid="uid://vxlhqgpc068q"]
 
+[sub_resource type="StandardMaterial3D" id="mat_dungeon"]
+transparency = 1
+albedo_color = Color(0.6, 0.2, 0.9, 0.5)
+
 [node name="5to6" type="Node3D" unique_id=1841982765]
 
 [node name="field" type="CSGBox3D" parent="." unique_id=1375178674]
@@ -21,3 +25,8 @@ size = Vector3(4, 3, 6)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 2, -114.5)
 use_collision = true
 size = Vector3(4, 3, 3)
+
+[node name="dungeon_3" type="CSGBox3D" parent="." unique_id=1923188193]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, 2.5, -143)
+size = Vector3(3, 4, 0.3)
+material = SubResource("mat_dungeon")

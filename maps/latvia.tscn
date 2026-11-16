@@ -1,5 +1,26 @@
 [gd_scene format=3 uid="uid://cemwtjqhyac1d"]
 
+[sub_resource type="StandardMaterial3D" id="mat_cattle"]
+albedo_color = Color(1, 0.9, 0.2, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_bird"]
+albedo_color = Color(0.6, 0.3, 0.85, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_sheep"]
+albedo_color = Color(0.5, 0.8, 1, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_wolf"]
+albedo_color = Color(0.9, 0.15, 0.15, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_wolf_alpha"]
+albedo_color = Color(0.5, 0.05, 0.05, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_hunter"]
+
+[sub_resource type="StandardMaterial3D" id="mat_dungeon"]
+transparency = 1
+albedo_color = Color(0.6, 0.2, 0.9, 0.5)
+
 [node name="latvia" type="Node3D" unique_id=1278224839]
 
 [node name="latvia field" type="CSGBox3D" parent="." unique_id=787680239]
@@ -7,6 +28,7 @@ use_collision = true
 size = Vector3(330, 1, 170)
 
 [node name="wolf_packs" type="Node3D" parent="." unique_id=1493057216]
+visible = false
 
 [node name="pack_1" type="CSGCylinder3D" parent="wolf_packs" unique_id=318840572]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 124.7, 0.6, 43.7)
@@ -54,6 +76,7 @@ radius = 14.0
 height = 0.2
 
 [node name="rocks" type="Node3D" parent="." unique_id=836402957]
+visible = false
 
 [node name="rock_1" type="CSGBox3D" parent="rocks" unique_id=1920456738]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 100, 1.7, 38)
@@ -122,6 +145,7 @@ size = Vector3(3, 2.5, 3.6)
 
 [node name="bandit_camp" type="Node3D" parent="." unique_id=694173820]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -100, 0, 60)
+visible = false
 
 [node name="camp_area" type="CSGCylinder3D" parent="bandit_camp" unique_id=1850392647]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
@@ -147,3 +171,648 @@ size = Vector3(3, 2, 3)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
 radius = 0.6
 height = 0.4
+
+[node name="ranch_trees" type="Node3D" parent="." unique_id=477401965]
+
+[node name="forest_west" type="CSGPolygon3D" parent="ranch_trees" unique_id=728789940]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.5, 0)
+use_collision = true
+polygon = PackedVector2Array(-88.4, 69, -87.6, 73.1, -85.4, 74.6, -67.9, 76.5, -42.5, 82.1, -35.8, 85.1, -28.7, 85.1, -26.8, 87.7, -17.1, 91, 3.4, 114.1, 20.6, 145, 78.4, 144.6, 79.5, 143.2, 91.8, 145.8, 93.7, 144.3, 98.9, 144.6, 138.1, 88.8, 172.8, 88.8, 177.6, 86.2, 177.6, 73.9, 174.7, 71.3, 134, 80.2, 119.4, 79.5, 101.9, 72.4, 71.3, 51.9, 57.1, 47.4, 40.3, 45.2, 27.6, 46.3, 10.1, 51.5, -4.8, 61.6, -13.8, 65.3, -29.8, 66.1, -48.1, 63.8, -69.4, 63.8, -85.4, 66.1)
+depth = 6.0
+
+[node name="forest_east" type="CSGPolygon3D" parent="ranch_trees" unique_id=956112136]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.5, 0)
+use_collision = true
+polygon = PackedVector2Array(-83.5, -85.1, -79.8, -80.7, -60, -80.7, -51.8, -78.1, -13.4, -52, 8.2, -42.7, 12, -17, 16.1, -10.3, 22.4, -9.2, 26.9, -14.8, 23.5, -37.1, 24.7, -38.6, 47.4, -39, 60.9, -43.1, 77.3, -51.3, 89.2, -59.8, 100.8, -72.1, 105.3, -85.9, 104.5, -88.9, -82.8, -88.9)
+depth = 6.0
+
+[node name="gate_e" type="CSGBox3D" parent="ranch_trees/forest_east" unique_id=485309315]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 105, -85, -3)
+operation = 2
+size = Vector3(14, 30, 10)
+
+[node name="gate_w" type="CSGBox3D" parent="ranch_trees/forest_east" unique_id=780778825]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -89, -85, -3)
+operation = 2
+size = Vector3(14, 30, 10)
+
+[node name="forest_ne" type="CSGPolygon3D" parent="ranch_trees" unique_id=2012609350]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.5, 0)
+use_collision = true
+polygon = PackedVector2Array(-164.1, -85.9, -165.3, -82.9, -162.6, -66.9, -161.9, -34.5, -158.5, -31.1, -149.6, -32.3, -143.6, -30.8, -130.9, -20.7, -125.3, -18.9, -114.1, -19.6, -108.2, -23.3, -102.6, -33, -102.9, -41.6, -107.8, -51.6, -119, -62.8, -121.2, -73.6, -117.5, -78.8, -98.1, -79.2, -95.5, -81.8, -94.7, -88.9, -102.6, -88.9, -103.7, -87.4, -161.2, -87.4)
+depth = 6.0
+
+[node name="gate_w" type="CSGBox3D" parent="ranch_trees/forest_ne" unique_id=1749399477]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -89, -85, -3)
+operation = 2
+size = Vector3(14, 30, 10)
+
+[node name="forest_se" type="CSGPolygon3D" parent="ranch_trees" unique_id=2071840310]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.5, 0)
+use_collision = true
+polygon = PackedVector2Array(113.8, -88.5, 113.5, -82.2, 115.3, -79.9, 127.3, -78.8, 137, -71.4, 141.8, -57.6, 146.3, -34.1, 155.6, -17, 166.1, -7.3, 174.3, -4.3, 177.6, -9.5, 177.3, -88.9)
+depth = 6.0
+
+[node name="forest_nw" type="CSGPolygon3D" parent="ranch_trees" unique_id=1872658320]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.5, 0)
+use_collision = true
+polygon = PackedVector2Array(-163, 31.4, -166, 61.6, -163, 73.1, -155.6, 74.6, -99.2, 73.1, -97.7, 68.7, -99.2, 63.8, -107.4, 53.8, -123.8, 41.5, -144.4, 32.9, -157.8, 29.6)
+depth = 6.0
+
+[node name="clump_big" type="CSGPolygon3D" parent="ranch_trees" unique_id=492211542]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.5, 0)
+use_collision = true
+polygon = PackedVector2Array(-34.3, 4.2, -33.5, 8, -30.6, 10.9, -17.9, 18, -16.4, 21.7, -17.9, 31.4, -11.9, 37.4, -6.3, 37.4, 0, 33.3, 12, 29.6, 26.2, 11.7, 24.7, 2.7, 19.4, -1.7, 12.4, -0.2, 5.6, 5, -2.9, 5.4, -18.2, -1.7, -26.1, -2.8, -31.3, -1)
+depth = 6.0
+
+[node name="forest_south" type="CSGPolygon3D" parent="ranch_trees" unique_id=1335962226]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.5, 0)
+use_collision = true
+polygon = PackedVector2Array(172.4, 68.3, 177.6, 66.4, 177.6, 16.2, 175, 13.9, 171.3, 13.9, 165.3, 18.4, 159, 28.1, 156.8, 37.8, 157.1, 45.6, 165.7, 63.1)
+depth = 6.0
+
+[node name="clump_sw" type="CSGPolygon3D" parent="ranch_trees" unique_id=1475958558]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.5, 0)
+use_collision = true
+polygon = PackedVector2Array(85.1, 9.1, 86.6, 18.8, 93.3, 27, 103.8, 32.5, 109, 31.4, 109.7, 21.7, 116.1, 15.8, 114.2, 9.5, 108.6, 8.7, 100, 12.8, 93.7, 6.1, 90, 5.7)
+depth = 6.0
+
+[node name="clump_n" type="CSGPolygon3D" parent="ranch_trees" unique_id=513638917]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.5, 0)
+use_collision = true
+polygon = PackedVector2Array(-96.6, 11.3, -95.1, 16.2, -80.6, 25.1, -75, 25.8, -66.8, 29.9, -63.4, 28.8, -61.5, 25.8, -63, 19.9, -76.8, 12.8, -83.5, 12.1, -90.3, 8, -94, 8.3)
+depth = 6.0
+
+[node name="clump_se" type="CSGPolygon3D" parent="ranch_trees" unique_id=726588081]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.5, 0)
+use_collision = true
+polygon = PackedVector2Array(100.8, -43.8, 99.7, -39.3, 103, -28.9, 112.4, -24.1, 117.2, -25.2, 117.9, -30.4, 113.5, -34.5, 111.6, -39.3, 106.8, -44.2)
+depth = 6.0
+
+[node name="clump_mid" type="CSGPolygon3D" parent="ranch_trees" unique_id=540136394]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.5, 0)
+use_collision = true
+polygon = PackedVector2Array(52.3, -14.8, 56, -10.3, 62, -10.3, 65.3, -15.1, 65.3, -19.6, 62.4, -22.6, 57.1, -21.8, 53.8, -20)
+depth = 6.0
+
+[node name="clump_dot_n" type="CSGPolygon3D" parent="ranch_trees" unique_id=138864533]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.5, 0)
+use_collision = true
+polygon = PackedVector2Array(-78.7, -19.2, -75, -15.5, -70.5, -15.5, -67.5, -18.9, -67.5, -21.8, -72, -25.9, -75, -25.9, -77.9, -23.7)
+depth = 6.0
+
+[node name="clump_dot_mid" type="CSGPolygon3D" parent="ranch_trees" unique_id=1868224196]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0.5, 0)
+use_collision = true
+polygon = PackedVector2Array(34.4, 24, 37, 26.6, 40, 26.6, 42.2, 24.7, 42.6, 21.4, 40.3, 18.8, 36.2, 18.8)
+depth = 6.0
+
+[node name="state_common" type="Node3D" parent="." unique_id=1858946161]
+
+[node name="cattle_1" type="CSGCylinder3D" parent="state_common" unique_id=1934128094]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -137, 2, -2)
+radius = 3.0
+height = 3.0
+material = SubResource("mat_cattle")
+
+[node name="cattle_2" type="CSGCylinder3D" parent="state_common" unique_id=456804213]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -111, 2, 29)
+radius = 3.0
+height = 3.0
+material = SubResource("mat_cattle")
+
+[node name="cattle_3" type="CSGCylinder3D" parent="state_common" unique_id=851699572]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -94, 2, -12)
+radius = 3.0
+height = 3.0
+material = SubResource("mat_cattle")
+
+[node name="cattle_4" type="CSGCylinder3D" parent="state_common" unique_id=1461243213]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -94, 2, -59)
+radius = 3.0
+height = 3.0
+material = SubResource("mat_cattle")
+
+[node name="cattle_5" type="CSGCylinder3D" parent="state_common" unique_id=843405621]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -74, 2, 49)
+radius = 3.0
+height = 3.0
+material = SubResource("mat_cattle")
+
+[node name="cattle_6" type="CSGCylinder3D" parent="state_common" unique_id=404365737]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -62, 2, -41)
+radius = 3.0
+height = 3.0
+material = SubResource("mat_cattle")
+
+[node name="cattle_7" type="CSGCylinder3D" parent="state_common" unique_id=642044476]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -46, 2, 32)
+radius = 3.0
+height = 3.0
+material = SubResource("mat_cattle")
+
+[node name="cattle_8" type="CSGCylinder3D" parent="state_common" unique_id=1145109376]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -48, 2, -4)
+radius = 3.0
+height = 3.0
+material = SubResource("mat_cattle")
+
+[node name="cattle_9" type="CSGCylinder3D" parent="state_common" unique_id=922091479]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -32, 2, 57)
+radius = 3.0
+height = 3.0
+material = SubResource("mat_cattle")
+
+[node name="cattle_10" type="CSGCylinder3D" parent="state_common" unique_id=344055515]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -31, 2, -47)
+radius = 3.0
+height = 3.0
+material = SubResource("mat_cattle")
+
+[node name="cattle_11" type="CSGCylinder3D" parent="state_common" unique_id=1664987368]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 2, -17)
+radius = 3.0
+height = 3.0
+material = SubResource("mat_cattle")
+
+[node name="bird_1" type="CSGCylinder3D" parent="state_common" unique_id=458225407]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -143.7, 0.9, 20)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_2" type="CSGCylinder3D" parent="state_common" unique_id=945253349]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -120, 0.9, -10)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_3" type="CSGCylinder3D" parent="state_common" unique_id=1389969850]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -95, 0.9, -41)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_4" type="CSGCylinder3D" parent="state_common" unique_id=1200284930]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -71, 0.9, 34)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_5" type="CSGCylinder3D" parent="state_common" unique_id=1580010844]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -74, 0.9, -1)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_6" type="CSGCylinder3D" parent="state_common" unique_id=757979672]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -69, 0.9, -9)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_7" type="CSGCylinder3D" parent="state_common" unique_id=1147946370]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -63, 0.9, -56)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_8" type="CSGCylinder3D" parent="state_common" unique_id=540045478]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -72, 0.9, -73)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_9" type="CSGCylinder3D" parent="state_common" unique_id=835058097]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -42, 0.9, 54)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_10" type="CSGCylinder3D" parent="state_common" unique_id=2044393721]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -18, 0.9, -27)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_11" type="CSGCylinder3D" parent="state_common" unique_id=1284038098]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 55, 0.9, 42)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_12" type="CSGCylinder3D" parent="state_common" unique_id=1317003030]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 60, 0.9, 9)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_14" type="CSGCylinder3D" parent="state_common" unique_id=131196607]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 91, 0.9, 32)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_15" type="CSGCylinder3D" parent="state_common" unique_id=1872628010]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 107.7, 0.9, 63)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_16" type="CSGCylinder3D" parent="state_common" unique_id=924588826]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 127, 0.9, -21)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="bird_17" type="CSGCylinder3D" parent="state_common" unique_id=894720405]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 144, 0.9, 30)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="state_normal" type="Node3D" parent="." unique_id=503731985]
+
+[node name="sheep_1" type="CSGCylinder3D" parent="state_normal" unique_id=1725702880]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 39, 1.1, -2)
+radius = 3.0
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_2" type="CSGCylinder3D" parent="state_normal" unique_id=1035745865]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 44, 1.1, -26)
+radius = 3.0
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_3" type="CSGCylinder3D" parent="state_normal" unique_id=862330627]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 65, 1.1, 38)
+radius = 3.0
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_4" type="CSGCylinder3D" parent="state_normal" unique_id=1531622191]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 70, 1.1, 6)
+radius = 3.0
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_5" type="CSGCylinder3D" parent="state_normal" unique_id=1530682619]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 86, 1.1, -41)
+radius = 3.0
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_6" type="CSGCylinder3D" parent="state_normal" unique_id=1009877015]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 95, 1.1, 44)
+radius = 3.0
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_7" type="CSGCylinder3D" parent="state_normal" unique_id=1065371277]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 100, 1.1, -9)
+radius = 3.0
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_8" type="CSGCylinder3D" parent="state_normal" unique_id=1691463004]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 121, 1.1, 61)
+radius = 3.0
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_9" type="CSGCylinder3D" parent="state_normal" unique_id=106417374]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 134, 1.1, 35)
+radius = 3.0
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_10" type="CSGCylinder3D" parent="state_normal" unique_id=602962031]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 132, 1.1, 0)
+radius = 3.0
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_11" type="CSGCylinder3D" parent="state_normal" unique_id=1881639520]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 134, 1.1, -29)
+radius = 3.0
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_12" type="CSGCylinder3D" parent="state_normal" unique_id=705028267]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 123.5, 1.1, -52.5)
+radius = 3.0
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="bird_13" type="CSGCylinder3D" parent="state_normal" unique_id=655579692]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 76, 0.9, -40)
+height = 0.8
+material = SubResource("mat_bird")
+
+[node name="state_event" type="Node3D" parent="." unique_id=1608730153]
+visible = false
+
+[node name="sheep_3" type="CSGCylinder3D" parent="state_event" unique_id=1836676466]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 65, 1.1, 38)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_4" type="CSGCylinder3D" parent="state_event" unique_id=484423430]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 70, 1.1, 6)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_6" type="CSGCylinder3D" parent="state_event" unique_id=1308798759]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 95, 1.1, 44)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_7" type="CSGCylinder3D" parent="state_event" unique_id=1941744854]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 100, 1.1, -9)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_8" type="CSGCylinder3D" parent="state_event" unique_id=1916946517]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 121, 1.1, 61)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_9" type="CSGCylinder3D" parent="state_event" unique_id=1584005889]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 134, 1.1, 35)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_10" type="CSGCylinder3D" parent="state_event" unique_id=1190476157]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 132, 1.1, 0)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_11" type="CSGCylinder3D" parent="state_event" unique_id=469111403]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 134, 1.1, -29)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_12" type="CSGCylinder3D" parent="state_event" unique_id=1855005672]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 123.5, 1.1, -52.5)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="wolf_pack_1" type="Node3D" parent="state_event" unique_id=1355521937]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -39.4, 0, 29.5)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_event/wolf_pack_1" unique_id=360356913]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_event/wolf_pack_1" unique_id=1190791985]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_3" type="CSGCylinder3D" parent="state_event/wolf_pack_1" unique_id=654141653]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_2" type="Node3D" parent="state_event" unique_id=1793484182]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -25.2, 0, 55.5)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_event/wolf_pack_2" unique_id=2011815373]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_event/wolf_pack_2" unique_id=485244761]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_3" type="Node3D" parent="state_event" unique_id=723070540]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.5, 0, -12.6)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_event/wolf_pack_3" unique_id=297849146]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_event/wolf_pack_3" unique_id=812145544]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_3" type="CSGCylinder3D" parent="state_event/wolf_pack_3" unique_id=1767898481]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_4" type="Node3D" parent="state_event" unique_id=1705248304]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 39, 0, -2)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_event/wolf_pack_4" unique_id=1646927290]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_event/wolf_pack_4" unique_id=212225922]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_5" type="Node3D" parent="state_event" unique_id=506458747]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 37, 0, -28)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_event/wolf_pack_5" unique_id=780918472]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_event/wolf_pack_5" unique_id=1149971789]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_3" type="CSGCylinder3D" parent="state_event/wolf_pack_5" unique_id=862765878]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_6" type="Node3D" parent="state_event" unique_id=710825685]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 53, 0, 20)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_event/wolf_pack_6" unique_id=1202765366]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_event/wolf_pack_6" unique_id=204069254]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_7" type="Node3D" parent="state_event" unique_id=1953845060]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 63, 0, 38)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_event/wolf_pack_7" unique_id=1001383995]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_event/wolf_pack_7" unique_id=904377039]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_3" type="CSGCylinder3D" parent="state_event/wolf_pack_7" unique_id=2020280961]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_8" type="Node3D" parent="state_event" unique_id=447038665]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 68, 0, 6)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_event/wolf_pack_8" unique_id=2061455864]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_event/wolf_pack_8" unique_id=1589275660]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_9" type="Node3D" parent="state_event" unique_id=1424046168]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 93, 0, 44)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_event/wolf_pack_9" unique_id=563380177]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_event/wolf_pack_9" unique_id=1163041109]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_3" type="CSGCylinder3D" parent="state_event/wolf_pack_9" unique_id=1928672199]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_10" type="Node3D" parent="state_event" unique_id=1813930516]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 98, 0, -9)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_event/wolf_pack_10" unique_id=1969764773]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_event/wolf_pack_10" unique_id=1392030861]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_11" type="Node3D" parent="state_event" unique_id=1156115340]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 105, 0, -54)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_event/wolf_pack_11" unique_id=286250609]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_event/wolf_pack_11" unique_id=1109437678]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_3" type="CSGCylinder3D" parent="state_event/wolf_pack_11" unique_id=1306694650]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_12" type="Node3D" parent="state_event" unique_id=507518216]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 132, 0, -29)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_event/wolf_pack_12" unique_id=408622635]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.5, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_event/wolf_pack_12" unique_id=1818862859]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_pack_13" type="Node3D" parent="state_event" unique_id=599741775]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 120.8, 0, -51.8)
+
+[node name="wolf_1" type="CSGCylinder3D" parent="state_event/wolf_pack_13" unique_id=1915761992]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_2" type="CSGCylinder3D" parent="state_event/wolf_pack_13" unique_id=262282797]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_3" type="CSGCylinder3D" parent="state_event/wolf_pack_13" unique_id=1460894661]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1, 0)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_alpha" type="CSGCylinder3D" parent="state_event" unique_id=1118539529]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 78, 1.25, -35)
+radius = 1.5
+height = 1.5
+material = SubResource("mat_wolf_alpha")
+
+[node name="wolf_alpha_guard_1" type="CSGCylinder3D" parent="state_event" unique_id=795212691]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 75, 1, -35)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="wolf_alpha_guard_2" type="CSGCylinder3D" parent="state_event" unique_id=1926028319]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 81, 1, -35)
+radius = 0.8
+height = 1.0
+material = SubResource("mat_wolf")
+
+[node name="hunter" type="CSGCylinder3D" parent="state_event" unique_id=1043116395]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 158, 1.4, 5)
+radius = 0.4
+height = 1.8
+material = SubResource("mat_hunter")
+
+[node name="dungeon_4" type="CSGBox3D" parent="." unique_id=669886483]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24, 2.5, 22)
+size = Vector3(3, 4, 0.3)
+material = SubResource("mat_dungeon")
