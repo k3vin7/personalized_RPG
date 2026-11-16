@@ -41,6 +41,15 @@ var auto_smoke := false
 # minutes long, which is too slow to iterate one stage against.
 var auto_only := ""
 var _spawn_index := 0
+# The client's "my world is in" has to wait for the connection: see
+# register_playground().
+var _ready_pending := false
+# --auto-log-sends: for a second after a peer connects, the host prints every
+# broadcast it makes (note_send), and both ends print when the connection
+# completed, on the wall clock. Finds what was sent into the gap between the
+# host's side of the connection completing and the client's.
+var log_sends := false
+var _peer_connected_at := -1.0
 var leave_message := ""
 var _leaving := false
 var _physics_requests: Array[Callable] = []
@@ -101,6 +110,8 @@ func _parse_cmdline() -> void:
 			mode = "join"
 		elif argument == "--auto-smoke":
 			auto_smoke = true
+		elif argument == "--auto-log-sends":
+			log_sends = true
 		elif argument.begins_with("--auto-only="):
 			auto_only = argument.trim_prefix("--auto-only=")
 		elif argument.begins_with("--auto-world="):
@@ -186,8 +197,17 @@ func register_playground(root: Node3D, points: Array[Vector3], player_spawner: M
 		_spawn_player(1)
 		for peer_id in multiplayer.get_peers():
 			_spawn_player(peer_id)
-	else:
+	elif multiplayer.get_peers().has(1):
 		peer_ready.rpc_id(1)
+	else:
+		# The world comes up during authentication (see above), and with any
+		# latency its navigation bake finishes before the host's half of the
+		# connection has arrived: the host is not a peer yet, and an RPC to a
+		# peer the engine does not know is dropped with an error. The host
+		# then never spawned this body (2026-11-16, every run through the
+		# delay proxy). Sent from _on_connected() instead.
+		_ready_pending = true
+		print("PLAYGROUND_READY_DEFERRED peer=%d" % multiplayer.get_unique_id())
 
 
 # A client tells the host it has the playground loaded. Spawning before that
@@ -216,6 +236,20 @@ func _spawn_player(peer_id: int) -> void:
 
 func _on_peer_connected(peer_id: int) -> void:
 	print("PLAYGROUND_PEER_CONNECTED peer=%d" % peer_id)
+	if log_sends:
+		_peer_connected_at = Time.get_unix_time_from_system()
+		print("PLAYGROUND_SEND_MARK on=%d peer_connected=%d at=%.3f" % [
+			multiplayer.get_unique_id(), peer_id, _peer_connected_at])
+
+
+# Called at every broadcast site on the host. Prints only under
+# --auto-log-sends and only in the second after a peer connected.
+func note_send(what: String) -> void:
+	if not log_sends or _peer_connected_at < 0.0:
+		return
+	var now := Time.get_unix_time_from_system()
+	if now - _peer_connected_at <= 1.0:
+		print("PLAYGROUND_SEND what=%s at=%.3f since_connect=%.3f" % [what, now, now - _peer_connected_at])
 
 
 # Host side: a peer has begun authenticating -- tell it the world.
@@ -284,6 +318,10 @@ func _on_peer_disconnected(peer_id: int) -> void:
 func _on_connected() -> void:
 	# The world scene is already in: it was loaded during authentication.
 	print("PLAYGROUND_CONNECTED peer=%d world=%s" % [multiplayer.get_unique_id(), world])
+	if _ready_pending and spawn_root != null:
+		_ready_pending = false
+		peer_ready.rpc_id(1)
+		print("PLAYGROUND_READY_SENT peer=%d after=connected" % multiplayer.get_unique_id())
 
 
 func _on_connection_failed() -> void:
@@ -296,6 +334,7 @@ func _on_server_disconnected() -> void:
 
 func _reset_peer() -> void:
 	is_hosting = false
+	_ready_pending = false
 	spawn_root = null
 	spawner = null
 	spawn_points.clear()

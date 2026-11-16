@@ -274,6 +274,7 @@ func _physics_process(delta: float) -> void:
 			_state_left -= delta
 			if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 				_state_left = SyncRules.STATE_INTERVAL
+				Net.note_send("dummy.push_state %s" % name)
 				push_state.rpc(global_position, hp, "", hit_ids, hit_damages)
 			return
 	if not is_multiplayer_authority():
@@ -303,6 +304,7 @@ func _physics_process(delta: float) -> void:
 		_state_left -= delta
 		if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 			_state_left = SyncRules.STATE_INTERVAL
+			Net.note_send("dummy.push_state %s" % name)
 			push_state.rpc(global_position, hp, attack_phase, hit_ids, hit_damages)
 		return
 
@@ -351,6 +353,7 @@ func _physics_process(delta: float) -> void:
 	_state_left -= delta
 	if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 		_state_left = SyncRules.STATE_INTERVAL
+		Net.note_send("dummy.push_state %s" % name)
 		push_state.rpc(global_position, hp, attack_phase, hit_ids, hit_damages)
 
 

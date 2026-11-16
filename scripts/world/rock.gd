@@ -211,6 +211,7 @@ func _physics_process(delta: float) -> void:
 		_state_left = SyncRules.STATE_INTERVAL
 		# Position only. The holder used to ride along here as well, which meant
 		# two sources for one fact; it now comes from the hold table alone.
+		Net.note_send("rock.push_state %s" % name)
 		push_state.rpc(global_position, rotation)
 
 

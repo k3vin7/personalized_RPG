@@ -468,6 +468,7 @@ func _push_view() -> void:
 			"holder": int(entry.get("holder", 0)),
 			"presses": int(entry.get("presses", 0)),
 		})
+	Net.note_send("push_holds+race_mults+server_tuning(reliable)")
 	push_holds.rpc(entries)
 	# The race table rides the same heartbeat: it changes rarely, a late joiner
 	# gets it within one beat, and a dropped change is repaired by the next.
