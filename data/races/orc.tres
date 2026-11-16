@@ -13,3 +13,4 @@ vitality = 80.0
 intellect = 10.0
 height_cm = 220.0
 body_weight = 140.0
+large_mount = true

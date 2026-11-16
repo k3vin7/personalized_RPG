@@ -27,3 +27,6 @@ extends Resource
 @export var height_cm: float = 180.0
 # Bare: gear and whatever is being carried are added on top, by CharacterStats.
 @export var body_weight: float = 80.0
+# Riding: this race sits a bigger horse (the same model scaled by the
+# server's mount_large_scale). The speed is the same for every race.
+@export var large_mount: bool = false

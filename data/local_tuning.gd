@@ -37,6 +37,10 @@ extends Resource
 # any key from the debug panel, the way the slot keys are. Written into the
 # InputMap's "dash" action by PlayerMovement.apply_dash_binding().
 @export var dash_key: int = KEY_SHIFT
+# The horse: one key summons and mounts, the same key gets off. Default Z;
+# any key from the debug panel. Written into the InputMap's "mount" action
+# by PlayerMovement.apply_mount_binding().
+@export var mount_key: int = KEY_Z
 
 @export_group("Slots")
 # M-1: the eight slot keys, as physical keycodes, in slot order. Defaults

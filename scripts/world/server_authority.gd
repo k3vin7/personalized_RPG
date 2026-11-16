@@ -60,6 +60,9 @@ enum Intent {
 	# C-1c: the shield raised (on) or lowered (off). A request: the server
 	# keeps the block and rules every blow on the body against it.
 	BLOCK,
+	# Riding: the horse asked for (on) or left (off). A request: the server
+	# runs the summon clock and writes the stage (Player.sync_mount).
+	MOUNT,
 }
 
 # Anything that can be picked up joins this group and offers
@@ -624,6 +627,8 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 			result = _rule_charge(actor, bool(payload.get("on", false)))
 		Intent.BLOCK:
 			result = _rule_block(actor, bool(payload.get("on", false)))
+		Intent.MOUNT:
+			result = _rule_mount(actor, bool(payload.get("on", false)))
 	if result == null:
 		return _refuse(sender, kind, "refused")
 	granted_intents += 1
@@ -672,7 +677,7 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 			return _target_for(payload) != null
 		Intent.DROP, Intent.ESCAPE, Intent.RESPAWN, Intent.DASH:
 			return true
-		Intent.CHARGE, Intent.BLOCK:
+		Intent.CHARGE, Intent.BLOCK, Intent.MOUNT:
 			return payload.get("on") is bool
 		Intent.SKILL:
 			if payload.has("dash_gap"):
@@ -1590,6 +1595,10 @@ func server_damage(player: Player, amount: float, cause: String, hit_id := 0) ->
 		return
 	server_set_hp(player, player.hp - amount)
 	player.note_hit(hit_id if hit_id > 0 else ForceSystem.next_id(), amount)
+	# Riding: a body that is hurt while it is calling its horse does not get it.
+	if player.sync_mount == PlayerMount.Stage.SUMMONING:
+		mounts_cancelled += 1
+		_set_mount(player, PlayerMount.Stage.NONE, "hurt")
 	if player.hp <= 0.0:
 		server_kill(player, cause)
 
@@ -1999,6 +2008,12 @@ func move_allowance(player: Player) -> Vector2:
 	# dash's speed is allowed around that notice and nowhere else.
 	var horizontal := maxf(player.get_move_speed(), player.leap_speed_cap())
 	var now := float(Time.get_ticks_msec()) / 1000.0
+	# Riding: the horse's speed, while the body is on it and for a grace after
+	# it got off -- the stage is the server's and changes here at once, while
+	# the positions that show the body slowing arrive a round trip later.
+	if player.sync_mount == PlayerMount.Stage.MOUNTED \
+			or now - float(_mount_ended.get(peer, -100.0)) <= MOUNT_SPEED_GRACE:
+		horizontal = maxf(horizontal, player.get_mount_speed())
 	if now - float(_dash_seen.get(peer, -100.0)) <= _dash_window(player):
 		horizontal = maxf(horizontal, player.dash_speed())
 	# Vertical has two honest sources: our own jump, and gravity acting over
@@ -2173,6 +2188,128 @@ func _rule_weapon(actor: Player, kind: int) -> Variant:
 	print("PLAYGROUND_WEAPON peer=%s kind=%s main=%s off=%s" % [actor.name, WeaponKinds.LABELS.get(kind, "?"),
 		WeaponKinds.LABELS.get(actor.sync_weapon, "?"), WeaponKinds.LABELS.get(actor.sync_offhand, "?")])
 	return true
+
+
+# ------------------------------------------------------------------ riding
+# The horse is a stage on the body (Player.sync_mount), written here and
+# nowhere else and carried by the Vitals synchronizer. The key is a request:
+# on starts the summon clock (mount_summon_time, the server's), and the body
+# is on the horse when it runs out; off gets down at once.
+var _mount_summons := {}
+# When each peer last got off, for the move check's grace.
+var _mount_ended := {}
+const MOUNT_SPEED_GRACE := 0.6
+var mounts_granted := 0
+var mounts_cancelled := 0
+var last_mount := {}
+
+
+func _rule_mount(actor: Player, on: bool) -> Variant:
+	var peer := actor.get_multiplayer_authority()
+	if not on:
+		if actor.sync_mount == PlayerMount.Stage.NONE:
+			return null
+		_set_mount(actor, PlayerMount.Stage.NONE, "asked")
+		return true
+	if actor.sync_dead or actor.sync_mount != PlayerMount.Stage.NONE:
+		return null
+	# Only what cannot change in a round trip is asked at the press. Whether
+	# the body is standing is asked when the clock runs out: a state arrives a
+	# round trip late, and the summon time is the grace that covers it.
+	var why := _mount_refusal(actor, false)
+	if why != "":
+		last_refusal = why
+		print("PLAYGROUND_MOUNT_REFUSED peer=%s why=%s" % [actor.name, why])
+		return null
+	_mount_summons[peer] = float(Tuning.server.mount_summon_time)
+	_set_mount(actor, PlayerMount.Stage.SUMMONING, "asked")
+	return true
+
+
+# Why this body may not be on a horse, or "" when it may. `standing` adds the
+# question of what the body is doing right now.
+func _mount_refusal(actor: Player, standing: bool) -> String:
+	var peer := actor.get_multiplayer_authority()
+	if actor.sync_dead:
+		return "dead"
+	if _holds.has(peer):
+		return "holding"
+	if holder_of(actor) != 0:
+		return "held"
+	if standing and actor.state != Player.State.IDLE and actor.state != Player.State.MOVE:
+		return "not_standing"
+	return ""
+
+
+func _set_mount(actor: Player, stage: int, why: String) -> void:
+	var peer := actor.get_multiplayer_authority()
+	if stage != PlayerMount.Stage.SUMMONING:
+		_mount_summons.erase(peer)
+	if stage == PlayerMount.Stage.MOUNTED:
+		mounts_granted += 1
+	elif actor.sync_mount == PlayerMount.Stage.MOUNTED:
+		_mount_ended[peer] = float(Time.get_ticks_msec()) / 1000.0
+	actor.sync_mount = stage
+	last_mount = {"peer": peer, "stage": stage, "why": why,
+		"at": float(Time.get_ticks_msec()) / 1000.0}
+	print("PLAYGROUND_MOUNT peer=%s stage=%s why=%s" % [
+		actor.name, PlayerMount.Stage.keys()[stage], why])
+
+
+var last_mount_blocker := ""
+
+
+# Another character or a thing standing where the mounted body would be: the
+# mounted capsule, asked of the server's own world at the body's place.
+# Terrain is not asked about -- a wall beside the body is something the
+# bigger capsule slides off, not something in its seat.
+func mount_blocker(actor: Player) -> Node:
+	var dims := actor.mount.capsule_dims()
+	var shape := CapsuleShape3D.new()
+	shape.radius = dims.x
+	shape.height = dims.y
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = shape
+	query.transform = Transform3D(Basis.IDENTITY, actor.global_position + actor.mount.capsule_offset())
+	query.collision_mask = Layers.PLAYER | Layers.THROWABLE | Layers.DUMMY
+	query.collide_with_areas = false
+	query.exclude = [actor.get_rid()]
+	for hit: Dictionary in actor.get_world_3d().direct_space_state.intersect_shape(query, 8):
+		var body := hit.get("collider") as Node
+		if body != null and body != actor:
+			return body
+	return null
+
+
+# The summon clocks, and the one thing that ends a ride with nobody asking
+# in this stage: a death.
+func _tick_mounts(delta: float) -> void:
+	for peer: int in _mount_summons.keys():
+		var actor := actor_for(peer)
+		if actor == null or actor.sync_mount != PlayerMount.Stage.SUMMONING:
+			_mount_summons.erase(peer)
+			continue
+		_mount_summons[peer] = float(_mount_summons[peer]) - delta
+		if float(_mount_summons[peer]) > 0.0:
+			continue
+		var why := _mount_refusal(actor, true)
+		if why == "":
+			var in_the_way := mount_blocker(actor)
+			if in_the_way != null:
+				why = "blocked"
+				last_mount_blocker = String(in_the_way.name)
+		if why == "":
+			_set_mount(actor, PlayerMount.Stage.MOUNTED, "summoned")
+		else:
+			mounts_cancelled += 1
+			last_refusal = why
+			_set_mount(actor, PlayerMount.Stage.NONE, why)
+	if not is_instance_valid(Net.spawn_root):
+		return
+	for node in Net.spawn_root.get_children():
+		var player := node as Player
+		if player != null and player.sync_dead and player.sync_mount != PlayerMount.Stage.NONE:
+			_set_mount(player, PlayerMount.Stage.NONE, "dead")
 
 
 # What the server holds this peer to be carrying: its own copy's sync_weapon,
@@ -3147,6 +3284,7 @@ func _physics_process(delta: float) -> void:
 	_run_sweeps()
 	_expire_parries()
 	_tick_blocks()
+	_tick_mounts(delta)
 	_watch_vitals(delta)
 	# N-1: any write to the server's table reaches the replicas within a step,
 	# whoever made it. The heartbeat below repairs a dropped push.

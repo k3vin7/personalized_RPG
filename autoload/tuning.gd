@@ -110,6 +110,10 @@ func limits_for(field: String) -> Vector2:
 	# (the user's call, 2026-11-04: 0..360 rather than four times 240).
 	if field.ends_with("_arc_deg"):
 		return Vector2(0.0, 360.0)
+	# Riding: the misalignment at which the horse starts to slow ships at 0
+	# and means an angle short of a quarter turn.
+	if field == "mount_turn_slow_deg":
+		return Vector2(0.0, 89.0)
 	return Vector2(1.0 if field == "grabbed_escape_presses" else 0.0, maxf(value * 4.0, 1.0))
 
 

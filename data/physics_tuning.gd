@@ -914,3 +914,87 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			respawn_delay = value
+
+@export_group("Mount")
+# Riding, first pass (movement only). The summon and the linger are the
+# server's clocks; the horse's size is the collider every peer judges with.
+# Seconds from the key to sitting on the horse.
+@export var mount_summon_time: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			mount_summon_time = value
+# Seconds the horse stands where the rider got off before it is gone.
+@export var mount_linger_time: float = 3.0:
+	set(value):
+		if Tuning.may_write(self):
+			mount_linger_time = value
+# The horse, nose to tail, and the height of its back, in metres.
+@export var mount_length: float = 2.2:
+	set(value):
+		if Tuning.may_write(self):
+			mount_length = value
+@export var mount_back_height: float = 1.5:
+	set(value):
+		if Tuning.may_write(self):
+			mount_back_height = value
+@export var mount_width: float = 0.7:
+	set(value):
+		if Tuning.may_write(self):
+			mount_width = value
+# The mounted collider: an upright capsule this wide (radius), from the
+# ground to the rider's head. The horse's length is not in the collision.
+@export var mount_radius: float = 0.6:
+	set(value):
+		if Tuning.may_write(self):
+			mount_radius = value
+# How far above the horse's back the rider's body centre sits, per unit of
+# the rider's own scale. Sets the picture and the top of the collider.
+@export var mount_seat_above: float = 0.25:
+	set(value):
+		if Tuning.may_write(self):
+			mount_seat_above = value
+# The horse's top speed: this times the walk of a bare level-1 human
+# (Player.get_mount_speed). Nothing about the rider changes it.
+@export var mount_speed_mult: float = 3.3:
+	set(value):
+		if Tuning.may_write(self):
+			mount_speed_mult = value
+# Seconds from standing to the top speed, and from the top speed to a stop.
+@export var mount_accel_time: float = 0.8:
+	set(value):
+		if Tuning.may_write(self):
+			mount_accel_time = value
+# Seconds from the top speed to a stop.
+@export var mount_decel_time: float = 0.5:
+	set(value):
+		if Tuning.may_write(self):
+			mount_decel_time = value
+# How fast the horse turns, degrees a second. It moves where it faces.
+@export var mount_turn_deg: float = 180.0:
+	set(value):
+		if Tuning.may_write(self):
+			mount_turn_deg = value
+# The horse slows while it is not facing where it was sent. Up to this many
+# degrees off it keeps its full speed; from here to a quarter turn the speed
+# eases down (a cosine), to mount_turn_min_ratio of the top at 90 and beyond.
+@export var mount_turn_slow_deg: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			mount_turn_slow_deg = value
+# The least the misalignment may cut the speed to, as a share of the top
+# speed. 0 turns on the spot past a quarter turn. The arc limit (no faster
+# than a turn at mount_turn_deg can still reach the next path point) stays.
+@export var mount_turn_min_ratio: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			mount_turn_min_ratio = value
+# Floor snap while riding, metres: keeps the body on a downhill at speed.
+@export var mount_floor_snap: float = 0.5:
+	set(value):
+		if Tuning.may_write(self):
+			mount_floor_snap = value
+# The same horse scaled for a race whose data says large_mount (the orc).
+@export var mount_large_scale: float = 1.3:
+	set(value):
+		if Tuning.may_write(self):
+			mount_large_scale = value

@@ -119,6 +119,10 @@ var sync_jumped := false
 var sync_weapon: int = WeaponKinds.Kind.NONE
 # C-1c: the off hand (the shield, or nothing), the server's like the weapon.
 var sync_offhand: int = WeaponKinds.Kind.NONE
+# Riding: the server's word on the horse (PlayerMount.Stage), on the Vitals
+# synchronizer like the weapon. The owner asks (Intent.MOUNT); the server
+# runs the summon clock and writes this; every peer shows what arrives.
+var sync_mount: int = PlayerMount.Stage.NONE
 # C-1c: the owner's raised shield, on the pose synchronizer for the picture
 # on other screens. The server keeps its own record of the block.
 var sync_blocking := false
@@ -159,6 +163,10 @@ var climb: PlayerClimb
 var grab: PlayerGrab
 # M-1: the eight slots and the cast flow. Local, like the three above.
 var skills: PlayerSkills
+# Riding: the horse, its collider and the seat. On every peer, not only the
+# owner's: the body the server judges and the body each screen shows are the
+# same size.
+var mount: PlayerMount
 # M-1: the procedural show of a cast -- a lean, and (C-0) a bar that swings.
 var _skill_lean_deg := 0.0
 # C-0: the swing. A pivot on the body at the skill's strike height; the held
@@ -519,6 +527,19 @@ func default_snap_length() -> float:
 	return _default_snap
 
 
+# Riding: the horse's top speed. A fixed number -- mount_speed_mult times the
+# walk of a bare human at training 0 -- so the rider's strength, agility,
+# weight, gear and race are not in it. One copy: the movement drives with it
+# and the server's move check allows it.
+func get_mount_speed() -> float:
+	var human := Races.data_for(Races.Kind.HUMAN)
+	var ratio := human.strength / maxf(human.body_weight, 0.01)
+	var judge := ServerAuthority.instance
+	var race_mult := judge.race_move_mult(Races.Kind.HUMAN) if judge != null else 1.0
+	return Tuning.server.base_move_speed * Tuning.ratio_mult(ratio, Tuning.server.ratio_k_speed) \
+		* race_mult * Tuning.server.mount_speed_mult
+
+
 # Standing on the ground, whatever the hands are doing. GRABBING belongs here:
 # stage E takes out the rules that forbade jumping, dashing and shoving while
 # carrying something, and every one of them was written as "is this body
@@ -570,7 +591,7 @@ func _apply_body_size() -> void:
 	if _shadow != null:
 		(_shadow.mesh as QuadMesh).size = Vector2(r * 2.4, r * 2.4)
 	if _label != null:
-		_label.position = Vector3(0.0, h + 0.55, 0.0)
+		_label.position = Vector3(0.0, h + 0.55 + _seat_lift(), 0.0)
 	if movement != null:
 		movement.refresh_body_size()
 	print("PLAYGROUND_BODY_SIZE peer=%s race=%s radius=%.2f half_height=%.2f" % [
@@ -629,6 +650,9 @@ func _physics_process(delta: float) -> void:
 		_apply_state_colour()
 	if stats != null and stats.race != _body_race:
 		_apply_body_size()
+	# Riding: the stage follows the server's word on every peer, the owner too.
+	if mount != null and sync_mount != mount.stage:
+		mount.apply(sync_mount)
 	# M-5: the weapon follows the server's word on every peer, the owner too.
 	if sync_weapon != weapon:
 		_apply_weapon(sync_weapon)
@@ -1148,6 +1172,11 @@ func _build_body() -> void:
 	_body_shape = shape
 	add_child(collision)
 
+	mount = PlayerMount.new()
+	mount.name = "PlayerMount"
+	add_child(mount)
+	mount.setup(self, collision)
+
 	_visual = Node3D.new()
 	_visual.name = "Visual"
 	add_child(_visual)
@@ -1306,7 +1335,25 @@ func _apply_predicted_pose() -> void:
 		return
 	var lying := _lying()
 	_visual.rotation.x = deg_to_rad(-_skill_lean_deg - 85.0 * lying)
-	_visual.position.y = -(half_height() - radius()) * lying
+	_visual.position.y = _seat_lift() - (half_height() - radius()) * lying
+
+
+# Riding: how far the picture of the body sits above where it stands on foot.
+func _seat_lift() -> float:
+	return mount.seat_lift() if mount != null else 0.0
+
+
+func is_mounted() -> bool:
+	return mount != null and mount.is_mounted()
+
+
+# Told by PlayerMount when the stage or the horse's size changed: the rider's
+# picture and the label move with the seat. Drawn only.
+func on_mount_changed() -> void:
+	_apply_predicted_pose()
+	if _label != null:
+		_label.position = Vector3(0.0, half_height() + 0.55 + _seat_lift(), 0.0)
+	_apply_state_colour()
 
 
 # M-1: the procedural show, one phase at a time. "windup" leans the capsule
@@ -1571,6 +1618,10 @@ func _apply_state_colour() -> void:
 		# C-1a: the HP, readable off every body on every screen.
 		if stats != null:
 			_label.text += "\nHP %d / %d" % [roundi(hp), roundi(stats.max_hp)]
+		if sync_mount == PlayerMount.Stage.SUMMONING:
+			_label.text += "\n말 소환 중"
+		elif sync_mount == PlayerMount.Stage.MOUNTED:
+			_label.text += "\n기마"
 		if overhead_note != "":
 			_label.text += "\n" + overhead_note
 		if sync_knock != "":

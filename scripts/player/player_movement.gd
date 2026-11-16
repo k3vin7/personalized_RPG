@@ -73,6 +73,15 @@ var _head_stand_left := 0.0
 var _head_body: Node3D
 # How long the body is still carrying a push rather than its own move order.
 var _pushed_left := 0.0
+# Riding: the horse's speed along its own heading, and the physics frame it
+# was last driven on (a gap means the speed is stale and is read back off
+# the body). For the checks: the fastest turn asked of it, degrees a second.
+var _mount_speed := -1.0
+var _mount_drive_frame := -10
+var mount_turn_peak := 0.0
+# For the checks and the panel: what each of the three limits allowed on the
+# last driven frame (the misalignment, the reachable arc, the braking).
+var mount_limits := Vector3.ZERO
 # 2026-11-04: the cast step. A press drops the walk (the body does not
 # slide into the swing on its old speed) and, for skills with a
 # step_distance, walks that far toward the aim over the windup and the
@@ -106,6 +115,7 @@ func setup(owner_player: Player) -> void:
 	player.get_tree().current_scene.add_child(_indicator)
 	player.add_owned_view(_indicator)
 	apply_dash_binding()
+	apply_mount_binding()
 	set_physics_process(true)
 
 
@@ -140,6 +150,7 @@ func rebind_dash(physical_keycode: int) -> void:
 		return
 	if player.skills != null:
 		player.skills.release_key(physical_keycode)
+	_release_mount_key(physical_keycode)
 	Tuning.values.dash_key = physical_keycode
 	apply_dash_binding()
 	Tuning.notify_changed()
@@ -149,12 +160,74 @@ func rebind_dash(physical_keycode: int) -> void:
 # Empties the dash if it holds this key, so a slot can take it. Returns
 # whether it did. Does not notify: the caller's own write does.
 func release_key(physical_keycode: int) -> bool:
+	var mount_released := _release_mount_key(physical_keycode)
+	return _release_dash_key(physical_keycode) or mount_released
+
+
+func _release_dash_key(physical_keycode: int) -> bool:
 	if int(Tuning.values.dash_key) != physical_keycode:
 		return false
 	Tuning.values.dash_key = 0
 	apply_dash_binding()
 	print("PLAYGROUND_KEY_RELEASED from=dash key=%s" % OS.get_keycode_string(physical_keycode))
 	return true
+
+
+# ------------------------------------------------------------ the mount key
+
+const MOUNT_ACTION := "mount"
+# For the checks: presses that went out as a request.
+var mount_presses := 0
+
+
+func mount_key_label() -> String:
+	var key := int(Tuning.values.mount_key)
+	return OS.get_keycode_string(key) if key != 0 else PlayerSkills.EMPTY_KEY_LABEL
+
+
+# Writes this peer's mount key into the InputMap, the way the dash key is.
+func apply_mount_binding() -> void:
+	if not InputMap.has_action(MOUNT_ACTION):
+		InputMap.add_action(MOUNT_ACTION)
+	InputMap.action_erase_events(MOUNT_ACTION)
+	if int(Tuning.values.mount_key) == 0:
+		return
+	var key := InputEventKey.new()
+	key.physical_keycode = int(Tuning.values.mount_key) as Key
+	InputMap.action_add_event(MOUNT_ACTION, key)
+
+
+# Any key for the horse. One key, one meaning: a slot or the dash that held
+# this key is emptied (last wins).
+func rebind_mount(physical_keycode: int) -> void:
+	if physical_keycode == 0:
+		return
+	if player.skills != null:
+		player.skills.release_key(physical_keycode)
+	_release_dash_key(physical_keycode)
+	Tuning.values.mount_key = physical_keycode
+	apply_mount_binding()
+	Tuning.notify_changed()
+	print("PLAYGROUND_MOUNT_KEY key=%s" % OS.get_keycode_string(physical_keycode))
+
+
+func _release_mount_key(physical_keycode: int) -> bool:
+	if int(Tuning.values.mount_key) != physical_keycode:
+		return false
+	Tuning.values.mount_key = 0
+	apply_mount_binding()
+	print("PLAYGROUND_KEY_RELEASED from=mount key=%s" % OS.get_keycode_string(physical_keycode))
+	return true
+
+
+# The one key: no horse asks for one, a horse (or one on its way) sends it
+# off. A request either way; the stage that comes back is the server's.
+func press_mount() -> void:
+	if player.state == Player.State.DEAD:
+		return
+	mount_presses += 1
+	var on := player.sync_mount == PlayerMount.Stage.NONE
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.MOUNT, {"on": on})
 
 
 func cancel_target() -> void:
@@ -400,6 +473,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	# M-6: the grab's own key is gone. The grab, the charge and the release
 	# are the second slot's (SkillDef input_mode HOLD_RELEASE), read by
 	# PlayerSkills; interact() below is the entry it calls.
+	if event.is_action_pressed(MOUNT_ACTION):
+		Net.queue_physics(press_mount)
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action_pressed("dash"):
 		Net.queue_physics(press_dash)
 		get_viewport().set_input_as_handled()
@@ -505,6 +582,8 @@ func _ground_step(delta: float) -> void:
 		var rub: float = Tuning.server.force_slide_friction * delta
 		player.velocity.x = move_toward(player.velocity.x, 0.0, rub)
 		player.velocity.z = move_toward(player.velocity.z, 0.0, rub)
+	elif player.is_mounted():
+		_mounted_drive(delta)
 	else:
 		var desired := _desired_velocity()
 		if desired.length_squared() > 0.0001:
@@ -524,6 +603,10 @@ func _ground_step(delta: float) -> void:
 		player.velocity.y = -0.5
 	else:
 		player.velocity.y -= Tuning.server.gravity * delta
+	# Riding: a longer snap, so a downhill at the horse's speed does not lift
+	# the body off the ground between steps.
+	player.floor_snap_length = float(Tuning.server.mount_floor_snap) if player.is_mounted() \
+		else player.default_snap_length()
 	player.move_and_slide()
 	# Asked before the airborne transition below: a body balanced on another
 	# body's head loses floor contact constantly, and letting that read as
@@ -540,6 +623,69 @@ func _ground_step(delta: float) -> void:
 			player.change_state(Player.State.AIRBORNE)
 		return
 	_try_attach_climb()
+
+
+# Riding: the horse moves where it faces. The heading turns toward the order
+# at mount_turn_deg a second; the speed climbs to the top in mount_accel_time
+# and comes off it in mount_decel_time. Two things the work order does not
+# spell out and a horse cannot be steered without: it slows while it is not
+# yet facing where it was sent (stopped outright past a quarter turn, so it
+# turns on the spot rather than circling a point inside its turning circle),
+# and it starts braking early enough to stop on the order's end.
+func _mounted_drive(delta: float) -> void:
+	var top := player.get_mount_speed()
+	var frame := Engine.get_physics_frames()
+	var heading := Vector3(-sin(player.rotation.y), 0.0, -cos(player.rotation.y))
+	if _mount_speed < 0.0 or frame - _mount_drive_frame > 1:
+		_mount_speed = clampf(Vector3(player.velocity.x, 0.0, player.velocity.z).dot(heading), 0.0, top)
+	_mount_drive_frame = frame
+	var desired := _desired_velocity()
+	var wanted := 0.0
+	if desired.length_squared() > 0.0001:
+		var diff := wrapf(atan2(-desired.x, -desired.z) - player.rotation.y, -PI, PI)
+		var step := deg_to_rad(Tuning.server.mount_turn_deg) * delta
+		var turned := clampf(diff, -step, step)
+		player.rotation.y += turned
+		mount_turn_peak = maxf(mount_turn_peak, rad_to_deg(absf(turned)) / maxf(delta, 0.0001))
+		var off := absf(diff - turned)
+		# Full speed up to mount_turn_slow_deg off, easing to mount_turn_min_ratio
+		# at a quarter turn and beyond. The defaults (0, 0) are a plain cosine.
+		var slow_from := deg_to_rad(clampf(Tuning.server.mount_turn_slow_deg, 0.0, 89.0))
+		var eased := clampf((off - slow_from) / (PI * 0.5 - slow_from), 0.0, 1.0)
+		wanted = top * maxf(cos(eased * PI * 0.5), clampf(Tuning.server.mount_turn_min_ratio, 0.0, 1.0))
+		mount_limits = Vector3(wanted, INF, INF)
+		# No faster than an arc at the turn rate can still reach the next
+		# point of the path: radius = distance / (2 sin(off)), speed = turn
+		# rate x radius. Without it the horse circles a point it cannot hit.
+		if off > 0.001 and _path_index < _path.size():
+			var reach := _flat_distance(player.global_position, _path[_path_index])
+			mount_limits.y = deg_to_rad(Tuning.server.mount_turn_deg) * reach / (2.0 * sin(minf(off, PI * 0.5)))
+			wanted = minf(wanted, mount_limits.y)
+		var brake := top / maxf(Tuning.server.mount_decel_time, 0.01)
+		mount_limits.z = sqrt(2.0 * brake * _path_distance_left())
+		wanted = minf(wanted, mount_limits.z)
+		heading = Vector3(-sin(player.rotation.y), 0.0, -cos(player.rotation.y))
+	var rate := top / maxf(Tuning.server.mount_accel_time, 0.01) if wanted > _mount_speed \
+		else top / maxf(Tuning.server.mount_decel_time, 0.01)
+	_mount_speed = move_toward(_mount_speed, wanted, rate * delta)
+	player.velocity.x = heading.x * _mount_speed
+	player.velocity.z = heading.z * _mount_speed
+
+
+func mount_speed() -> float:
+	return maxf(_mount_speed, 0.0)
+
+
+# Metres of the order still to cover, along the path.
+func _path_distance_left() -> float:
+	if not _has_target:
+		return 0.0
+	if _path.is_empty() or _path_index >= _path.size():
+		return _flat_distance(player.global_position, _target)
+	var total := _flat_distance(player.global_position, _path[_path_index])
+	for index in range(_path_index, _path.size() - 1):
+		total += _flat_distance(_path[index], _path[index + 1])
+	return total
 
 
 # T-1b: in contact with ground steeper than the walk limit (so not floor)
@@ -1334,6 +1480,15 @@ func _query_path() -> void:
 		return
 	_path = result
 	_path_index = 0
+	# Riding: the path's first point is where the body stood when it was
+	# asked for, and at the horse's speed the body is already most of a
+	# metre past it when the answer comes -- outside the look-ahead, so the
+	# follower turned the horse back toward it for a frame on every new
+	# order (measured: 19.8 -> 14.9 m/s on a 45 degree re-order that should
+	# not have slowed it). On foot the point is inside the look-ahead and is
+	# consumed on the same frame, as before.
+	if player.is_mounted() and result.size() > 1:
+		_path_index = 1
 	_path_dirty = false
 	_retries = 0
 

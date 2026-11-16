@@ -1,0 +1,929 @@
+extends Node
+
+# Riding, sub-stages a and b: the summon, getting on and getting off; then
+# the horse's speed, its acceleration, its turn and the floor snap.
+#
+#   host:   --auto-host --auto-smoke --auto-only=MT --auto-port=P --auto-quit=300
+#   client: --auto-join --auto-smoke --auto-only=MT --auto-port=P --auto-quit=300
+#
+# What is measured: the key is a request and the server's clock puts the body
+# on the horse mount_summon_time later; on the horse the collider is the
+# upright mounted capsule and the rider's picture sits on its back, on both
+# screens; a summon is called off by a hurt or by something in the seat;
+# getting off is at once and leaves the horse standing mount_linger_time; an
+# orc's horse is mount_large_scale times the size; the key is rebindable and
+# one key keeps one meaning.
+
+const HOME := Vector3(0.0, 0.9, 11.0)
+# West of the mark: the rocks stand east of it (x 4..9, z 6..9).
+const CLIENT_SPOT := HOME + Vector3(-6.0, 0.0, 0.0)
+# A clear run across the hub, north of the rocks and south of the rack.
+const LANE_A := Vector3(-14.0, 0.9, 14.0)
+const LANE_B := Vector3(14.0, 0.9, 14.0)
+# Over the top of the test terrain's hill (30 deg sides), west to east.
+const HILL_A := Vector3(131.0, 0.0, 40.0)
+const HILL_B := Vector3(169.0, 0.0, 40.0)
+const STEP := 1.0 / 120.0
+
+var _world: Node3D
+var _local: Player
+var _judge: ServerAuthority
+var _peer_id := 0
+var _checks := 0
+var _failures := 0
+var _stage_done := ""
+var _reports := {}
+var _swerve_limits := Vector3(INF, INF, INF)
+var _swerve_misaligned := 0.0
+
+
+func expect(condition: bool, label: String) -> void:
+	_checks += 1
+	if not condition:
+		_failures += 1
+	print("MT_CHECK peer=%d %s %s" % [_peer_id, "PASS" if condition else "FAIL", label])
+
+
+func note(line: String) -> void:
+	print("MT_NOTE peer=%d %s" % [_peer_id, line])
+
+
+func placed() -> void:
+	if _judge == null:
+		return
+	if _judge.is_judge():
+		_judge.forgive_move(multiplayer.get_unique_id(), "")
+	else:
+		_judge.harness_forgive_move.rpc_id(1)
+
+
+func tick_request(action: Callable) -> void:
+	Net.queue_physics(action)
+	for _frame in range(3):
+		await get_tree().physics_frame
+
+
+func _wait(seconds: float) -> void:
+	await get_tree().create_timer(seconds).timeout
+
+
+func _wait_stage(name_text: String) -> bool:
+	var waited := 0.0
+	while _stage_done != name_text and waited < 25.0:
+		await get_tree().create_timer(0.1).timeout
+		waited += 0.1
+	var arrived := _stage_done == name_text
+	_stage_done = ""
+	return arrived
+
+
+func _take_report(key: String, seconds := 10.0) -> Dictionary:
+	var waited := 0.0
+	while not _reports.has(key) and waited < seconds:
+		await get_tree().create_timer(0.05).timeout
+		waited += 0.05
+	expect(_reports.has(key), "the_client_reported_%s" % key)
+	var out: Dictionary = _reports.get(key, {})
+	_reports.erase(key)
+	return out
+
+
+func _client_peer() -> int:
+	var peers := multiplayer.get_peers()
+	return peers[0] if peers.size() > 0 else 0
+
+
+func _mate() -> Player:
+	return _judge.actor_for(_client_peer())
+
+
+# Physics seconds until `test` is true, or -1 after `limit`.
+func _until(test: Callable, limit: float) -> float:
+	var waited := 0.0
+	while waited < limit:
+		if test.call():
+			return waited
+		await get_tree().physics_frame
+		waited += STEP
+	return -1.0
+
+
+# What this screen shows of a body's horse.
+static func describe(body: Player) -> Dictionary:
+	var horse := body.mount.horse()
+	return {
+		"sync": body.sync_mount,
+		"stage": body.mount.stage,
+		"collider": body.mount.collider_dims(),
+		"capsule_off": (body.get_node("BodyShape") as CollisionShape3D).disabled,
+		"horse": horse != null,
+		"horse_at": horse.global_position if horse != null else Vector3.INF,
+		"horse_scale": horse.scale.x if horse != null else 0.0,
+		"lift": body._visual.position.y,
+		"body_at": body.global_position,
+		"lingering": body.mount.lingering_count(),
+		"linger_at": body.mount.lingering_position(),
+		"state": Player.State.keys()[body.state],
+	}
+
+
+func _reset_pair() -> void:
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = HOME
+		_local.velocity = Vector3.ZERO
+		_local.rotation.y = 0.0
+		_local.movement.cancel_target()
+		_local.movement.set_aim_override(Vector3.INF))
+	client_park.rpc_id(_client_peer(), CLIENT_SPOT)
+	await _wait(0.9)
+
+
+func run(world: Node3D) -> void:
+	_world = world
+	_peer_id = multiplayer.get_unique_id()
+	_local = Net.spawn_root.get_node(str(_peer_id)) as Player
+	_judge = world.get_node_or_null("ServerAuthority") as ServerAuthority
+	if not multiplayer.is_server():
+		stage_done.rpc_id(1, "client_ready")
+		return
+	expect(await _wait_stage("client_ready"), "both_peers_present")
+	var warnings := _judge.move_warnings
+	var corrections := _judge.move_corrections
+	_data_checks()
+	await _reset_pair()
+	await _host_mount_checks()
+	await _cancel_checks()
+	await _hurt_and_blocked_checks()
+	await _client_mount_checks()
+	await _orc_checks()
+	await _key_checks()
+	await _ride_checks()
+	await _turn_slow_checks()
+	await _hill_checks()
+	await _client_ride_checks()
+	note("move warnings %d, corrections %d during MT" % [
+		_judge.move_warnings - warnings, _judge.move_corrections - corrections])
+	# A warning is one 0.1 s sample of a remote body over the cap: at the
+	# horse's speed a late frame on the client is enough for one. Reported,
+	# not failed; a correction (two in a row) is the failure.
+	expect(_judge.move_corrections == corrections, "no_corrections_during_mt")
+	print("MT_RESULT peer=%d checks=%d failures=%d" % [_peer_id, _checks, _failures])
+	finish.rpc(_failures)
+	await _wait(1.0)
+	get_tree().quit(0 if _failures == 0 else 1)
+
+
+# ------------------------------------------------- 1: the numbers are data
+
+func _data_checks() -> void:
+	var s := Tuning.server
+	note("mount data: summon %.2f s, linger %.2f s, horse %.2f long x %.2f back x %.2f wide, large scale %.2f, key %s" % [
+		s.mount_summon_time, s.mount_linger_time, s.mount_length, s.mount_back_height, s.mount_width,
+		s.mount_large_scale, OS.get_keycode_string(int(Tuning.values.mount_key))])
+	var fields := Tuning.field_names(Tuning.server)
+	var missing := []
+	for f in ["mount_summon_time", "mount_linger_time", "mount_length", "mount_back_height", "mount_width", "mount_large_scale",
+			"mount_radius", "mount_seat_above", "mount_speed_mult", "mount_accel_time", "mount_decel_time", "mount_turn_deg",
+			"mount_floor_snap", "mount_turn_slow_deg", "mount_turn_min_ratio"]:
+		if not fields.has(f):
+			missing.append(f)
+	expect(missing.is_empty(), "the_mount_numbers_are_server_tuning_fields_with_sliders")
+	expect(absf(s.mount_summon_time - 1.0) < 0.001 and absf(s.mount_linger_time - 3.0) < 0.001
+		and absf(s.mount_length - 2.2) < 0.001 and absf(s.mount_back_height - 1.5) < 0.001
+		and absf(s.mount_large_scale - 1.3) < 0.001,
+		"defaults_are_1s_summon_3s_linger_2_2m_long_1_5m_back_1_3x_large")
+	note("mount data: radius %.2f, seat above %.2f, speed x%.2f, accel %.2f s, decel %.2f s, turn %.0f deg/s, snap %.2f m" % [
+		s.mount_radius, s.mount_seat_above, s.mount_speed_mult, s.mount_accel_time, s.mount_decel_time, s.mount_turn_deg,
+		s.mount_floor_snap])
+	expect(absf(s.mount_radius - 0.6) < 0.001 and absf(s.mount_speed_mult - 3.3) < 0.001
+		and absf(s.mount_accel_time - 0.8) < 0.001 and absf(s.mount_decel_time - 0.5) < 0.001
+		and absf(s.mount_turn_deg - 180.0) < 0.001 and s.mount_floor_snap > 0.0,
+		"defaults_are_0_6m_radius_3_3x_speed_0_8s_up_0_5s_down_180_deg_a_second_snap_on")
+	expect(DebugPanel.GROUP_LABELS.has("Mount"), "the_panel_has_the_mount_group")
+	expect(int(Tuning.values.mount_key) == KEY_Z and Tuning.field_names(Tuning.values).has("mount_key"),
+		"the_mount_key_is_local_and_defaults_to_z")
+	var large := []
+	for kind in Races.all_kinds():
+		if Races.data_for(kind).large_mount:
+			large.append(Races.label_for(kind))
+	note("races with large_mount in their data: %s" % [large])
+	expect(Races.data_for(Races.Kind.ORC).large_mount and large.size() == 1,
+		"only_the_orcs_race_data_asks_for_the_large_horse")
+
+
+# ------------------------------------------------- 2: the host gets on, rides, gets off
+
+func _host_mount_checks() -> void:
+	var dims := _dims_for(1.0, 1.0)
+	var granted := _judge.mounts_granted
+	var on_foot := describe(_local)
+	expect(on_foot["stage"] == PlayerMount.Stage.NONE and not on_foot["capsule_off"]
+		and (on_foot["collider"] as Vector2) == Vector2.ZERO and not on_foot["horse"],
+		"on_foot_the_body_is_its_capsule_and_there_is_no_horse")
+	Net.queue_physics(_local.movement.press_mount)
+	var asked := await _until(func() -> bool: return _local.sync_mount == PlayerMount.Stage.SUMMONING, 0.5)
+	expect(asked >= 0.0 and asked <= 0.05, "the_press_starts_the_summon_at_once")
+	await _wait(0.5)
+	var half := describe(_local)
+	expect(half["stage"] == PlayerMount.Stage.SUMMONING and not half["capsule_off"] and not half["horse"],
+		"half_way_through_the_summon_the_body_is_still_on_foot")
+	var rest := await _until(func() -> bool: return _local.sync_mount == PlayerMount.Stage.MOUNTED, 2.0)
+	note("host summon: asked after %.3f s, mounted %.3f s after the half-way look" % [asked, rest])
+	expect(rest >= 0.0, "the_host_is_on_the_horse")
+	expect(_judge.mounts_granted == granted + 1, "the_server_granted_one_mount")
+	await _wait(0.3)
+	var up := describe(_local)
+	var feet_y := _local.global_position.y - _local.half_height()
+	var lift_wanted := Tuning.server.mount_back_height + Tuning.server.mount_seat_above * _local.body_scale() - _local.half_height()
+	note("host mounted: collider %s, capsule off %s, horse at %s (feet y %.2f), rider lift %.2f (wanted %.2f), state %s, on floor %s" % [
+		up["collider"], up["capsule_off"], up["horse_at"], feet_y, up["lift"], lift_wanted, up["state"], _local.is_on_floor()])
+	expect((up["collider"] as Vector2).is_equal_approx(dims) and up["capsule_off"],
+		"mounted_the_collider_is_an_upright_capsule_0_6_wide_up_to_the_riders_head")
+	expect(up["horse"] and absf((up["horse_at"] as Vector3).y - feet_y) < 0.02
+		and Vector2((up["horse_at"] as Vector3).x - _local.global_position.x, (up["horse_at"] as Vector3).z - _local.global_position.z).length() < 0.02,
+		"the_horse_stands_on_the_ground_under_the_body")
+	expect(absf(float(up["lift"]) - lift_wanted) < 0.01 and float(up["lift"]) > 0.5,
+		"the_riders_picture_is_lifted_onto_the_horses_back")
+	expect(_local.is_on_floor() and absf(_local.global_position.y - HOME.y) < 0.05,
+		"the_mounted_body_still_stands_on_the_floor_at_the_same_height")
+	client_report_body.rpc_id(_client_peer(), _local.get_path(), "host_up")
+	var seen := await _take_report("host_up")
+	note("client sees the host mounted: %s" % [seen])
+	expect(seen.get("stage", -1) == PlayerMount.Stage.MOUNTED and seen.get("horse", false)
+		and (seen.get("collider", Vector2.ZERO) as Vector2).is_equal_approx(dims) and seen.get("capsule_off", false),
+		"the_client_shows_the_host_on_a_horse_with_the_same_collider")
+	expect((seen.get("horse_at", Vector3.INF) as Vector3).distance_to(up["horse_at"] as Vector3) < 0.1
+		and absf(float(seen.get("lift", 0.0)) - lift_wanted) < 0.01,
+		"the_clients_horse_and_rider_are_where_the_hosts_are")
+
+	# Ridden a few metres: the horse goes with the body on both screens.
+	await tick_request(func() -> void: _local.movement.set_target(HOME + Vector3(0.0, 0.0, 5.0)))
+	await _wait(0.3)
+	await _until(func() -> bool:
+		return not _local.movement.has_target() and _local.velocity.length() < 0.02, 6.0)
+	await _wait(0.6)
+	var rode := describe(_local)
+	client_report_body.rpc_id(_client_peer(), _local.get_path(), "host_rode")
+	var seen_rode := await _take_report("host_rode")
+	var rode_far := Vector2(_local.global_position.x - HOME.x, _local.global_position.z - HOME.z).length()
+	note("host rode %.2f m: horse %s here, %s on the client" % [rode_far, rode["horse_at"], seen_rode.get("horse_at")])
+	expect(rode_far > 4.0 and (rode["horse_at"] as Vector3).distance_to(_local.global_position - Vector3.UP * _local.half_height()) < 0.02,
+		"the_horse_moves_with_the_body")
+	expect((seen_rode.get("horse_at", Vector3.INF) as Vector3).distance_to(rode["horse_at"] as Vector3) < 0.15,
+		"and_arrives_at_the_same_place_on_the_client")
+
+	# Off: at once, and the horse stays where it stood for the linger.
+	var left_at := _local.global_position - Vector3.UP * _local.half_height()
+	client_watch_linger.rpc_id(_client_peer(), _local.get_path(), "host_linger")
+	await _wait(0.2)
+	Net.queue_physics(_local.movement.press_mount)
+	var off := await _until(func() -> bool: return _local.mount.stage == PlayerMount.Stage.NONE, 0.5)
+	var down := describe(_local)
+	note("host off after %.3f s: collider %s, capsule off %s, lift %.2f, lingering %d at %s" % [
+		off, down["collider"], down["capsule_off"], down["lift"], down["lingering"], down["linger_at"]])
+	expect(off >= 0.0 and off <= 0.05, "the_same_key_gets_off_at_once")
+	expect((down["collider"] as Vector2) == Vector2.ZERO and not down["capsule_off"] and absf(float(down["lift"])) < 0.001,
+		"off_the_horse_the_body_is_its_capsule_again_standing_on_the_ground")
+	expect(down["lingering"] == 1 and (down["linger_at"] as Vector3).distance_to(left_at) < 0.02,
+		"the_horse_is_left_standing_where_the_rider_got_off")
+	await tick_request(func() -> void: _local.movement.set_target(HOME))
+	var gone := await _until(func() -> bool: return _local.mount.lingering_count() == 0, 6.0)
+	var lingered := off + 3.0 * STEP + gone
+	var walked := Vector2(_local.global_position.x - left_at.x, _local.global_position.z - left_at.z).length()
+	note("host: the horse stood %.2f s after the dismount while the body walked %.2f m away" % [lingered, walked])
+	expect(gone >= 0.0 and absf(lingered - Tuning.server.mount_linger_time) < 0.15,
+		"and_is_gone_after_the_3_second_linger")
+	var watched := await _take_report("host_linger")
+	note("client: the host's horse stood %.2f s at %s (the host left it at %s)" % [
+		float(watched.get("seconds", -1.0)), watched.get("at"), left_at])
+	expect(absf(float(watched.get("seconds", -1.0)) - Tuning.server.mount_linger_time) < 0.2
+		and (watched.get("at", Vector3.INF) as Vector3).distance_to(left_at) < 0.3,
+		"the_client_sees_the_same_horse_stand_3_seconds_in_the_same_place")
+	await _until(func() -> bool: return _local.state == Player.State.IDLE, 4.0)
+
+
+# ------------------------------------------------- 3: a summon that does not finish
+
+func _cancel_checks() -> void:
+	var granted := _judge.mounts_granted
+	Net.queue_physics(_local.movement.press_mount)
+	await _wait(0.4)
+	var during := _local.sync_mount
+	Net.queue_physics(_local.movement.press_mount)
+	await _wait(1.2)
+	note("pressed again 0.4 s into the summon: stage %s then %s, granted %d" % [
+		PlayerMount.Stage.keys()[during], PlayerMount.Stage.keys()[_local.sync_mount], _judge.mounts_granted - granted])
+	expect(during == PlayerMount.Stage.SUMMONING and _local.sync_mount == PlayerMount.Stage.NONE
+		and _judge.mounts_granted == granted, "the_key_again_during_the_summon_calls_it_off")
+
+	# In the air when the clock runs out: the server asks then whether the
+	# body is standing, and it is not.
+	var cancelled := _judge.mounts_cancelled
+	Net.queue_physics(_local.movement.press_mount)
+	await _wait(0.5)
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(_local.global_position)
+		_local.movement.request_jump())
+	await _wait(0.9)
+	note("jumped 0.5 s into the summon: stage %s, why %s, state %s" % [
+		PlayerMount.Stage.keys()[_local.sync_mount], _judge.last_mount.get("why", ""), Player.State.keys()[_local.state]])
+	expect(_local.sync_mount == PlayerMount.Stage.NONE and _judge.mounts_cancelled == cancelled + 1
+		and String(_judge.last_mount.get("why", "")) == "not_standing",
+		"a_body_in_the_air_when_the_summon_ends_does_not_get_the_horse")
+	await _until(func() -> bool: return _local.state == Player.State.IDLE, 3.0)
+	await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+
+
+# The mounted capsule (radius, height) for a body scale and a horse scale.
+static func _dims_for(body_scale: float, horse_scale: float) -> Vector2:
+	var s := Tuning.server
+	return Vector2(s.mount_radius * horse_scale,
+		s.mount_back_height * horse_scale + s.mount_seat_above * body_scale + Player.BODY_HALF_HEIGHT * body_scale)
+
+
+# ------------------------------------------------- 3b: hurt, or something in the seat
+
+func _hurt_and_blocked_checks() -> void:
+	var mate := _mate()
+	var cancelled := _judge.mounts_cancelled
+	var granted := _judge.mounts_granted
+	Net.queue_physics(_local.movement.press_mount)
+	await _wait(0.4)
+	var before := _local.sync_mount
+	await tick_request(func() -> void: _judge.server_damage(_local, 5.0, "mt_check"))
+	var after := _local.sync_mount
+	await _wait(1.0)
+	note("hurt 0.4 s into the summon (5 HP through server_damage): stage %s -> %s, why %s, still %s a second later" % [
+		PlayerMount.Stage.keys()[before], PlayerMount.Stage.keys()[after], _judge.last_mount.get("why", ""),
+		PlayerMount.Stage.keys()[_local.sync_mount]])
+	expect(before == PlayerMount.Stage.SUMMONING and after == PlayerMount.Stage.NONE
+		and _local.sync_mount == PlayerMount.Stage.NONE and _judge.mounts_cancelled == cancelled + 1
+		and _judge.mounts_granted == granted, "a_hurt_during_the_summon_calls_it_off")
+	await tick_request(func() -> void: _judge.server_set_hp(_local, _local.stats.max_hp))
+
+	# The client stands 0.9 m away: clear of the body on foot (0.4 + 0.4),
+	# inside the mounted capsule (0.6 + 0.4).
+	client_park.rpc_id(_client_peer(), HOME + Vector3(0.9, 0.0, 0.0))
+	await _wait(1.0)
+	var apart := Vector2(mate.global_position.x - _local.global_position.x, mate.global_position.z - _local.global_position.z).length()
+	cancelled = _judge.mounts_cancelled
+	Net.queue_physics(_local.movement.press_mount)
+	await _wait(1.3)
+	note("summoned with the client %.2f m away: stage %s, why %s, in the way: %s" % [
+		apart, PlayerMount.Stage.keys()[_local.sync_mount], _judge.last_mount.get("why", ""), _judge.last_mount_blocker])
+	expect(_local.sync_mount == PlayerMount.Stage.NONE and String(_judge.last_mount.get("why", "")) == "blocked"
+		and _judge.last_mount_blocker == String(mate.name) and _judge.mounts_cancelled == cancelled + 1,
+		"another_character_in_the_seat_when_the_summon_ends_calls_it_off")
+	client_press_mount.rpc_id(_client_peer())
+	await _wait(1.5)
+	note("the client summoned beside the host: stage %s, why %s, in the way: %s" % [
+		PlayerMount.Stage.keys()[mate.sync_mount], _judge.last_mount.get("why", ""), _judge.last_mount_blocker])
+	expect(mate.sync_mount == PlayerMount.Stage.NONE and String(_judge.last_mount.get("why", "")) == "blocked"
+		and _judge.last_mount_blocker == String(_local.name), "and_the_same_for_the_client_with_the_host_in_its_seat")
+	# A rock in the seat.
+	var rock := _world.get_node_or_null("Rock_0") as Node3D
+	if rock != null:
+		await tick_request(func() -> void:
+			placed()
+			_local.global_position = Vector3(rock.global_position.x - Rock.radius_for((rock as Rock).weight) - 0.5, HOME.y, rock.global_position.z)
+			_local.velocity = Vector3.ZERO)
+		await _wait(0.5)
+		var rock_gap := Vector2(rock.global_position.x - _local.global_position.x, rock.global_position.z - _local.global_position.z).length()
+		Net.queue_physics(_local.movement.press_mount)
+		await _wait(1.3)
+		note("summoned %.2f m from %s: stage %s, why %s, in the way: %s" % [rock_gap, rock.name,
+			PlayerMount.Stage.keys()[_local.sync_mount], _judge.last_mount.get("why", ""), _judge.last_mount_blocker])
+		expect(_local.sync_mount == PlayerMount.Stage.NONE and String(_judge.last_mount.get("why", "")) == "blocked"
+			and _judge.last_mount_blocker == String(rock.name), "a_thing_in_the_seat_calls_it_off_too")
+		await _get_off()
+	await _reset_pair()
+
+	# Walking through the summon still gets the horse.
+	await tick_request(func() -> void: _local.movement.set_target(HOME + Vector3(0.0, 0.0, 6.0)))
+	Net.queue_physics(_local.movement.press_mount)
+	var took := await _until(func() -> bool: return _local.sync_mount == PlayerMount.Stage.MOUNTED, 2.0)
+	var walked := Vector2(_local.global_position.x - HOME.x, _local.global_position.z - HOME.z).length()
+	note("summoned while walking: mounted after %.2f s, %.2f m from where it was asked" % [took, walked])
+	expect(took >= 0.0 and walked > 3.0, "a_body_that_walks_through_the_summon_is_mounted_on_the_move")
+	await _until(func() -> bool: return _local.state == Player.State.IDLE, 3.0)
+	Net.queue_physics(_local.movement.press_mount)
+	await _wait(0.3)
+	await _reset_pair()
+
+
+# ------------------------------------------------- 4: the client gets on and off
+
+func _client_mount_checks() -> void:
+	var mate := _mate()
+	var dims := _dims_for(1.0, 1.0)
+	client_press_mount.rpc_id(_client_peer())
+	var asked := await _until(func() -> bool: return mate.sync_mount == PlayerMount.Stage.SUMMONING, 2.0)
+	var took := await _until(func() -> bool: return mate.sync_mount == PlayerMount.Stage.MOUNTED, 3.0)
+	note("client asked: summoning seen after %.3f s, mounted %.3f s later (server clock %.2f s)" % [
+		asked, took, Tuning.server.mount_summon_time])
+	expect(asked >= 0.0 and took >= 0.0 and absf(took - Tuning.server.mount_summon_time) < 0.06,
+		"the_clients_request_is_mounted_by_the_servers_clock_1_second_later")
+	await _wait(0.5)
+	var here := describe(mate)
+	client_report_body.rpc_id(_client_peer(), mate.get_path(), "self_up")
+	var there := await _take_report("self_up")
+	note("client mounted, on the host: %s" % [here])
+	note("client mounted, on its own screen: %s" % [there])
+	expect(here["stage"] == PlayerMount.Stage.MOUNTED and (here["collider"] as Vector2).is_equal_approx(dims)
+		and here["capsule_off"] and here["horse"],
+		"the_host_shows_the_client_on_a_horse_with_the_horses_collider")
+	expect(there.get("stage", -1) == PlayerMount.Stage.MOUNTED and (there.get("collider", Vector2.ZERO) as Vector2).is_equal_approx(dims)
+		and there.get("capsule_off", false) and there.get("horse", false),
+		"the_client_is_on_its_horse_on_its_own_screen")
+	expect((there.get("horse_at", Vector3.INF) as Vector3).distance_to(here["horse_at"] as Vector3) < 0.15,
+		"both_screens_put_the_clients_horse_in_the_same_place")
+	var left_at := mate.global_position - Vector3.UP * mate.half_height()
+	client_press_mount.rpc_id(_client_peer())
+	var off := await _until(func() -> bool: return mate.mount.stage == PlayerMount.Stage.NONE, 2.0)
+	var down := describe(mate)
+	var gone := await _until(func() -> bool: return mate.mount.lingering_count() == 0, 6.0)
+	note("client off: seen after %.3f s, capsule back %s, horse left at %s, gone %.2f s later" % [
+		off, not down["capsule_off"], down["linger_at"], gone])
+	expect(off >= 0.0 and not down["capsule_off"] and down["lingering"] == 1
+		and (down["linger_at"] as Vector3).distance_to(left_at) < 0.1,
+		"the_client_gets_off_and_its_horse_is_left_where_it_stood_on_the_host")
+	expect(gone >= 0.0 and absf(gone - Tuning.server.mount_linger_time) < 0.15,
+		"and_the_clients_horse_is_gone_after_3_seconds_on_the_host")
+
+
+# ------------------------------------------------- 5: the orc's horse
+
+func _orc_checks() -> void:
+	var dims := _dims_for(1.0, 1.0)
+	var big := _dims_for(Races.data_for(Races.Kind.ORC).height_cm / Races.data_for(Races.Kind.HUMAN).height_cm, Tuning.server.mount_large_scale)
+	await tick_request(func() -> void:
+		placed()
+		_judge.harness_set_race(_local, Races.Kind.ORC))
+	await _wait(0.6)
+	# The taller body's origin is higher off the floor; let it settle.
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = Vector3(HOME.x, _local.half_height() + 0.05, HOME.z)
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target())
+	await _wait(0.5)
+	Net.queue_physics(_local.movement.press_mount)
+	await _until(func() -> bool: return _local.mount.stage == PlayerMount.Stage.MOUNTED, 3.0)
+	await _wait(0.4)
+	var up := describe(_local)
+	client_report_body.rpc_id(_client_peer(), _local.get_path(), "orc_up")
+	var seen := await _take_report("orc_up")
+	note("orc mounted: collider %s (wanted %s), horse scale %.2f, lift %.2f, on floor %s | client: collider %s scale %.2f" % [
+		up["collider"], big, up["horse_scale"], up["lift"], _local.is_on_floor(),
+		seen.get("collider"), float(seen.get("horse_scale", 0.0))])
+	expect((up["collider"] as Vector2).is_equal_approx(big) and absf(float(up["horse_scale"]) - Tuning.server.mount_large_scale) < 0.001,
+		"an_orcs_horse_is_the_same_model_at_1_3_times_with_the_capsule_scaled_to_it")
+	expect((seen.get("collider", Vector2.ZERO) as Vector2).is_equal_approx(big)
+		and absf(float(seen.get("horse_scale", 0.0)) - Tuning.server.mount_large_scale) < 0.001,
+		"and_the_client_shows_the_orcs_horse_at_the_same_size")
+	expect(_local.is_on_floor(), "the_orc_on_its_horse_stands_on_the_floor")
+	Net.queue_physics(_local.movement.press_mount)
+	await _until(func() -> bool: return _local.mount.stage == PlayerMount.Stage.NONE, 1.0)
+	await tick_request(func() -> void:
+		placed()
+		_judge.harness_set_race(_local, Races.Kind.HUMAN))
+	await _wait(0.6)
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = HOME
+		_local.velocity = Vector3.ZERO)
+	await _wait(3.2)
+
+
+# ------------------------------------------------- 6: the key
+
+func _press_key(code: int) -> void:
+	for pressed in [true, false]:
+		var event := InputEventKey.new()
+		event.physical_keycode = code as Key
+		event.pressed = pressed
+		Input.parse_input_event(event)
+		Input.flush_buffered_events()
+	for _frame in range(4):
+		await get_tree().physics_frame
+
+
+func _key_checks() -> void:
+	var presses := _local.movement.mount_presses
+	await _press_key(KEY_Z)
+	var after_z := _local.sync_mount
+	await _press_key(KEY_Z)
+	var after_second := _local.sync_mount
+	note("Z key: presses %d, stage %s then %s" % [_local.movement.mount_presses - presses,
+		PlayerMount.Stage.keys()[after_z], PlayerMount.Stage.keys()[after_second]])
+	expect(_local.movement.mount_presses == presses + 2 and after_z == PlayerMount.Stage.SUMMONING
+		and after_second == PlayerMount.Stage.NONE, "the_z_key_asks_for_the_horse_and_z_again_sends_it_off")
+	_local.movement.rebind_mount(KEY_X)
+	presses = _local.movement.mount_presses
+	await _press_key(KEY_Z)
+	var z_after_rebind := _local.movement.mount_presses - presses
+	await _press_key(KEY_X)
+	var x_after_rebind := _local.movement.mount_presses - presses - z_after_rebind
+	var stage_x := _local.sync_mount
+	await _press_key(KEY_X)
+	note("rebound to X: Z presses %d, X presses %d, stage %s, label %s" % [
+		z_after_rebind, x_after_rebind, PlayerMount.Stage.keys()[stage_x], _local.movement.mount_key_label()])
+	expect(z_after_rebind == 0 and x_after_rebind == 1 and stage_x == PlayerMount.Stage.SUMMONING
+		and _local.sync_mount == PlayerMount.Stage.NONE, "after_a_rebind_the_new_key_works_and_the_old_one_does_not")
+	# One key, one meaning, both ways round.
+	var slot_key := _local.skills.key_for(0)
+	_local.movement.rebind_mount(slot_key)
+	var slot_emptied := _local.skills.key_for(0) == 0
+	_local.skills.rebind(0, slot_key)
+	var mount_emptied := int(Tuning.values.mount_key) == 0
+	var dash_key := int(Tuning.values.dash_key)
+	_local.movement.rebind_mount(dash_key)
+	var dash_emptied := int(Tuning.values.dash_key) == 0
+	_local.movement.rebind_dash(dash_key)
+	var mount_emptied_by_dash := int(Tuning.values.mount_key) == 0
+	_local.movement.rebind_mount(KEY_Z)
+	note("one key one meaning: slot emptied %s, mount emptied by the slot %s, dash emptied %s, mount emptied by the dash %s, back on %s" % [
+		slot_emptied, mount_emptied, dash_emptied, mount_emptied_by_dash, _local.movement.mount_key_label()])
+	expect(slot_emptied and mount_emptied and dash_emptied and mount_emptied_by_dash
+		and int(Tuning.values.mount_key) == KEY_Z and _local.skills.key_for(0) == slot_key
+		and int(Tuning.values.dash_key) == dash_key,
+		"a_key_given_to_the_mount_leaves_the_slot_or_the_dash_and_the_other_way_round")
+
+
+# ------------------------------------------------- 7 (b): the speed, the ramps, the turn
+
+# Rides `body` (this machine's) from where it stands to `to` and samples it
+# every physics step.
+func _ride(to: Vector3, limit := 12.0) -> Dictionary:
+	var top := _local.get_mount_speed()
+	var out := {"peak": 0.0, "to_top": -1.0, "brake_from": -1.0, "took": -1.0, "air": 0, "wall": 0,
+		"from": _local.global_position, "max_y": _local.global_position.y}
+	_local.movement.mount_turn_peak = 0.0
+	Net.queue_physics(func() -> void: _local.movement.set_target(to))
+	var waited := 0.0
+	var moving_at := -1.0
+	while waited < limit:
+		await get_tree().physics_frame
+		waited += STEP
+		var speed := Vector2(_local.velocity.x, _local.velocity.z).length()
+		if moving_at < 0.0 and speed > 0.01:
+			moving_at = waited
+		out["peak"] = maxf(float(out["peak"]), speed)
+		out["max_y"] = maxf(float(out["max_y"]), _local.global_position.y)
+		if float(out["to_top"]) < 0.0 and speed >= top * 0.995 and moving_at >= 0.0:
+			out["to_top"] = waited - moving_at + STEP
+		if float(out["to_top"]) >= 0.0 and float(out["brake_from"]) < 0.0 and speed < top * 0.995:
+			out["brake_from"] = waited
+		if _local.state == Player.State.AIRBORNE or not _local.is_on_floor():
+			out["air"] = int(out["air"]) + 1
+		if _local.is_on_wall():
+			out["wall"] = int(out["wall"]) + 1
+		if moving_at >= 0.0 and speed < 0.02 and not _local.movement.has_target():
+			out["took"] = waited - moving_at
+			break
+	out["brake"] = waited - float(out["brake_from"]) if float(out["brake_from"]) >= 0.0 else -1.0
+	out["short"] = Vector2(_local.global_position.x - to.x, _local.global_position.z - to.z).length()
+	out["turn_peak"] = _local.movement.mount_turn_peak
+	return out
+
+
+func _put(at: Vector3, yaw: float) -> void:
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = at
+		_local.velocity = Vector3.ZERO
+		_local.rotation.y = yaw
+		_local.movement.cancel_target()
+		_local.movement.set_aim_override(Vector3.INF))
+	await _wait(0.5)
+
+
+func _get_on() -> bool:
+	Net.queue_physics(_local.movement.press_mount)
+	var took := await _until(func() -> bool: return _local.mount.stage == PlayerMount.Stage.MOUNTED, 3.0)
+	await _wait(0.2)
+	return took >= 0.0
+
+
+func _get_off() -> void:
+	if _local.sync_mount == PlayerMount.Stage.NONE:
+		return
+	Net.queue_physics(_local.movement.press_mount)
+	await _until(func() -> bool: return _local.mount.stage == PlayerMount.Stage.NONE, 1.0)
+
+
+func _ride_checks() -> void:
+	var s := Tuning.server
+	var walk := _local.get_move_speed()
+	var top := _local.get_mount_speed()
+	note("speeds: bare human walk %.2f m/s, horse %.2f m/s (x%.2f)" % [walk, top, top / walk])
+	expect(absf(top - walk * s.mount_speed_mult) < 0.001 and absf(top / walk - 3.3) < 0.001,
+		"the_horses_speed_is_3_3_times_a_bare_level_1_humans_walk")
+	# Facing along the lane (+x), so the first ride measures the ramp alone.
+	var east := atan2(-1.0, 0.0)
+	await _put(LANE_A, east)
+	expect(await _get_on(), "the_host_is_mounted_for_the_ride")
+	var run := await _ride(LANE_B)
+	note("human ride %.1f m: peak %.2f m/s, 0 -> top in %.3f s, top -> 0 in %.3f s, whole ride %.2f s, stopped %.2f m from the order, air frames %d" % [
+		Vector2(LANE_B.x - LANE_A.x, LANE_B.z - LANE_A.z).length(), run["peak"], run["to_top"], run["brake"], run["took"],
+		run["short"], run["air"]])
+	expect(absf(float(run["peak"]) - top) < 0.05, "the_ride_tops_out_at_the_horses_speed")
+	expect(absf(float(run["to_top"]) - s.mount_accel_time) < 0.05, "it_reaches_the_top_speed_in_0_8_s")
+	expect(absf(float(run["brake"]) - s.mount_decel_time) < 0.05, "it_stops_from_the_top_speed_in_0_5_s")
+	expect(float(run["short"]) < 0.5, "and_stops_on_the_order")
+
+	# The turn: sent straight back the way it came, from a standstill.
+	var yaw_from := _local.rotation.y
+	_local.movement.mount_turn_peak = 0.0
+	Net.queue_physics(func() -> void: _local.movement.set_target(LANE_A))
+	var turned := await _until(func() -> bool:
+		return absf(wrapf(_local.rotation.y - yaw_from, -PI, PI)) > deg_to_rad(179.0), 3.0)
+	var crept := Vector2(_local.global_position.x - LANE_B.x, _local.global_position.z - LANE_B.z).length()
+	note("turned about from a standstill: 179 deg in %.3f s, fastest %.1f deg/s, %.2f m from where it stood" % [
+		turned, _local.movement.mount_turn_peak, crept])
+	expect(turned >= 0.0 and absf(turned - 179.0 / s.mount_turn_deg) < 0.08 and _local.movement.mount_turn_peak <= s.mount_turn_deg + 0.5,
+		"the_horse_turns_at_180_degrees_a_second_and_no_faster")
+	await _until(func() -> bool: return _local.state == Player.State.IDLE and not _local.movement.has_target(), 8.0)
+	await _wait(0.3)
+
+	# On foot the same about-turn is the walk's eased one, far quicker.
+	await _get_off()
+	await _put(LANE_A, east)
+	var walk_yaw := _local.rotation.y
+	Net.queue_physics(func() -> void: _local.movement.set_target(LANE_A + Vector3(-4.0, 0.0, 0.0)))
+	var walk_turned := await _until(func() -> bool:
+		return absf(wrapf(_local.rotation.y - walk_yaw, -PI, PI)) > deg_to_rad(170.0), 3.0)
+	note("on foot the same about-turn: 170 deg in %.3f s" % walk_turned)
+	expect(walk_turned >= 0.0 and walk_turned < turned, "which_is_slower_than_the_body_turns_on_foot")
+	await _until(func() -> bool: return _local.state == Player.State.IDLE, 4.0)
+
+	# The rider is not in the speed: an orc with 60 kg of gear, same lane.
+	await tick_request(func() -> void:
+		placed()
+		_judge.harness_set_race(_local, Races.Kind.ORC)
+		_judge.harness_set_stats(_local, NAN, INF, 60.0))
+	await _wait(0.6)
+	await _put(Vector3(LANE_A.x, _local.half_height() + 0.05, LANE_A.z), east)
+	var orc_walk := _local.get_move_speed()
+	var orc_top := _local.get_mount_speed()
+	expect(await _get_on(), "the_orc_is_mounted_for_the_ride")
+	var orc_run := await _ride(Vector3(LANE_B.x, _local.global_position.y, LANE_B.z))
+	note("orc + 60 kg gear: walk %.2f m/s (human %.2f); horse %.2f m/s, peak %.2f, 0 -> top %.3f s, whole ride %.2f s (human %.2f s)" % [
+		orc_walk, walk, orc_top, orc_run["peak"], orc_run["to_top"], orc_run["took"], run["took"]])
+	expect(absf(orc_top - top) < 0.001 and absf(float(orc_run["peak"]) - float(run["peak"])) < 0.05
+		and absf(float(orc_run["took"]) - float(run["took"])) < 0.1 and absf(orc_walk - walk) > 0.1,
+		"race_strength_weight_and_gear_change_the_walk_and_not_the_horse")
+	await _get_off()
+	await tick_request(func() -> void:
+		placed()
+		_judge.harness_set_race(_local, Races.Kind.HUMAN)
+		_judge.harness_clear_stats(_local))
+	await _wait(0.6)
+	await _put(HOME, 0.0)
+	await _wait(3.0)
+
+
+# ------------------------------------------------- 7b: the two sliders on the slow-down
+
+# West along the lane at the top speed, then sent 45 degrees off (south-west):
+# the lowest speed in the 0.4 s after the new order (the order is 19.8 m off,
+# so the horse is not yet braking for its end inside that window).
+func _dip_after_swerve() -> float:
+	await _put(LANE_B, atan2(1.0, 0.0))
+	await _get_on()
+	Net.queue_physics(func() -> void: _local.movement.set_target(LANE_A))
+	var top := _local.get_mount_speed()
+	await _until(func() -> bool:
+		return Vector2(_local.velocity.x, _local.velocity.z).length() >= top * 0.995 and _local.global_position.x < 3.0, 4.0)
+	var here := _local.global_position
+	Net.queue_physics(func() -> void: _local.movement.set_target(here + Vector3(-14.0, 0.0, -14.0)))
+	var lowest := top
+	var waited := 0.0
+	while waited < 0.4:
+		await get_tree().physics_frame
+		waited += STEP
+		# The first frames still run on the old path while the new one is asked.
+		if waited > 0.05:
+			lowest = minf(lowest, Vector2(_local.velocity.x, _local.velocity.z).length())
+			var limits := _local.movement.mount_limits
+			_swerve_limits = Vector3(minf(_swerve_limits.x, limits.x), minf(_swerve_limits.y, limits.y), minf(_swerve_limits.z, limits.z))
+	note("   swerve: lowest allowed by misalignment %.2f, by the arc %.2f, by braking %.2f; path points %d; lowest speed %.2f" % [
+		_swerve_limits.x, _swerve_limits.y, _swerve_limits.z, _local.movement._path.size(), lowest])
+	_swerve_misaligned = _swerve_limits.x
+	_swerve_limits = Vector3(INF, INF, INF)
+	Net.queue_physics(_local.movement.cancel_target)
+	await _wait(0.8)
+	await _get_off()
+	return lowest
+
+
+# From a standstill, sent straight behind: the speed 0.3 s after the order.
+func _speed_into_about_turn() -> float:
+	await _put(LANE_B, atan2(-1.0, 0.0))
+	await _get_on()
+	Net.queue_physics(func() -> void: _local.movement.set_target(LANE_A))
+	await _wait(0.3)
+	var speed := Vector2(_local.velocity.x, _local.velocity.z).length()
+	Net.queue_physics(_local.movement.cancel_target)
+	await _wait(0.8)
+	await _get_off()
+	return speed
+
+
+func _turn_slow_checks() -> void:
+	var s := Tuning.server
+	var top := _local.get_mount_speed()
+	var slow_was: float = s.mount_turn_slow_deg
+	var min_was: float = s.mount_turn_min_ratio
+	note("slow-down sliders: starts at %.0f deg off, lowest ratio %.2f (range %s)" % [
+		slow_was, min_was, Tuning.limits_for("mount_turn_slow_deg")])
+	var dip_default := await _dip_after_swerve()
+	var allowed_default := _swerve_misaligned
+	s.mount_turn_slow_deg = 60.0
+	var dip_late := await _dip_after_swerve()
+	var allowed_late := _swerve_misaligned
+	s.mount_turn_slow_deg = slow_was
+	var crawl_default := await _speed_into_about_turn()
+	s.mount_turn_min_ratio = 0.5
+	var crawl_half := await _speed_into_about_turn()
+	s.mount_turn_min_ratio = min_was
+	note("swerved 45 deg at %.2f m/s: lowest speed %.2f with the slow-down from %.0f deg, %.2f with it from 60 deg" % [
+		top, dip_default, slow_was, dip_late])
+	note("0.3 s into an about-turn from a standstill: %.2f m/s at lowest ratio %.2f, %.2f m/s at 0.50" % [
+		crawl_default, min_was, crawl_half])
+	note("the misalignment rule alone allowed %.2f m/s from %.0f deg and %.2f m/s from 60 deg; the rest of the dip at 60 is the arc limit (the path's next point is near)" % [
+		allowed_default, slow_was, allowed_late])
+	expect(allowed_default < top * 0.8 and dip_default < top * 0.95 and absf(allowed_late - top) < 0.01 and dip_late > dip_default,
+		"the_start_angle_slider_decides_whether_a_45_degree_swerve_is_slowed_for_misalignment")
+	expect(crawl_default < 0.5 and crawl_half > 2.0,
+		"the_lowest_ratio_slider_decides_whether_the_horse_moves_through_an_about_turn")
+	await _put(HOME, 0.0)
+	await _wait(3.0)
+
+
+# ------------------------------------------------- 8 (b): the floor snap on a downhill
+
+func _hill_spot(spot: Vector3) -> Vector3:
+	return Vector3(spot.x, TestTerrain.height_at(spot.x, spot.z) + _local.half_height() + 0.05, spot.z)
+
+
+func _hill_checks() -> void:
+	var snap_was: float = Tuning.server.mount_floor_snap
+	var east := atan2(-1.0, 0.0)
+	await _put(_hill_spot(HILL_A), east)
+	expect(await _get_on(), "the_host_is_mounted_on_the_terrain")
+	var with_snap := await _ride(_hill_spot(HILL_B))
+	await _get_off()
+	await _put(_hill_spot(HILL_A), east)
+	Tuning.server.mount_floor_snap = 0.0
+	await _get_on()
+	var without := await _ride(_hill_spot(HILL_B))
+	Tuning.server.mount_floor_snap = snap_was
+	await _get_off()
+	note("over the 6 m hill (30 deg sides) at the horse's speed: snap %.2f m -> %d frames off the floor, peak %.2f m/s, top y %.2f, %.2f m short; snap 0 -> %d frames off the floor, top y %.2f" % [
+		snap_was, with_snap["air"], with_snap["peak"], with_snap["max_y"], with_snap["short"], without["air"], without["max_y"]])
+	expect(float(with_snap["max_y"]) - _hill_spot(HILL_A).y > 4.0 and float(with_snap["short"]) < 1.0,
+		"the_ride_goes_over_the_hill_and_arrives")
+	expect(int(with_snap["air"]) == 0, "with_the_floor_snap_the_horse_never_leaves_the_ground_downhill")
+	await _put(HOME, 0.0)
+	await _wait(3.0)
+
+
+# ------------------------------------------------- 9 (b): the client rides, the server watches
+
+func _client_ride_checks() -> void:
+	var mate := _mate()
+	var warnings := _judge.move_warnings
+	var corrections := _judge.move_corrections
+	client_ride.rpc_id(_client_peer(), LANE_A, LANE_B, false)
+	var seen_peak := 0.0
+	var waited := 0.0
+	var last := mate.global_position
+	var mounted_seen := false
+	while waited < 14.0 and not _reports.has("ride"):
+		await get_tree().physics_frame
+		waited += STEP
+		# Counted from a moment after the horse appears: the park before it is
+		# a teleport, and reads as one.
+		if mate.mount.is_mounted() and not mounted_seen:
+			mounted_seen = true
+			await _wait(0.3)
+		if mounted_seen:
+			seen_peak = maxf(seen_peak, _judge.observed_h_speed(mate))
+		last = mate.global_position
+	var ride := await _take_report("ride")
+	await _wait(0.5)
+	var here := describe(mate)
+	note("client rode the lane: its own peak %.2f m/s in %.2f s, stopped %.2f m from the order; the server's samples peaked at %.2f m/s; body here %s, there %s; warnings %d, corrections %d" % [
+		float(ride.get("peak", 0.0)), float(ride.get("took", -1.0)), float(ride.get("short", -1.0)), seen_peak,
+		here["body_at"], ride.get("at"), _judge.move_warnings - warnings, _judge.move_corrections - corrections])
+	expect(mounted_seen and absf(float(ride.get("peak", 0.0)) - _local.get_mount_speed()) < 0.05,
+		"the_client_rides_at_the_horses_speed")
+	expect(seen_peak > _local.get_mount_speed() * 0.9, "the_server_sees_the_clients_body_at_that_speed")
+	expect((here["body_at"] as Vector3).distance_to(ride.get("at", Vector3.INF) as Vector3) < 0.1
+		and here["stage"] == PlayerMount.Stage.MOUNTED and here["horse"],
+		"both_screens_put_the_ridden_horse_in_the_same_place")
+	expect(_judge.move_corrections == corrections, "the_move_check_does_not_put_the_ridden_body_back")
+	# Getting off at full speed: the stage changes on the server at once and
+	# the body's slowing arrives a round trip later.
+	warnings = _judge.move_warnings
+	client_ride.rpc_id(_client_peer(), LANE_B, LANE_A, true)
+	var bail := await _take_report("ride", 14.0)
+	await _wait(1.0)
+	note("client got off at %.2f m/s mid-ride: stage on the host %s, warnings %d, corrections %d" % [
+		float(bail.get("bail_speed", 0.0)), PlayerMount.Stage.keys()[mate.sync_mount],
+		_judge.move_warnings - warnings, _judge.move_corrections - corrections])
+	expect(float(bail.get("bail_speed", 0.0)) > _local.get_mount_speed() * 0.9 and mate.sync_mount == PlayerMount.Stage.NONE
+		and _judge.move_corrections == corrections,
+		"getting_off_at_full_speed_is_not_read_as_a_sprint")
+	client_park.rpc_id(_client_peer(), CLIENT_SPOT)
+	await _wait(3.2)
+
+
+# ------------------------------------------------------------------- RPCs
+
+@rpc("any_peer", "call_remote", "reliable")
+func stage_done(name_text: String) -> void:
+	if multiplayer.is_server() and multiplayer.get_peers().has(multiplayer.get_remote_sender_id()):
+		_stage_done = name_text
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func report(key: String, value: Variant) -> void:
+	if multiplayer.is_server() and multiplayer.get_peers().has(multiplayer.get_remote_sender_id()):
+		_reports[key] = value
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_park(point: Vector3) -> void:
+	placed()
+	await Harness.forgive_lead(get_tree(), placed)
+	await tick_request(func() -> void:
+		_local.global_position = point
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target()
+		_local.movement.set_aim_override(Vector3.INF))
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_press_mount() -> void:
+	Net.queue_physics(_local.movement.press_mount)
+
+
+# Server -> client: stand at `from`, get on, ride to `to`; with `bail`, get
+# off the moment the horse is at its top speed.
+@rpc("authority", "call_remote", "reliable")
+func client_ride(from: Vector3, to: Vector3, bail: bool) -> void:
+	if _local.sync_mount != PlayerMount.Stage.NONE:
+		Net.queue_physics(_local.movement.press_mount)
+		await _until(func() -> bool: return _local.mount.stage == PlayerMount.Stage.NONE, 2.0)
+	placed()
+	await Harness.forgive_lead(get_tree(), placed)
+	var flat := to - from
+	await tick_request(func() -> void:
+		_local.global_position = from
+		_local.velocity = Vector3.ZERO
+		_local.rotation.y = atan2(-flat.x, -flat.z)
+		_local.movement.cancel_target())
+	await _wait(0.8)
+	await _get_on()
+	if not bail:
+		var run := await _ride(to)
+		run["at"] = _local.global_position
+		report.rpc_id(1, "ride", run)
+		return
+	Net.queue_physics(func() -> void: _local.movement.set_target(to))
+	var top := _local.get_mount_speed()
+	await _until(func() -> bool: return Vector2(_local.velocity.x, _local.velocity.z).length() >= top * 0.995, 4.0)
+	var speed := Vector2(_local.velocity.x, _local.velocity.z).length()
+	Net.queue_physics(_local.movement.press_mount)
+	await _until(func() -> bool: return _local.state == Player.State.IDLE and not _local.movement.has_target(), 8.0)
+	report.rpc_id(1, "ride", {"bail_speed": speed, "at": _local.global_position})
+
+
+# Server -> client: how this screen shows a body's horse.
+@rpc("authority", "call_remote", "reliable")
+func client_report_body(path: NodePath, key: String) -> void:
+	var body := get_node_or_null(path) as Player
+	report.rpc_id(1, key, describe(body) if body != null else {})
+
+
+# Server -> client: time the horse a body leaves behind, on this screen.
+@rpc("authority", "call_remote", "reliable")
+func client_watch_linger(path: NodePath, key: String) -> void:
+	var body := get_node_or_null(path) as Player
+	if body == null:
+		report.rpc_id(1, key, {})
+		return
+	var appeared := await _until(func() -> bool: return body.mount.lingering_count() > 0, 8.0)
+	var at := body.mount.lingering_position()
+	var stood := await _until(func() -> bool: return body.mount.lingering_count() == 0, 8.0)
+	report.rpc_id(1, key, {"seconds": stood if appeared >= 0.0 else -1.0, "at": at})
+
+
+@rpc("authority", "call_remote", "reliable")
+func finish(host_failures: int) -> void:
+	print("MT_RESULT peer=%d checks=%d failures=%d host_failures=%d" % [
+		_peer_id, _checks, _failures, host_failures])
+	get_tree().quit(0 if _failures == 0 else 1)

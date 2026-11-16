@@ -38,6 +38,7 @@ const GROUP_LABELS := {
 	"Force": "힘 · 밀치기 · 잡기 · 넉백 (손맛 Q6)",
 	"Skills": "기술 · 허수아비 공격",
 	"Survival": "낙하 · 낙사 · 리스폰",
+	"Mount": "말 타기 (서버 승인) — 소환 · 크기 · 속도",
 	"Combat": "전투 튜닝 (서버 승인) — 무기 공격력 · 방어력 · 치명타",
 	"Sword": "검 4기술 (서버 승인) — 찌르기 · 횡베기 · 종베기 · 흘리기",
 	"Shield": "방패 4기술 (서버 승인) — 들기 · 밀기 · 던지기 · 찍기",
@@ -71,6 +72,21 @@ const FIELD_LABELS := {
 	"visual_run_speed": "달리기 그림 시작 속도 (m/s, 아래는 걷기)",
 	"visual_walk_back_speed": "걷기 그림 복귀 속도 (m/s)",
 	"visual_stride_max": "보행 클립 최대 배속",
+	"mount_summon_time": "말 소환 시간 (초)",
+	"mount_linger_time": "내린 뒤 말이 남는 시간 (초)",
+	"mount_length": "말 길이 (m)",
+	"mount_back_height": "말 등 높이 (m)",
+	"mount_width": "말 폭 (m)",
+	"mount_large_scale": "큰 말 배율 (오크)",
+	"mount_radius": "탄 동안 충돌 캡슐 반지름 (m)",
+	"mount_seat_above": "앉은 높이 (등 위, 몸 배율당 m)",
+	"mount_speed_mult": "말 속도 배율 (인간 맨몸 이속 대비)",
+	"mount_accel_time": "말 가속 시간 (0 → 최고, 초)",
+	"mount_decel_time": "말 감속 시간 (최고 → 0, 초)",
+	"mount_turn_deg": "말 회전 속도 (도/초)",
+	"mount_floor_snap": "말 바닥 붙기 길이 (m)",
+	"mount_turn_slow_deg": "방향 어긋남 감속 시작 각도 (도)",
+	"mount_turn_min_ratio": "방향 어긋남 최저 속도 비율 (0~1)",
 	"gravity": "중력",
 	"base_move_speed": "기본 이속",
 	"base_jump_height": "기본 점프 높이",
@@ -165,6 +181,8 @@ var _slot_buttons: Array[Button] = []
 # The dash key, rebound the same way: the button asks, the next key answers.
 var _rebind_dash := false
 var _dash_button: Button
+var _rebind_mount := false
+var _mount_button: Button
 var _arc: MeshInstance3D
 # Off by default (2026-11-03): the line drawn from the feet along the jump
 # the cursor would get was always on and read as clutter. The panel's
@@ -195,6 +213,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		_rebind_dash = false
 		_refresh_dash_button()
 		# The key may have come off a slot.
+		_refresh_slot_buttons()
+		get_viewport().set_input_as_handled()
+		return
+	if _rebind_mount and event is InputEventKey and event.is_pressed() and not event.is_echo():
+		if is_instance_valid(player) and player.movement != null:
+			player.movement.rebind_mount((event as InputEventKey).physical_keycode)
+		_rebind_mount = false
+		_refresh_dash_button()
 		_refresh_slot_buttons()
 		get_viewport().set_input_as_handled()
 		return
@@ -336,6 +362,12 @@ func _build_ui() -> void:
 		_rebind_dash = true
 		_refresh_dash_button())
 	keys.add_child(_dash_button)
+	_mount_button = Button.new()
+	_mount_button.name = "MountKey"
+	_mount_button.pressed.connect(func() -> void:
+		_rebind_mount = true
+		_refresh_dash_button())
+	keys.add_child(_mount_button)
 	_refresh_dash_button()
 	_slot_buttons.clear()
 	for index in PlayerSkills.SLOT_COUNT:
@@ -352,7 +384,7 @@ func _build_ui() -> void:
 	var local := _section(column, "조작 설정 (이 컴퓨터만)", false)
 	for name_text in Tuning.field_names(Tuning.values):
 		# Keycodes are not sliders: the dash key has its button above.
-		if name_text == "dash_key":
+		if name_text == "dash_key" or name_text == "mount_key":
 			continue
 		var value: Variant = Tuning.values.get(name_text)
 		if typeof(value) == TYPE_BOOL:
@@ -580,6 +612,12 @@ func _refresh_dash_button() -> void:
 		_dash_button.text = "돌진: 키를 누르세요…"
 	else:
 		_dash_button.text = "돌진: %s  — 키 변경" % player.movement.dash_key_label()
+	if _mount_button == null:
+		return
+	if _rebind_mount:
+		_mount_button.text = "말 소환/내리기: 키를 누르세요…"
+	else:
+		_mount_button.text = "말 소환/내리기: %s  — 키 변경" % player.movement.mount_key_label()
 
 
 func numeric_limits(field: String, value: float) -> Vector2:
