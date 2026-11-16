@@ -1,0 +1,149 @@
+[gd_scene format=3 uid="uid://cemwtjqhyac1d"]
+
+[node name="latvia" type="Node3D" unique_id=1278224839]
+
+[node name="latvia field" type="CSGBox3D" parent="." unique_id=787680239]
+use_collision = true
+size = Vector3(330, 1, 170)
+
+[node name="wolf_packs" type="Node3D" parent="." unique_id=1493057216]
+
+[node name="pack_1" type="CSGCylinder3D" parent="wolf_packs" unique_id=318840572]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 124.7, 0.6, 43.7)
+radius = 10.0
+height = 0.2
+
+[node name="pack_2" type="CSGCylinder3D" parent="wolf_packs" unique_id=902716345]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 76.1, 0.6, 35.8)
+radius = 10.0
+height = 0.2
+
+[node name="pack_3" type="CSGCylinder3D" parent="wolf_packs" unique_id=1687340921]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 102.8, 0.6, 6.5)
+radius = 10.0
+height = 0.2
+
+[node name="pack_4" type="CSGCylinder3D" parent="wolf_packs" unique_id=574129083]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 32.8, 0.6, -2.9)
+radius = 10.0
+height = 0.2
+
+[node name="pack_5" type="CSGCylinder3D" parent="wolf_packs" unique_id=2041875630]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 124.4, 0.6, -51.8)
+radius = 10.0
+height = 0.2
+
+[node name="pack_6" type="CSGCylinder3D" parent="wolf_packs" unique_id=1265903478]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 56.4, 0.6, -39.9)
+radius = 10.0
+height = 0.2
+
+[node name="big_pack_1" type="CSGCylinder3D" parent="wolf_packs" unique_id=1741930265]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0.6, -20)
+radius = 12.0
+height = 0.2
+
+[node name="big_pack_2" type="CSGCylinder3D" parent="wolf_packs" unique_id=385617042]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -60, 0.6, 25)
+radius = 12.0
+height = 0.2
+
+[node name="alpha_pack" type="CSGCylinder3D" parent="wolf_packs" unique_id=1209483756]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -130, 0.6, -50)
+radius = 14.0
+height = 0.2
+
+[node name="rocks" type="Node3D" parent="." unique_id=836402957]
+
+[node name="rock_1" type="CSGBox3D" parent="rocks" unique_id=1920456738]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 100, 1.7, 38)
+use_collision = true
+size = Vector3(3.2, 2.4, 2.6)
+
+[node name="rock_2" type="CSGBox3D" parent="rocks" unique_id=447281906]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 68, 2.3, 12)
+use_collision = true
+size = Vector3(2.3, 3.6, 3.1)
+
+[node name="rock_3" type="CSGBox3D" parent="rocks" unique_id=1358620417]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 128, 1.55, 18)
+use_collision = true
+size = Vector3(3.8, 2.1, 2.9)
+
+[node name="rock_4" type="CSGBox3D" parent="rocks" unique_id=709534182]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 88, 2, -24)
+use_collision = true
+size = Vector3(2.7, 3, 3.5)
+
+[node name="rock_5" type="CSGBox3D" parent="rocks" unique_id=1832097564]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 92, 1.9, -52)
+use_collision = true
+size = Vector3(3.4, 2.8, 2.2)
+
+[node name="rock_6" type="CSGBox3D" parent="rocks" unique_id=268415739]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 148, 2.45, -18)
+use_collision = true
+size = Vector3(2.1, 3.9, 2.5)
+
+[node name="rock_7" type="CSGBox3D" parent="rocks" unique_id=1576238094]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, 1.6, -28)
+use_collision = true
+size = Vector3(3.9, 2.2, 3.7)
+
+[node name="rock_8" type="CSGBox3D" parent="rocks" unique_id=1104867325]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, 2.15, 26)
+use_collision = true
+size = Vector3(2.8, 3.3, 2)
+
+[node name="rock_9" type="CSGBox3D" parent="rocks" unique_id=1648205913]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -35, 2.2, 5)
+use_collision = true
+size = Vector3(2.6, 3.4, 3)
+
+[node name="rock_10" type="CSGBox3D" parent="rocks" unique_id=523791468]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -85, 1.65, -15)
+use_collision = true
+size = Vector3(3.7, 2.3, 2.4)
+
+[node name="rock_11" type="CSGBox3D" parent="rocks" unique_id=1987340652]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -45, 1.95, -55)
+use_collision = true
+size = Vector3(2.2, 2.9, 3.8)
+
+[node name="rock_12" type="CSGBox3D" parent="rocks" unique_id=871265309]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -140, 2.35, 15)
+use_collision = true
+size = Vector3(3.3, 3.7, 2.7)
+
+[node name="rock_13" type="CSGBox3D" parent="rocks" unique_id=1432908571]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -25, 1.75, 55)
+use_collision = true
+size = Vector3(3, 2.5, 3.6)
+
+[node name="bandit_camp" type="Node3D" parent="." unique_id=694173820]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -100, 0, 60)
+
+[node name="camp_area" type="CSGCylinder3D" parent="bandit_camp" unique_id=1850392647]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
+radius = 10.0
+height = 0.2
+
+[node name="tent_1" type="CSGBox3D" parent="bandit_camp" unique_id=312648795]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, -7)
+use_collision = true
+size = Vector3(3, 2, 3)
+
+[node name="tent_2" type="CSGBox3D" parent="bandit_camp" unique_id=1573820946]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.06, 1.5, 3.5)
+use_collision = true
+size = Vector3(3, 2, 3)
+
+[node name="tent_3" type="CSGBox3D" parent="bandit_camp" unique_id=948205137]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.06, 1.5, 3.5)
+use_collision = true
+size = Vector3(3, 2, 3)
+
+[node name="campfire" type="CSGCylinder3D" parent="bandit_camp" unique_id=2106473958]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
+radius = 0.6
+height = 0.4

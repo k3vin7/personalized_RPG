@@ -1,0 +1,80 @@
+[gd_scene format=3 uid="uid://g262o3oqajev"]
+
+[ext_resource type="PackedScene" uid="uid://dwfx4x32t4g6k" path="res://maps/zone_5.tscn" id="1_v61fo"]
+[ext_resource type="PackedScene" uid="uid://s8xr1f8vus3q" path="res://maps/2_to_5.tscn" id="2_eq6i0"]
+[ext_resource type="PackedScene" uid="uid://vxlhqgpc068q" path="res://maps/5_to_6.tscn" id="3_ahfa1"]
+[ext_resource type="PackedScene" uid="uid://cemwtjqhyac1d" path="res://maps/latvia.tscn" id="4_eq6i0"]
+[ext_resource type="PackedScene" uid="uid://cg4gk0i8rfy35" path="res://maps/mirche_forest.tscn" id="5_ahfa1"]
+
+[ext_resource type="Script" path="res://scripts/world/world_walk.gd" id="6_walk"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_day"]
+sky_top_color = Color(0.3, 0.52, 0.85, 1)
+sky_horizon_color = Color(0.72, 0.82, 0.92, 1)
+ground_bottom_color = Color(0.35, 0.38, 0.4, 1)
+ground_horizon_color = Color(0.72, 0.82, 0.92, 1)
+
+[sub_resource type="Sky" id="Sky_day"]
+sky_material = SubResource("ProceduralSkyMaterial_day")
+
+[sub_resource type="Environment" id="Environment_day"]
+background_mode = 2
+sky = SubResource("Sky_day")
+ambient_light_source = 2
+ambient_light_color = Color(0.86, 0.9, 0.94, 1)
+ambient_light_energy = 0.35
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_fu0nf"]
+radius = 0.45
+height = 1.5
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_485l0"]
+radius = 0.37
+height = 1.7
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_ua6tw"]
+radius = 0.4
+height = 1.8
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_ik31s"]
+height = 2.2
+
+[node name="Node3D" type="Node3D" unique_id=2115086612]
+script = ExtResource("6_walk")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1392847561]
+transform = Transform3D(0.766044, 0.506524, -0.39574, 0, 0.615661, 0.788011, 0.642788, -0.603651, 0.471624, 0, 30, 0)
+light_energy = 0.75
+shadow_enabled = true
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=605918324]
+environment = SubResource("Environment_day")
+
+[node name="dwarf_ex" type="MeshInstance3D" parent="." unique_id=283109883]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11, 1.25, -1)
+mesh = SubResource("CapsuleMesh_fu0nf")
+
+[node name="elf_ex" type="MeshInstance3D" parent="." unique_id=495327262]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11, 1.35, -3)
+mesh = SubResource("CapsuleMesh_485l0")
+
+[node name="human_ex" type="MeshInstance3D" parent="." unique_id=740685745]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9, 1.4, -3)
+mesh = SubResource("CapsuleMesh_ua6tw")
+
+[node name="orc_ex" type="MeshInstance3D" parent="." unique_id=941933603]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9, 1.5999999, -1)
+mesh = SubResource("CapsuleMesh_ik31s")
+
+[node name="zone5" parent="." unique_id=1059632899 instance=ExtResource("1_v61fo")]
+
+[node name="2to5" parent="." unique_id=215606521 instance=ExtResource("2_eq6i0")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -232, 0, 0)
+
+[node name="5to6" parent="." unique_id=1841982765 instance=ExtResource("3_ahfa1")]
+
+[node name="latvia" parent="." unique_id=1278224839 instance=ExtResource("4_eq6i0")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -195, 0, -175)
+
+[node name="mirche" parent="." unique_id=1869865343 instance=ExtResource("5_ahfa1")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -195, 0, -355)

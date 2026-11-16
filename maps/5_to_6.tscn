@@ -1,0 +1,23 @@
+[gd_scene format=3 uid="uid://vxlhqgpc068q"]
+
+[node name="5to6" type="Node3D" unique_id=1841982765]
+
+[node name="field" type="CSGBox3D" parent="." unique_id=1375178674]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, -270)
+use_collision = true
+size = Vector3(100, 1, 360)
+
+[node name="road" type="CSGBox3D" parent="." unique_id=817538009]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -270)
+use_collision = true
+size = Vector3(6, 1, 360)
+
+[node name="checkpoint_zone5" type="CSGBox3D" parent="." unique_id=290759534]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 2, -113)
+use_collision = true
+size = Vector3(4, 3, 6)
+
+[node name="checkpoint_zone5_2" type="CSGBox3D" parent="." unique_id=1762695226]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 2, -114.5)
+use_collision = true
+size = Vector3(4, 3, 3)

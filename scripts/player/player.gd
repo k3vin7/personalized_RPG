@@ -1278,6 +1278,22 @@ func _build_body() -> void:
 	_apply_state_colour()
 
 
+# Draws the plain capsule and its facing cone in place of the model, or the
+# model again. Drawn only: the body, its size and every ruling are the same.
+# For a blockout walk, where the thing to read is the body's size against
+# the buildings. Whatever hangs off the model's hands is hidden with it.
+func draw_as_capsule(on: bool) -> void:
+	var model := visual != null and visual.model_loaded()
+	if model:
+		visual.visible = not on
+	_body_mesh_node.visible = on or not model
+	_facing.visible = on or not model
+
+
+func drawn_as_capsule() -> bool:
+	return _body_mesh_node.visible
+
+
 # How long a press is shown while nothing has answered it. Long enough for a
 # 200 ms round trip and the ruling at the far end, short enough that a lost
 # answer does not leave the body posing.

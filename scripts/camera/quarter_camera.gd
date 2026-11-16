@@ -11,11 +11,18 @@ extends Node3D
 # steps it by camera_zoom_step and the shown value eases after it. There was
 # no "camera shrink for buildings" code to extend; this is the first zoom.
 # Still no rotation (11-02): rotation.y stays 0 at every zoom.
+#
+# A map may give the view a compass heading once (set_yaw), for a map whose
+# north is not -Z. It is a fixed heading, not a rotation in play: nothing
+# changes it afterwards, and it is 0 unless a map sets it.
 
 @export var follow_smoothing: float = 14.0
 
 var target: Node3D
 var camera: Camera3D
+
+# The view's heading, degrees about Y. 0 looks along -Z.
+var yaw_deg := 0.0
 
 var _offset := Vector3.ZERO
 # The zoom the view is showing, easing toward Tuning.values.camera_zoom.
@@ -51,6 +58,16 @@ func _ready() -> void:
 func set_pitch(degrees: float) -> void:
 	Tuning.values.camera_pitch_deg = degrees
 	_apply_view(_zoom_shown)
+
+
+# The heading the view looks along, degrees about Y (0 = -Z up the screen).
+# Jumps there: a heading is set when a map starts, not eased into.
+func set_yaw(degrees: float) -> void:
+	yaw_deg = degrees
+	_apply_view(_zoom_shown)
+	if is_instance_valid(target) and target.is_inside_tree():
+		_smoothed = target.global_position + _offset
+		global_position = _smoothed
 
 
 # ------------------------------------------------------------ C-1g-e: zoom
@@ -95,8 +112,9 @@ func set_zoom_now(zoom: float) -> void:
 
 func _apply_view(zoom: float) -> void:
 	var pitch := deg_to_rad(pitch_deg_for(zoom))
-	_offset = Vector3(0.0, sin(pitch), cos(pitch)) * distance_for(zoom)
-	rotation = Vector3(-pitch, 0.0, 0.0)
+	var yaw := deg_to_rad(yaw_deg)
+	_offset = (Vector3(0.0, sin(pitch), cos(pitch)) * distance_for(zoom)).rotated(Vector3.UP, yaw)
+	rotation = Vector3(-pitch, yaw, 0.0)
 
 
 # The wheel. Up is closer. Anything the UI took (the panel's own scroll) does
@@ -175,4 +193,5 @@ func _shake_offset(delta: float) -> Vector3:
 		return Vector3.ZERO
 	_shake_left = maxf(0.0, _shake_left - delta)
 	var strength := _shake_amp * (_shake_left / maxf(_shake_time, 0.001))
-	return Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), 0.0) * strength
+	var jitter := Vector3(randf_range(-1.0, 1.0), randf_range(-1.0, 1.0), 0.0) * strength
+	return jitter.rotated(Vector3.UP, deg_to_rad(yaw_deg))
