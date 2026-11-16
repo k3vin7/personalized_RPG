@@ -222,6 +222,7 @@ func _start_smoke_when_ready() -> void:
 	# auth handshake lets a client connect during the host's bake, so both
 	# spawns and the start can land in one frame -- V-1, 2026-11-07).
 	await get_tree().create_timer(0.5).timeout
+	Harness.held_features_on()
 	begin_smoke.rpc()
 	_run_smoke()
 

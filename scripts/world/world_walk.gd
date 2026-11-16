@@ -154,6 +154,8 @@ func _local_player() -> Player:
 # Measures what F6 is for: the body lands, a jump leaves the floor, a move
 # order walks it. Input goes through the player's own request functions.
 func _walk_check(local: Player) -> void:
+	# The check presses jump, which is on hold (off by default) in the game.
+	Tuning.server.jump_enabled = true
 	await get_tree().create_timer(1.5).timeout
 	var landed := local.global_position
 	print("WORLD_WALK_CHECK landed at=%s on_floor=%s state=%s" % [

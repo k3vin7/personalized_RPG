@@ -36,6 +36,20 @@ const REFILL_WAIT := 3.5
 # is counted in physics frames, and on a loaded peer (C-1f-2's model and
 # clips on both screens) those run late enough that the first forgiveness
 # (two samples, 0.2 s) had expired before the teleport was synced.
+# Host side, before a check begins: the jump, the climb and the co-op launch
+# are on hold in the game (off by default since 2026-11-17) and the checks
+# written before that measure them, so an automated run turns all three on.
+# Pushed at once rather than on the next heartbeat, on the same reliable
+# channel as the order to begin, so a client has the table before it starts.
+static func held_features_on() -> void:
+	Tuning.server.jump_enabled = true
+	Tuning.server.climb_enabled = true
+	Tuning.server.coop_launch_enabled = true
+	if ServerAuthority.instance != null:
+		ServerAuthority.instance._push_server_tuning()
+	print("PLAYGROUND_HARNESS held features on: jump, climb, co-op launch")
+
+
 static func forgive_lead(tree: SceneTree, again := Callable()) -> void:
 	var waited := 0.0
 	while waited < FORGIVE_LEAD:
