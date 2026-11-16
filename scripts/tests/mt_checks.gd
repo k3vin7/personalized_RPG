@@ -146,12 +146,28 @@ func run(world: Node3D) -> void:
 	_peer_id = multiplayer.get_unique_id()
 	_local = Net.spawn_root.get_node(str(_peer_id)) as Player
 	_judge = world.get_node_or_null("ServerAuthority") as ServerAuthority
+	# --mt-knock-solo=N: one process on its own, its own body knocked away on
+	# foot N times, the gaps between its physics steps timed. No second peer.
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--mt-knock-solo=") and multiplayer.is_server():
+			await _knock_solo(int(arg.trim_prefix("--mt-knock-solo=")))
+			get_tree().quit(0)
+			return
 	if not multiplayer.is_server():
 		stage_done.rpc_id(1, "client_ready")
 		return
 	expect(await _wait_stage("client_ready"), "both_peers_present")
 	var warnings := _judge.move_warnings
 	var corrections := _judge.move_corrections
+	# --mt-knock=N: the client knocked away on foot N times, its step gaps timed.
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--mt-knock="):
+			await _reset_pair()
+			await _knock_repeat(int(arg.trim_prefix("--mt-knock=")))
+			finish.rpc(0)
+			await _wait(1.0)
+			get_tree().quit(0)
+			return
 	# --mt-thrown=N: only the thrown client's horse, N times over.
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--mt-thrown="):
@@ -1115,7 +1131,12 @@ func _hit_checks() -> void:
 	_slams(true)
 	var took := await _until(func() -> bool: return mate.sync_mount == PlayerMount.Stage.NONE, 6.0)
 	_slams(false)
-	await _wait(0.3)
+	# The client's own screen follows the server's word a little later: wait
+	# for it to change, up to 1 s (was a fixed 0.3 s; the headless client's
+	# frame gaps ate that margin 2 times in 20).
+	client_watch_stage.rpc_id(_client_peer(), mate.get_path(), "client_hit_followed")
+	var followed := await _take_report("client_hit_followed", 4.0)
+	note("client's own screen followed the server %.3f s after the watch reached it" % float(followed.get("followed", -1.0)))
 	var knock: Dictionary = _judge.last_knock.get(_client_peer(), {})
 	var launched := bool(knock.get("launched", false))
 	client_report_body.rpc_id(_client_peer(), mate.get_path(), "client_hit")
@@ -1141,7 +1162,7 @@ func _hit_checks() -> void:
 
 
 # The client slammed off its horse, `times` over: what its own screen shows
-# 0.3 s after the server took it off (the check as it stands in _hit_checks),
+# once it has followed the server, 1 s at most (as in _hit_checks),
 # and how long after the server's word its own screen followed.
 func _thrown_repeat(times: int) -> void:
 	var mate := _mate()
@@ -1168,17 +1189,16 @@ func _thrown_repeat(times: int) -> void:
 		_slams(false)
 		var frame_off := Engine.get_physics_frames()
 		client_watch_stage.rpc_id(_client_peer(), mate.get_path(), "lag_%d" % trial)
-		await _wait(0.3)
+		var lag := await _take_report("lag_%d" % trial, 4.0)
 		var knock: Dictionary = _judge.last_knock.get(_client_peer(), {})
 		client_report_body.rpc_id(_client_peer(), mate.get_path(), "trial_%d" % trial)
 		var own := await _take_report("trial_%d" % trial)
-		var lag := await _take_report("lag_%d" % trial)
 		var thrown := String(_judge.last_mount.get("why", "")) == "thrown" and _judge.mount_throws == throws + 1
 		var passed: bool = thrown and mate.mount.lingering_count() == 0 and int(own.get("lingering", -1)) == 0 \
 			and not own.get("capsule_off", true)
 		if not passed:
 			failed += 1
-		note("thrown trial %d: %s; mounted %.2f, off after %.2f s (host frame %d), why %s, launched %s; client's own screen 0.3 s later: stage %s, horses left %s, vanished total %s, capsule off %s; when the watch RPC arrived its screen showed stage %s / sync %s, and followed %.3f s later (state then %s, hp %s)" % [
+		note("thrown trial %d: %s; mounted %.2f, off after %.2f s (host frame %d), why %s, launched %s; client's own screen once it followed (1 s at most): stage %s, horses left %s, vanished total %s, capsule off %s; when the watch RPC arrived its screen showed stage %s / sync %s, and followed %.3f s later (state then %s, hp %s)" % [
 			trial + 1, "PASS" if passed else "FAIL", up, took, frame_off, _judge.last_mount.get("why", ""),
 			knock.get("launched"), own.get("stage"), own.get("lingering"), own.get("vanished"), own.get("capsule_off"),
 			lag.get("stage_at_rpc"), lag.get("sync_at_rpc"), float(lag.get("followed", -1.0)), lag.get("state"), lag.get("hp")])
@@ -1192,6 +1212,189 @@ func _thrown_repeat(times: int) -> void:
 	expect(failed == 0, "the_thrown_client_has_no_horse_left_on_either_screen_every_time")
 	Tuning.server.dummy_attack_period = period
 	Tuning.server.dummy_attack_enabled = enabled
+
+
+# ------------------------------------------------- the stall at a launch, timed
+
+# Real time between this process's physics steps, and every node that enters
+# the tree, while _gap_on. Measurement only.
+var _gap_on := false
+var _gap_last_usec := 0
+var _gap_steps: Array = []
+var _gap_nodes: Array = []
+var _gap_hit_usec := 0
+var _gap_hp := 0.0
+var _gap_frames: Array = []
+var _gap_frame_last := 0
+
+
+func _physics_process(_delta: float) -> void:
+	if not _gap_on:
+		return
+	var now := Time.get_ticks_usec()
+	_gap_steps.append([now, now - _gap_last_usec, Engine.get_process_frames()])
+	_gap_last_usec = now
+	if _gap_hit_usec == 0 and (_local.hp < _gap_hp - 0.01 or _local.state == Player.State.AIRBORNE):
+		_gap_hit_usec = now
+
+
+func _process(_delta: float) -> void:
+	if not _gap_on:
+		return
+	var now := Time.get_ticks_usec()
+	_gap_frames.append([now, now - _gap_frame_last])
+	_gap_frame_last = now
+
+
+func _gap_node_added(node: Node) -> void:
+	if not _gap_on:
+		return
+	var text := "%s(%s)" % [node.name, node.get_class()]
+	var script := node.get_script() as Script
+	if script != null:
+		text += "[%s]" % script.resource_path.get_file()
+	for prop: String in ["mesh", "material_override", "process_material", "stream", "texture", "draw_pass_1", "font"]:
+		if prop in node:
+			var res := node.get(prop) as Resource
+			if res != null:
+				text += " %s=%s%s" % [prop, res.get_class(), (":" + res.resource_path.get_file()) if res.resource_path != "" else ""]
+	var parent := node.get_parent()
+	_gap_nodes.append([Time.get_ticks_usec(), text + " under " + (String(parent.name) if parent != null else "?")])
+
+
+func _gap_begin() -> void:
+	if not get_tree().node_added.is_connected(_gap_node_added):
+		get_tree().node_added.connect(_gap_node_added)
+	_gap_steps = []
+	_gap_nodes = []
+	_gap_frames = []
+	_gap_hit_usec = 0
+	_gap_hp = _local.hp
+	_gap_last_usec = Time.get_ticks_usec()
+	_gap_frame_last = _gap_last_usec
+	_gap_on = true
+
+
+# What the record says: the longest gap in the second around the hit, the
+# longest outside it, and what entered the tree during the long one.
+func _gap_end() -> Dictionary:
+	_gap_on = false
+	var hit := _gap_hit_usec
+	var worst := 0
+	var worst_at := 0
+	var worst_from := 0
+	var calm := 0
+	var long_gaps := 0
+	var all_long := []
+	for row: Array in _gap_steps:
+		var at := int(row[0])
+		var gap := int(row[1])
+		if gap > 50000 and hit != 0:
+			all_long.append("%d@%+d" % [gap / 1000, (at - hit) / 1000])
+		if hit != 0 and at >= hit - 300000 and at <= hit + 700000:
+			if gap > 20000:
+				long_gaps += 1
+			if gap > worst:
+				worst = gap
+				worst_at = at
+				worst_from = at - gap
+		elif gap > calm:
+			calm = gap
+	var frame_worst := 0
+	for row: Array in _gap_frames:
+		var at := int(row[0])
+		if hit != 0 and at >= hit - 300000 and at <= hit + 700000:
+			frame_worst = maxi(frame_worst, int(row[1]))
+	var during := []
+	var around := []
+	for row: Array in _gap_nodes:
+		var at := int(row[0])
+		if at >= worst_from and at <= worst_at:
+			during.append(row[1])
+		elif hit != 0 and at >= hit - 300000 and at <= hit + 700000:
+			around.append(row[1])
+	return {"hit_seen": hit != 0, "worst_ms": float(worst) / 1000.0, "worst_after_hit_ms": float(worst_at - hit) / 1000.0,
+		"calm_worst_ms": float(calm) / 1000.0, "long_gaps": long_gaps, "frame_worst_ms": float(frame_worst) / 1000.0,
+		"steps": _gap_steps.size(), "all_long": all_long, "frames": _gap_frames.size(),
+		"span_ms": float(_gap_last_usec - int((_gap_steps[0] as Array)[0])) / 1000.0 if _gap_steps.size() > 0 else 0.0,
+		"nodes_during": during, "nodes_around": around, "state": Player.State.keys()[_local.state]}
+
+
+func _gap_line(label: String, got: Dictionary) -> String:
+	return "%s: hit seen %s; longest gap between physics steps around the hit %.1f ms (ending %.1f ms after the hit showed), longest away from it %.1f ms, gaps over 20 ms around the hit %d, longest gap between drawn frames %.1f ms; nodes entering the tree during the long gap: %s; in the rest of that second: %s" % [
+		label, got.get("hit_seen"), float(got.get("worst_ms", -1.0)), float(got.get("worst_after_hit_ms", 0.0)),
+		float(got.get("calm_worst_ms", -1.0)), int(got.get("long_gaps", -1)), float(got.get("frame_worst_ms", -1.0)),
+		got.get("nodes_during"), got.get("nodes_around")] + "; every gap over 50 ms in the %.0f ms record, as ms@ms-from-hit: %s; %d steps, %d drawn frames" % [
+		float(got.get("span_ms", 0.0)), got.get("all_long"), int(got.get("steps", 0)), int(got.get("frames", 0))]
+
+
+# The client on foot in front of the scarecrow, knocked away `times` over.
+func _knock_repeat(times: int) -> void:
+	var mate := _mate()
+	var dummy := _world.get_node("Dummy_1") as Dummy
+	var period: float = Tuning.server.dummy_attack_period
+	var enabled: bool = Tuning.server.dummy_attack_enabled
+	Tuning.server.dummy_attack_period = 1.5
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = _slam_spot(dummy) + Vector3(6.0, 0.0, 6.0)
+		_local.velocity = Vector3.ZERO)
+	for trial in range(times):
+		_slams(false)
+		await Harness.dummy_home(dummy, _judge, _local, mate, get_tree(), note)
+		client_park.rpc_id(_client_peer(), _slam_spot(dummy))
+		await _wait(1.5)
+		var hp := mate.hp
+		client_gap_watch.rpc_id(_client_peer(), "gap_%d" % trial, 4.5)
+		_gap_hp = -1000.0
+		_gap_begin()
+		_gap_hp = -1000.0
+		await _wait(0.5)
+		_slams(true)
+		await _until(func() -> bool: return mate.hp < hp - 0.01, 3.5)
+		_slams(false)
+		var knock: Dictionary = _judge.last_knock.get(_client_peer(), {})
+		var got := await _take_report("gap_%d" % trial, 8.0)
+		_gap_hit_usec = _gap_last_usec
+		var host_got := _gap_end()
+		note("knock trial %d, the host process over the same seconds: gaps over 50 ms as ms@ms-from-end: %s; %d steps, %d drawn frames in %.0f ms" % [
+			trial + 1, host_got.get("all_long"), int(host_got.get("steps", 0)), int(host_got.get("frames", 0)), float(host_got.get("span_ms", 0.0))])
+		note(_gap_line("knock trial %d (client on foot, launched %s, HP -%.0f)" % [trial + 1, knock.get("launched"), hp - mate.hp], got))
+		await tick_request(func() -> void: _judge.server_set_hp(mate, mate.stats.max_hp))
+		await _until(func() -> bool: return mate.state == Player.State.IDLE, 5.0)
+		await _wait(0.5)
+	Tuning.server.dummy_attack_period = period
+	Tuning.server.dummy_attack_enabled = enabled
+
+
+# This process alone: its own body knocked away on foot, `times` over.
+func _knock_solo(times: int) -> void:
+	var dummy := _world.get_node("Dummy_1") as Dummy
+	Tuning.server.dummy_attack_period = 1.5
+	note("solo: display server %s, vsync %d, max fps %d" % [DisplayServer.get_name(), DisplayServer.window_get_vsync_mode(), Engine.max_fps])
+	for trial in range(times):
+		_slams(false)
+		await Harness.dummy_home(dummy, _judge, _local, null, get_tree(), note)
+		await tick_request(func() -> void:
+			placed()
+			_judge.server_set_hp(_local, _local.stats.max_hp)
+			_local.global_position = _slam_spot(dummy)
+			_local.velocity = Vector3.ZERO
+			_local.movement.cancel_target())
+		await _wait(1.5)
+		var hp := _local.hp
+		_gap_begin()
+		await _wait(0.5)
+		_slams(true)
+		await _until(func() -> bool: return _local.hp < hp - 0.01, 3.5)
+		_slams(false)
+		await _wait(1.0)
+		var got := _gap_end()
+		var knock: Dictionary = _judge.last_knock.get(1, {})
+		note(_gap_line("solo knock trial %d (on foot, launched %s, HP -%.0f)" % [trial + 1, knock.get("launched"), hp - _local.hp], got))
+		await _until(func() -> bool: return _local.state == Player.State.IDLE, 5.0)
+		await _wait(0.5)
+	print("MT_RESULT peer=%d solo knock trials=%d" % [_peer_id, times])
 
 
 # ------------------------------------------------- 12 (c): the no-mount-zone slot
@@ -1462,7 +1665,7 @@ func client_watch_stage(path: NodePath, key: String) -> void:
 	var last := arrived
 	var worst_gap := 0
 	var steps := 0
-	while body.mount.stage != PlayerMount.Stage.NONE and steps < 360:
+	while body.mount.stage != PlayerMount.Stage.NONE and steps < 120:
 		await get_tree().physics_frame
 		steps += 1
 		var now := Time.get_ticks_msec()
@@ -1471,6 +1674,14 @@ func client_watch_stage(path: NodePath, key: String) -> void:
 	report.rpc_id(1, key, {"stage_at_rpc": stage_at_rpc, "sync_at_rpc": sync_at_rpc, "followed": float(steps) * STEP,
 		"real_ms": Time.get_ticks_msec() - arrived, "worst_gap_ms": worst_gap, "arrived_ms": arrived,
 		"state": Player.State.keys()[body.state], "hp": body.hp})
+
+
+# Server -> client: time this process's physics steps for `seconds`.
+@rpc("authority", "call_remote", "reliable")
+func client_gap_watch(key: String, seconds: float) -> void:
+	_gap_begin()
+	await get_tree().create_timer(seconds).timeout
+	report.rpc_id(1, key, _gap_end())
 
 
 # Server -> client: time the horse a body leaves behind, on this screen.
