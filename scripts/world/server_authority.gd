@@ -253,10 +253,39 @@ func strike_band(body: Node3D) -> float:
 # M-4: the radius of whatever a rectangle is being applied to.
 func body_radius(body: Node3D) -> float:
 	if body is Player:
-		return (body as Player).radius()
+		var rider := body as Player
+		if rider.sync_mount == PlayerMount.Stage.MOUNTED and rider.mount != null:
+			# Riding: horse and rider are one target, the mounted capsule.
+			return rider.mount.capsule_dims().x
+		return rider.radius()
 	if body is Dummy:
 		return Dummy.RADIUS
 	return Player.BODY_RADIUS
+
+
+# Riding (MT-d): how much taller than its walking body a body is as a target.
+# The mounted capsule stands from the feet to the rider's head, so it is the
+# walking body's height plus the seat's lift; on foot this is 0.
+func mounted_lift(body: Node3D) -> float:
+	var rider := body as Player
+	if rider == null or rider.sync_mount != PlayerMount.Stage.MOUNTED or rider.mount == null:
+		return 0.0
+	return maxf(rider.mount.seat_lift_mounted(), 0.0)
+
+
+# How far a height is from a body, for the strike bands: off the centre of its
+# walking body, or -- on a horse -- off the nearest height that body's centre
+# could be at anywhere in the mounted capsule. Horse or rider, touched is hit.
+func height_off(body: Node3D, y: float) -> float:
+	var low := body.global_position.y
+	var lift := mounted_lift(body)
+	if lift <= 0.0:
+		return absf(low - y)
+	if y < low:
+		return low - y
+	return maxf(y - (low + lift), 0.0)
+
+
 # N-3: when the held people's positions were last pushed. They ride the hand on
 # the rock's interval, from here, like a rock.
 var _held_push_left := 0.0
@@ -799,7 +828,7 @@ func _rule_shove(actor: Player, direction: Vector3) -> Variant:
 		# A team mate in the air is reached for -- that is the co-op launch, a
 		# body at the top of its jump pushed on across a gap -- so the band is
 		# for what stands on the ground.
-		if not (body is Player and recently_airborne(body as Player)) 				and absf(body.global_position.y - actor.global_position.y) > shove_band(actor):
+		if not (body is Player and recently_airborne(body as Player)) 				and height_off(body, actor.global_position.y) > shove_band(actor):
 			continue
 		# 4-chapter: a team mate is another player while the debug toggle says
 		# they are in the same party. The playground is all field, so there is
@@ -2097,6 +2126,10 @@ func _check_move(player: Player, delta: float) -> void:
 	var moved := player.global_position - from
 	watch["left"] = MOVE_SAMPLE
 	watch["at"] = player.global_position
+	# MT-d: the sample before this one, kept only to be printed with a warning.
+	var before_speed := float(watch.get("h_speed", 0.0))
+	var before_from: Vector3 = watch.get("was", from)
+	watch["was"] = from
 	# C-1b: the speed this sample saw, for the thrust's bonus (observed_h_speed).
 	watch["h_speed"] = Vector2(moved.x, moved.z).length() / maxf(elapsed, 0.001)
 	var skip := int(watch.get("forgive", 0)) > 0
@@ -2131,6 +2164,14 @@ func _check_move(player: Player, delta: float) -> void:
 	print("PLAYGROUND_MOVE_WARN peer=%s h=%.2f/%.2f v=%.2f/%.2f over=%.2fs state=%s" % [
 		player.name, horizontal, allowance.x, vertical, allowance.y,
 		elapsed, Player.State.keys()[player.state]])
+	# MT-d: a log only, nothing is ruled on it. The sample's length and the
+	# positions either side of it, to tell a late bunch of pose packets (a
+	# short sample before, a long step now) from a body that really ran.
+	print("PLAYGROUND_MOVE_WARN_DETAIL peer=%s mount=%s sample=%.4fs before=(%.2f, %.2f, %.2f) from=(%.2f, %.2f, %.2f) to=(%.2f, %.2f, %.2f) step=%.2fm prev_speed=%.2f frame=%d" % [
+		player.name, PlayerMount.Stage.keys()[player.sync_mount], elapsed,
+		before_from.x, before_from.y, before_from.z, from.x, from.y, from.z,
+		player.global_position.x, player.global_position.y, player.global_position.z,
+		Vector2(moved.x, moved.z).length(), before_speed, Engine.get_physics_frames()])
 	# Inside the memory of a force the server itself handed out, the body is
 	# fast because the server made it so: a warning says the allowance was
 	# short, and that is a tuning matter, not a correction.
@@ -3053,7 +3094,7 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0)
 				continue
 			if across > half_width + target_radius:
 				continue
-		if absf(body.global_position.y - strike_y) > strike_band(body):
+		if height_off(body, strike_y) > strike_band(body):
 			continue
 		_land_strike(actor, def, body, forward, strike_y, caster_strength, mult, tally)
 	_finish_strike(actor, def, mult, tally)
@@ -3245,7 +3286,7 @@ func _sweep_tick(actor: Node3D, record: Dictionary, low_deg: float, high_deg: fl
 			var ahead := maxf(along, 0.05)
 			var half := body_half_height(body)
 			var pitch_low := rad_to_deg(atan2(dy - half, ahead))
-			var pitch_high := rad_to_deg(atan2(dy + half, ahead))
+			var pitch_high := rad_to_deg(atan2(dy + mounted_lift(body) + half, ahead))
 			if pitch_high < low_deg or pitch_low > high_deg:
 				continue
 			bearing = rad_to_deg(atan2(dy, ahead))
@@ -3254,7 +3295,7 @@ func _sweep_tick(actor: Node3D, record: Dictionary, low_deg: float, high_deg: fl
 			# body's bearing inside the arc swept so far.
 			if offset.length() > reach + target_radius:
 				continue
-			if absf(dy) > strike_band(body):
+			if height_off(body, strike_y) > strike_band(body):
 				continue
 			bearing = rad_to_deg(atan2(side_signed, along))
 			if bearing < low_deg or bearing > high_deg:

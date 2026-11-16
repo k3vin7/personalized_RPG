@@ -265,8 +265,10 @@ func note_pushed() -> void:
 
 func press_jump() -> void:
 	if player.is_mounted():
-		# Riding: no jump off the horse's back. Counted for the checks.
+		# Riding: no jump off the horse's back. Like a skill key, the press
+		# only gets the body off (the user's call, 2026-11-16).
 		mounted_presses_dropped += 1
+		dismount_for_skill()
 		return
 	if player.is_incapacitated():
 		# M-1: the windup and the recovery take every order but the cancel;
@@ -308,7 +310,9 @@ func request_jump() -> void:
 
 func press_dash() -> void:
 	if player.is_mounted():
+		# Riding: the dash key only gets the body off, as a skill key does.
 		mounted_presses_dropped += 1
+		dismount_for_skill()
 		return
 	if player.is_incapacitated():
 		return

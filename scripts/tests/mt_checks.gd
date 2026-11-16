@@ -152,6 +152,16 @@ func run(world: Node3D) -> void:
 	expect(await _wait_stage("client_ready"), "both_peers_present")
 	var warnings := _judge.move_warnings
 	var corrections := _judge.move_corrections
+	# --mt-thrown=N: only the thrown client's horse, N times over.
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--mt-thrown="):
+			await _reset_pair()
+			await _thrown_repeat(int(arg.trim_prefix("--mt-thrown=")))
+			print("MT_RESULT peer=%d checks=%d failures=%d" % [_peer_id, _checks, _failures])
+			finish.rpc(_failures)
+			await _wait(1.0)
+			get_tree().quit(0 if _failures == 0 else 1)
+			return
 	_data_checks()
 	await _reset_pair()
 	await _host_mount_checks()
@@ -167,6 +177,7 @@ func run(world: Node3D) -> void:
 	await _restriction_checks()
 	await _hit_checks()
 	await _zone_checks()
+	await _target_checks()
 	note("move warnings %d, corrections %d during MT" % [
 		_judge.move_warnings - warnings, _judge.move_corrections - corrections])
 	# A warning is one 0.1 s sample of a remote body over the cap: at the
@@ -852,26 +863,36 @@ func _restriction_checks() -> void:
 	var mate := _mate()
 	await _reset_pair()
 	expect(await _get_on(), "the_host_is_mounted_for_the_restrictions")
-	# Jump and dash: nothing happens, and the body stays on the horse.
-	var dropped := _local.movement.mounted_presses_dropped
-	var stamina := _local.stamina
-	await tick_request(func() -> void:
-		_local.movement.set_aim_override(_local.global_position + Vector3(0.0, 0.0, 4.0))
-		_local.movement.press_jump())
-	var left_floor := false
-	for _frame in range(40):
-		await get_tree().physics_frame
-		left_floor = left_floor or _local.state == Player.State.AIRBORNE
-	await tick_request(func() -> void: _local.movement.press_dash())
-	var dashed := false
-	for _frame in range(40):
-		await get_tree().physics_frame
-		dashed = dashed or _local.state == Player.State.DASH
-	note("on the horse: jump press -> airborne %s, dash press -> dashing %s, presses dropped %d, stamina %.1f -> %.1f, still mounted %s" % [
-		left_floor, dashed, _local.movement.mounted_presses_dropped - dropped, stamina, _local.stamina, _local.is_mounted()])
-	expect(not left_floor and not dashed and _local.movement.mounted_presses_dropped - dropped == 2
-		and _local.is_mounted() and _local.stamina >= stamina - 0.01,
-		"on_the_horse_jump_and_dash_do_nothing")
+	# Jump and dash keys: no jump, no dash, and off the horse, like a skill key
+	# (the user's call after c).
+	for key_name: String in ["jump", "dash"]:
+		if not _local.is_mounted():
+			await _wait(0.2)
+			if not await _get_on():
+				break
+		var dropped := _local.movement.mounted_presses_dropped
+		var stamina := _local.stamina
+		await tick_request(func() -> void:
+			_local.movement.set_aim_override(_local.global_position + Vector3(0.0, 0.0, 4.0))
+			if key_name == "jump":
+				_local.movement.press_jump()
+			else:
+				_local.movement.press_dash())
+		var off := await _until(func() -> bool: return _local.mount.stage == PlayerMount.Stage.NONE, 0.5)
+		var moved_state := false
+		for _frame in range(40):
+			await get_tree().physics_frame
+			moved_state = moved_state or _local.state == Player.State.AIRBORNE or _local.state == Player.State.DASH
+		note("%s key on the horse: off in %.3f s, jumped or dashed %s, presses caught %d, stamina %.1f -> %.1f, why %s" % [
+			key_name, off, moved_state, _local.movement.mounted_presses_dropped - dropped, stamina, _local.stamina,
+			_judge.last_mount.get("why", "")])
+		expect(off >= 0.0 and off <= 0.05 and not moved_state and _local.movement.mounted_presses_dropped - dropped == 1
+			and _local.stamina >= stamina - 0.01 and String(_judge.last_mount.get("why", "")) == "asked",
+			"the_%s_key_on_the_horse_only_gets_off" % key_name)
+		await tick_request(func() -> void: _local.movement.set_aim_override(Vector3.INF))
+	await _wait(3.2)
+	if not _local.is_mounted():
+		expect(await _get_on(), "the_host_is_mounted_for_the_skill_keys")
 	# A skill key: no cast, and off the horse. Every slot that holds a skill.
 	var slots := []
 	for index in PlayerSkills.SLOT_COUNT:
@@ -1119,6 +1140,60 @@ func _hit_checks() -> void:
 	await _wait(3.0)
 
 
+# The client slammed off its horse, `times` over: what its own screen shows
+# 0.3 s after the server took it off (the check as it stands in _hit_checks),
+# and how long after the server's word its own screen followed.
+func _thrown_repeat(times: int) -> void:
+	var mate := _mate()
+	var dummy := _world.get_node("Dummy_1") as Dummy
+	var period: float = Tuning.server.dummy_attack_period
+	var enabled: bool = Tuning.server.dummy_attack_enabled
+	Tuning.server.dummy_attack_period = 1.5
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = _slam_spot(dummy) + Vector3(6.0, 0.0, 6.0)
+		_local.velocity = Vector3.ZERO)
+	var failed := 0
+	for trial in range(times):
+		_slams(false)
+		await Harness.dummy_home(dummy, _judge, _local, mate, get_tree(), note)
+		client_park.rpc_id(_client_peer(), _slam_spot(dummy))
+		await _wait(1.0)
+		client_press_mount.rpc_id(_client_peer())
+		var up := await _until(func() -> bool: return mate.sync_mount == PlayerMount.Stage.MOUNTED, 3.0)
+		await _wait(0.4)
+		var throws := _judge.mount_throws
+		_slams(true)
+		var took := await _until(func() -> bool: return mate.sync_mount == PlayerMount.Stage.NONE, 6.0)
+		_slams(false)
+		var frame_off := Engine.get_physics_frames()
+		client_watch_stage.rpc_id(_client_peer(), mate.get_path(), "lag_%d" % trial)
+		await _wait(0.3)
+		var knock: Dictionary = _judge.last_knock.get(_client_peer(), {})
+		client_report_body.rpc_id(_client_peer(), mate.get_path(), "trial_%d" % trial)
+		var own := await _take_report("trial_%d" % trial)
+		var lag := await _take_report("lag_%d" % trial)
+		var thrown := String(_judge.last_mount.get("why", "")) == "thrown" and _judge.mount_throws == throws + 1
+		var passed: bool = thrown and mate.mount.lingering_count() == 0 and int(own.get("lingering", -1)) == 0 \
+			and not own.get("capsule_off", true)
+		if not passed:
+			failed += 1
+		note("thrown trial %d: %s; mounted %.2f, off after %.2f s (host frame %d), why %s, launched %s; client's own screen 0.3 s later: stage %s, horses left %s, vanished total %s, capsule off %s; when the watch RPC arrived its screen showed stage %s / sync %s, and followed %.3f s later (state then %s, hp %s)" % [
+			trial + 1, "PASS" if passed else "FAIL", up, took, frame_off, _judge.last_mount.get("why", ""),
+			knock.get("launched"), own.get("stage"), own.get("lingering"), own.get("vanished"), own.get("capsule_off"),
+			lag.get("stage_at_rpc"), lag.get("sync_at_rpc"), float(lag.get("followed", -1.0)), lag.get("state"), lag.get("hp")])
+		note("thrown trial %d clock (client's own, real ms): report RPC arrived %d ms after the watch RPC (host sent them 300 apart); stage followed %d ms after the watch RPC, in %d physics steps; longest gap between its physics steps %d ms" % [
+			trial + 1, int(own.get("msec", 0)) - int(lag.get("arrived_ms", 0)), int(lag.get("real_ms", -1)),
+			roundi(float(lag.get("followed", 0.0)) / STEP), int(lag.get("worst_gap_ms", -1))])
+		await tick_request(func() -> void: _judge.server_set_hp(mate, mate.stats.max_hp))
+		await _until(func() -> bool: return mate.state == Player.State.IDLE, 5.0)
+		await _wait(1.0)
+	note("thrown trials: %d, failed %d" % [times, failed])
+	expect(failed == 0, "the_thrown_client_has_no_horse_left_on_either_screen_every_time")
+	Tuning.server.dummy_attack_period = period
+	Tuning.server.dummy_attack_enabled = enabled
+
+
 # ------------------------------------------------- 12 (c): the no-mount-zone slot
 
 func _zone_checks() -> void:
@@ -1157,6 +1232,143 @@ func _zone_checks() -> void:
 		"and_one_that_walks_in_during_the_summon_does_not_get_it")
 	expect(outside and cleared, "outside_the_zone_and_with_the_slot_empty_again_the_horse_comes")
 	await _wait(3.2)
+
+
+# ------------------------------------------------- 13 (d): the rider as a target
+
+# One blow at a body standing at STRIKE_AT: `by_host` says who swings. The
+# attacker stands `gap` south of it and strikes north. Returns what the
+# server ruled.
+const STRIKE_AT := HOME + Vector3(3.0, 0.0, 1.0)
+
+func _strike_at_rider(by_host: bool, skill: String, gap: float, mounted: bool) -> Dictionary:
+	var mate := _mate()
+	var target := mate if by_host else _local
+	var target_spot := STRIKE_AT
+	var attacker_spot := STRIKE_AT + Vector3(0.0, 0.0, gap)
+	# Both on foot, parked, healed.
+	if _local.sync_mount != PlayerMount.Stage.NONE:
+		await _get_off()
+	if mate.sync_mount != PlayerMount.Stage.NONE:
+		client_press_mount.rpc_id(_client_peer())
+		await _until(func() -> bool: return mate.sync_mount == PlayerMount.Stage.NONE, 2.0)
+	await _until(func() -> bool: return _local.state == Player.State.IDLE and mate.state == Player.State.IDLE, 5.0)
+	client_park.rpc_id(_client_peer(), target_spot if by_host else attacker_spot)
+	await _put(attacker_spot if by_host else target_spot, 0.0)
+	await _wait(0.6)
+	await tick_request(func() -> void:
+		_judge.server_set_hp(target, target.stats.max_hp))
+	if mounted:
+		if by_host:
+			client_press_mount.rpc_id(_client_peer())
+		else:
+			Net.queue_physics(_local.movement.press_mount)
+		await _until(func() -> bool: return target.sync_mount == PlayerMount.Stage.MOUNTED, 3.0)
+		await _wait(0.4)
+	var was_mounted := target.sync_mount == PlayerMount.Stage.MOUNTED
+	var hp := target.hp
+	var ruled := _judge.skills_ruled
+	var feet := target.global_position.y - target.half_height()
+	var flat_gap := Vector2(_local.global_position.x - mate.global_position.x, _local.global_position.z - mate.global_position.z).length()
+	if by_host:
+		Net.queue_physics(func() -> void:
+			ServerAuthority.submit_intent(_local, ServerAuthority.Intent.SKILL, {"skill": skill, "direction": Vector3.FORWARD}))
+	else:
+		client_send_skill.rpc_id(_client_peer(), skill)
+	var def := Skills.get_def(skill)
+	await _wait(def.impact_time() + 0.9)
+	var attacker := _local if by_host else mate
+	var out := {"mounted": was_mounted, "lost": hp - target.hp, "ruled": _judge.skills_ruled - ruled,
+		"gap": flat_gap, "strike_above_feet": attacker.global_position.y + def.strike_height * attacker.body_scale() - feet,
+		"stage_after": target.sync_mount, "why": String(_judge.last_mount.get("why", "")),
+		"radius": _judge.body_radius(target) if was_mounted and target.sync_mount == PlayerMount.Stage.MOUNTED else -1.0}
+	await _until(func() -> bool: return target.state == Player.State.IDLE, 5.0)
+	await _wait(1.0)
+	return out
+
+
+func _line(label: String, got: Dictionary) -> String:
+	return "%s: gap %.2f m, strike %.2f m above the target's feet, %s -> ruled %d, HP -%.1f, stage after %s (%s)" % [
+		label, float(got["gap"]), float(got["strike_above_feet"]), "mounted" if got["mounted"] else "on foot",
+		int(got["ruled"]), float(got["lost"]), PlayerMount.Stage.keys()[int(got["stage_after"])], got["why"]]
+
+
+func _target_checks() -> void:
+	var mate := _mate()
+	var punch := Skills.get_def("punch")
+	var kick := Skills.get_def("kick")
+	var punch_height := punch.strike_height
+	var reach_kick := kick.value("reach")
+	var reach_punch := punch.value("reach")
+	await tick_request(func() -> void:
+		placed()
+		_local.global_position = STRIKE_AT + Vector3(0.0, 0.0, 3.0))
+	client_park.rpc_id(_client_peer(), STRIKE_AT)
+	await _wait(1.0)
+	client_press_mount.rpc_id(_client_peer())
+	await _until(func() -> bool: return mate.sync_mount == PlayerMount.Stage.MOUNTED, 3.0)
+	var dims := mate.mount.capsule_dims()
+	var lift := _judge.mounted_lift(mate)
+	note("the rider as a target: capsule radius %.2f, height %.2f (walking body %.2f / %.2f), judged radius %.2f, lift %.2f; kick reach %.2f at %.2f m above the feet, punch reach %.2f at %.2f; band beyond the body %.2f" % [
+		dims.x, dims.y, mate.radius(), mate.half_height() * 2.0, _judge.body_radius(mate), lift,
+		reach_kick, mate.half_height() + kick.strike_height, reach_punch, mate.half_height() + punch.strike_height,
+		ServerAuthority.STRIKE_REACH_BEYOND])
+	expect(absf(_judge.body_radius(mate) - dims.x) < 0.001 and absf(lift + mate.half_height() * 2.0 - dims.y) < 0.001,
+		"a_rider_is_judged_as_the_whole_mounted_capsule")
+	client_press_mount.rpc_id(_client_peer())
+	await _until(func() -> bool: return mate.sync_mount == PlayerMount.Stage.NONE, 2.0)
+	await _wait(3.2)
+	expect(_judge.body_radius(mate) == mate.radius() and _judge.mounted_lift(mate) == 0.0,
+		"and_on_foot_as_the_walking_body_again")
+
+	# Host swings at the client on its horse.
+	var near := maxf(reach_kick - 0.2, 1.25)
+	var low := await _strike_at_rider(true, "kick", near, true)
+	note(_line("low blow (kick) at a client rider", low))
+	expect(low["mounted"] and float(low["lost"]) > 0.0 and int(low["stage_after"]) == PlayerMount.Stage.NONE,
+		"a_low_blow_hits_a_client_on_its_horse")
+	# Head height: the punch raised for the test to the rider's head.
+	var head_above_feet := dims.y - 0.25
+	punch.strike_height = head_above_feet - _local.half_height()
+	var head := await _strike_at_rider(true, "punch", maxf(reach_punch - 0.2, 1.25), true)
+	note(_line("head-height blow (punch raised to %.2f) at a client rider" % head_above_feet, head))
+	expect(head["mounted"] and float(head["lost"]) > 0.0 and int(head["stage_after"]) == PlayerMount.Stage.NONE,
+		"a_blow_at_the_riders_head_hits_a_client_on_its_horse")
+	# Past the walking body's band, still inside the rider's.
+	var over := _local.half_height() * 2.0 + ServerAuthority.STRIKE_REACH_BEYOND + lift * 0.5
+	punch.strike_height = over - _local.half_height()
+	var high_foot := await _strike_at_rider(true, "punch", maxf(reach_punch - 0.2, 1.25), false)
+	var high_ride := await _strike_at_rider(true, "punch", maxf(reach_punch - 0.2, 1.25), true)
+	note(_line("blow at %.2f m, on foot" % over, high_foot))
+	note(_line("blow at %.2f m, mounted" % over, high_ride))
+	expect(float(high_foot["lost"]) == 0.0 and int(high_foot["ruled"]) == 1 and float(high_ride["lost"]) > 0.0,
+		"a_blow_over_a_walkers_head_still_reaches_the_rider")
+	punch.strike_height = punch_height
+	# The horse's width: a kick that stops short of the walking body.
+	var wide := reach_kick + (mate.radius() + dims.x) * 0.5
+	var wide_foot := await _strike_at_rider(true, "kick", wide, false)
+	var wide_ride := await _strike_at_rider(true, "kick", wide, true)
+	note(_line("kick from %.2f m (reach %.2f), on foot" % [wide, reach_kick], wide_foot))
+	note(_line("kick from %.2f m (reach %.2f), mounted" % [wide, reach_kick], wide_ride))
+	expect(float(wide_foot["lost"]) == 0.0 and int(wide_foot["ruled"]) == 1 and float(wide_ride["lost"]) > 0.0,
+		"a_blow_that_reaches_the_horse_but_not_a_walker_hits")
+
+	# The client swings at the host on its horse.
+	var c_low := await _strike_at_rider(false, "kick", near, true)
+	note(_line("client's low blow (kick) at the host rider", c_low))
+	expect(c_low["mounted"] and float(c_low["lost"]) > 0.0 and int(c_low["stage_after"]) == PlayerMount.Stage.NONE,
+		"a_clients_low_blow_hits_the_host_on_its_horse")
+	punch.strike_height = head_above_feet - mate.half_height()
+	var c_head := await _strike_at_rider(false, "punch", maxf(reach_punch - 0.2, 1.25), true)
+	note(_line("client's head-height blow at the host rider", c_head))
+	expect(c_head["mounted"] and float(c_head["lost"]) > 0.0 and int(c_head["stage_after"]) == PlayerMount.Stage.NONE,
+		"a_clients_blow_at_the_riders_head_hits_the_host_on_its_horse")
+	punch.strike_height = punch_height
+	await tick_request(func() -> void:
+		_judge.server_set_hp(_local, _local.stats.max_hp)
+		_judge.server_set_hp(mate, mate.stats.max_hp))
+	await _reset_pair()
+	await _wait(3.0)
 
 
 # ------------------------------------------------------------------- RPCs
@@ -1231,7 +1443,34 @@ func client_ride(from: Vector3, to: Vector3, bail: bool) -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_report_body(path: NodePath, key: String) -> void:
 	var body := get_node_or_null(path) as Player
-	report.rpc_id(1, key, describe(body) if body != null else {})
+	var seen := describe(body) if body != null else {}
+	seen["msec"] = Time.get_ticks_msec()
+	report.rpc_id(1, key, seen)
+
+
+# Server -> client: what this screen shows of a body's stage now, and how
+# long until it shows the body off its horse.
+@rpc("authority", "call_remote", "reliable")
+func client_watch_stage(path: NodePath, key: String) -> void:
+	var body := get_node_or_null(path) as Player
+	if body == null:
+		report.rpc_id(1, key, {})
+		return
+	var stage_at_rpc := body.mount.stage
+	var sync_at_rpc := body.sync_mount
+	var arrived := Time.get_ticks_msec()
+	var last := arrived
+	var worst_gap := 0
+	var steps := 0
+	while body.mount.stage != PlayerMount.Stage.NONE and steps < 360:
+		await get_tree().physics_frame
+		steps += 1
+		var now := Time.get_ticks_msec()
+		worst_gap = maxi(worst_gap, now - last)
+		last = now
+	report.rpc_id(1, key, {"stage_at_rpc": stage_at_rpc, "sync_at_rpc": sync_at_rpc, "followed": float(steps) * STEP,
+		"real_ms": Time.get_ticks_msec() - arrived, "worst_gap_ms": worst_gap, "arrived_ms": arrived,
+		"state": Player.State.keys()[body.state], "hp": body.hp})
 
 
 # Server -> client: time the horse a body leaves behind, on this screen.
