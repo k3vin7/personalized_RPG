@@ -234,6 +234,11 @@ func current_def() -> SkillDef:
 # the two that used to work from the air (the shove) still do through their
 # own keys' old entry, which the checks call directly.
 func press_slot(index: int) -> bool:
+	if player.is_mounted():
+		# Riding: a skill key casts nothing and gets the body off the horse.
+		if player.movement != null:
+			player.movement.dismount_for_skill()
+		return false
 	var def := slot_def(index)
 	if def == null or slot_locked(index) or slot_on_cooldown(index) or is_busy() \
 			or player.state == Player.State.DOWNED:

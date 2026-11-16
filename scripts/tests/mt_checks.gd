@@ -1,10 +1,11 @@
 extends Node
 
-# Riding, sub-stages a and b: the summon, getting on and getting off; then
-# the horse's speed, its acceleration, its turn and the floor snap.
+# Riding, sub-stages a, b and c: the summon, getting on and getting off; the
+# horse's speed, its acceleration, its turn and the floor snap; then what a
+# rider may not do, what a blow does to one, and the no-mount-zone slot.
 #
-#   host:   --auto-host --auto-smoke --auto-only=MT --auto-port=P --auto-quit=300
-#   client: --auto-join --auto-smoke --auto-only=MT --auto-port=P --auto-quit=300
+#   host:   --auto-host --auto-smoke --auto-only=MT --auto-port=P --auto-quit=420
+#   client: --auto-join --auto-smoke --auto-only=MT --auto-port=P --auto-quit=420
 #
 # What is measured: the key is a request and the server's clock puts the body
 # on the horse mount_summon_time later; on the horse the collider is the
@@ -122,6 +123,7 @@ static func describe(body: Player) -> Dictionary:
 		"lift": body._visual.position.y,
 		"body_at": body.global_position,
 		"lingering": body.mount.lingering_count(),
+		"vanished": body.mount.horses_vanished,
 		"linger_at": body.mount.lingering_position(),
 		"state": Player.State.keys()[body.state],
 	}
@@ -162,6 +164,9 @@ func run(world: Node3D) -> void:
 	await _turn_slow_checks()
 	await _hill_checks()
 	await _client_ride_checks()
+	await _restriction_checks()
+	await _hit_checks()
+	await _zone_checks()
 	note("move warnings %d, corrections %d during MT" % [
 		_judge.move_warnings - warnings, _judge.move_corrections - corrections])
 	# A warning is one 0.1 s sample of a remote body over the cap: at the
@@ -841,6 +846,319 @@ func _client_ride_checks() -> void:
 	await _wait(3.2)
 
 
+# ------------------------------------------------- 10 (c): on the horse a body only moves
+
+func _restriction_checks() -> void:
+	var mate := _mate()
+	await _reset_pair()
+	expect(await _get_on(), "the_host_is_mounted_for_the_restrictions")
+	# Jump and dash: nothing happens, and the body stays on the horse.
+	var dropped := _local.movement.mounted_presses_dropped
+	var stamina := _local.stamina
+	await tick_request(func() -> void:
+		_local.movement.set_aim_override(_local.global_position + Vector3(0.0, 0.0, 4.0))
+		_local.movement.press_jump())
+	var left_floor := false
+	for _frame in range(40):
+		await get_tree().physics_frame
+		left_floor = left_floor or _local.state == Player.State.AIRBORNE
+	await tick_request(func() -> void: _local.movement.press_dash())
+	var dashed := false
+	for _frame in range(40):
+		await get_tree().physics_frame
+		dashed = dashed or _local.state == Player.State.DASH
+	note("on the horse: jump press -> airborne %s, dash press -> dashing %s, presses dropped %d, stamina %.1f -> %.1f, still mounted %s" % [
+		left_floor, dashed, _local.movement.mounted_presses_dropped - dropped, stamina, _local.stamina, _local.is_mounted()])
+	expect(not left_floor and not dashed and _local.movement.mounted_presses_dropped - dropped == 2
+		and _local.is_mounted() and _local.stamina >= stamina - 0.01,
+		"on_the_horse_jump_and_dash_do_nothing")
+	# A skill key: no cast, and off the horse. Every slot that holds a skill.
+	var slots := []
+	for index in PlayerSkills.SLOT_COUNT:
+		var def := _local.skills.slot_def(index)
+		if def == null:
+			continue
+		if not _local.is_mounted():
+			await _wait(0.2)
+			if not await _get_on():
+				break
+		var ruled := _judge.skills_ruled
+		var holds := _judge.hold_count()
+		var cast := false
+		Net.queue_physics(func() -> void: _local.skills.press_slot(index))
+		var off := await _until(func() -> bool: return _local.mount.stage == PlayerMount.Stage.NONE, 0.5)
+		for _frame in range(30):
+			await get_tree().physics_frame
+			cast = cast or _local.is_casting() or _local.skills.is_blocking()
+		Net.queue_physics(func() -> void: _local.skills.release_slot(index))
+		await _wait(0.1)
+		slots.append("%s: off in %.3f s, cast %s, rulings +%d, holds +%d" % [
+			def.id, off, cast, _judge.skills_ruled - ruled, _judge.hold_count() - holds])
+		expect(off >= 0.0 and off <= 0.05 and not cast and _judge.skills_ruled == ruled and _judge.hold_count() == holds
+			and String(_judge.last_mount.get("why", "")) == "asked",
+			"the_%s_key_on_the_horse_only_gets_off" % def.id)
+	note("skill keys on the horse: %s" % [slots])
+	await _wait(3.2)
+
+	# The server says the same to an intent that reaches it anyway.
+	expect(await _get_on(), "the_host_is_mounted_again")
+	var refused := _judge.mounted_refusals
+	var answers := []
+	for row: Array in [
+			[ServerAuthority.Intent.SKILL, {"skill": "punch", "direction": Vector3.FORWARD}],
+			[ServerAuthority.Intent.SHOVE, {"direction": Vector3.FORWARD}],
+			[ServerAuthority.Intent.GRAB, {"target": _world.get_node("Rock_0").get_path()}],
+			[ServerAuthority.Intent.BLOCK, {"on": true}]]:
+		var answer: Variant = ServerAuthority.submit_intent(_local, int(row[0]), row[1] as Dictionary)
+		answers.append("%s -> %s" % [ServerAuthority.Intent.keys()[int(row[0])], answer])
+	note("intents sent from the horse: %s; refused as mounted %d, last refusal %s, still mounted %s" % [
+		answers, _judge.mounted_refusals - refused, _judge.last_refusal, _local.is_mounted()])
+	expect(_judge.mounted_refusals - refused == 4 and _judge.last_refusal == "mounted" and _local.is_mounted()
+		and not _judge.is_blocking(1) and _judge.hold_count() == 0,
+		"the_server_refuses_a_skill_shove_grab_and_block_from_a_rider")
+	# A client's skill that crosses its own mount on the wire.
+	client_park.rpc_id(_client_peer(), CLIENT_SPOT)
+	await _wait(0.9)
+	client_press_mount.rpc_id(_client_peer())
+	await _until(func() -> bool: return mate.sync_mount == PlayerMount.Stage.MOUNTED, 3.0)
+	refused = _judge.mounted_refusals
+	var ruled_before := _judge.skills_ruled
+	client_send_skill.rpc_id(_client_peer(), "punch")
+	await _wait(0.8)
+	note("client sent a punch intent from the horse: refused %d, rulings +%d, client still mounted %s" % [
+		_judge.mounted_refusals - refused, _judge.skills_ruled - ruled_before, mate.sync_mount == PlayerMount.Stage.MOUNTED])
+	expect(_judge.mounted_refusals - refused == 1 and _judge.skills_ruled == ruled_before
+		and mate.sync_mount == PlayerMount.Stage.MOUNTED, "and_refuses_the_same_from_a_client_on_its_horse")
+	# A rider is not picked up.
+	await tick_request(func() -> void:
+		placed()
+		_judge.harness_set_stats(_local, 150.0)
+		_local.global_position = mate.global_position + Vector3(1.3, 0.0, 0.0)
+		_local.velocity = Vector3.ZERO)
+	await _get_off()
+	await _wait(0.3)
+	var can_mounted := _judge.can_grab(_local, mate)
+	client_press_mount.rpc_id(_client_peer())
+	await _until(func() -> bool: return mate.sync_mount == PlayerMount.Stage.NONE, 2.0)
+	await _wait(0.3)
+	var can_on_foot := _judge.can_grab(_local, mate)
+	note("a strong body 1.3 m from the client: may grab it on its horse %s, on foot %s" % [can_mounted, can_on_foot])
+	expect(not can_mounted and can_on_foot, "a_rider_cannot_be_picked_up_off_the_horse")
+	await tick_request(func() -> void: _judge.harness_clear_stats(_local))
+	await _reset_pair()
+	await _wait(3.0)
+
+
+# ------------------------------------------------- 11 (c): a blow on a rider
+
+# Stands `body_is_local` in front of the scarecrow, at the mounted capsule's
+# distance, and returns the spot.
+func _slam_spot(dummy: Dummy) -> Vector3:
+	var gap := Tuning.server.mount_radius + _judge.body_radius(dummy) + 0.15
+	var spot := dummy.home + dummy.attack_direction() * gap
+	return Vector3(spot.x, HOME.y, spot.z)
+
+
+func _slams(on: bool) -> void:
+	Tuning.server.dummy_attack_enabled = on
+
+
+# Mounted in front of the scarecrow with `strength`, then one slam: what the
+# server ruled and what both screens show.
+func _hit_while_mounted(dummy: Dummy, strength: float, label: String) -> Dictionary:
+	_slams(false)
+	await Harness.dummy_home(dummy, _judge, _local, _mate(), get_tree(), note)
+	await tick_request(func() -> void:
+		placed()
+		_judge.harness_set_stats(_local, strength)
+		_judge.server_set_hp(_local, _local.stats.max_hp)
+		_local.global_position = _slam_spot(dummy)
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target()
+		_local.movement.set_aim_override(Vector3.INF))
+	await _wait(0.6)
+	var mounted := await _get_on()
+	var hp := _local.hp
+	var hits := _judge.mount_hits
+	var throws := _judge.mount_throws
+	var vanished := _local.mount.horses_vanished
+	var at := _local.global_position
+	_slams(true)
+	var took := await _until(func() -> bool: return _local.sync_mount == PlayerMount.Stage.NONE, 6.0)
+	_slams(false)
+	# What the body does in the half second after it comes off.
+	var airborne := false
+	var peak_y := _local.global_position.y
+	var lingering_after := -1
+	for frame in range(60):
+		await get_tree().physics_frame
+		airborne = airborne or _local.state == Player.State.AIRBORNE
+		peak_y = maxf(peak_y, _local.global_position.y)
+		if frame == 6:
+			lingering_after = _local.mount.lingering_count()
+	client_report_body.rpc_id(_client_peer(), _local.get_path(), "hit_" + label)
+	var seen := await _take_report("hit_" + label)
+	var knock: Dictionary = _judge.last_knock.get(1, {})
+	var out := {"mounted": mounted, "took": took, "why": String(_judge.last_mount.get("why", "")),
+		"launched": bool(knock.get("launched", false)), "h_speed": float(knock.get("h_speed", 0.0)),
+		"tolerance": float(knock.get("tolerance", 0.0)), "lost": hp - _local.hp, "airborne": airborne,
+		"rise": peak_y - at.y, "lingering": lingering_after, "vanished": _local.mount.horses_vanished - vanished,
+		"hits": _judge.mount_hits - hits, "throws": _judge.mount_throws - throws, "state": Player.State.keys()[_local.state],
+		"capsule_back": not (_local.get_node("BodyShape") as CollisionShape3D).disabled,
+		"seen_lingering": int(seen.get("lingering", -1)), "seen_stage": int(seen.get("stage", -1)),
+		"seen_vanished": int(seen.get("vanished", -1))}
+	note("%s (strength %.0f): mounted %s, off after %.2f s, why %s; knock %.2f vs tolerance %.2f -> %s; HP -%.1f; airborne %s (rose %.2f m), state %s; horse left standing %d (client sees %d), vanished here +%d (client total %d); server counts hit +%d thrown +%d" % [
+		label, strength, mounted, took, out["why"], out["h_speed"], out["tolerance"],
+		"launched" if out["launched"] else "slid", out["lost"], airborne, out["rise"], out["state"],
+		out["lingering"], out["seen_lingering"], out["vanished"], out["seen_vanished"], out["hits"], out["throws"]])
+	await _until(func() -> bool: return _local.state == Player.State.IDLE, 5.0)
+	await _wait(3.2)
+	return out
+
+
+func _hit_checks() -> void:
+	var mate := _mate()
+	var dummy := _world.get_node("Dummy_1") as Dummy
+	var slam := Skills.get_def("dummy_slam")
+	var period: float = Tuning.server.dummy_attack_period
+	var enabled: bool = Tuning.server.dummy_attack_enabled
+	Tuning.server.dummy_attack_period = 1.5
+	client_park.rpc_id(_client_peer(), _slam_spot(dummy) + Vector3(0.0, 0.0, 8.0))
+	note("scarecrow slam: windup %.2f s, reach %.1f, damage %.0f, power %.0f; rider stands %.2f m from it" % [
+		slam.impact_time(), slam.value("reach"), slam.value("damage"), slam.value("knock_power"),
+		Tuning.server.mount_radius + _judge.body_radius(dummy) + 0.15])
+
+	# A real blow during the summon: asked for as the windup starts.
+	await Harness.dummy_home(dummy, _judge, _local, mate, get_tree(), note)
+	await tick_request(func() -> void:
+		placed()
+		_judge.server_set_hp(_local, _local.stats.max_hp)
+		_local.global_position = _slam_spot(dummy)
+		_local.velocity = Vector3.ZERO
+		_local.movement.cancel_target())
+	await _wait(0.6)
+	var cancelled := _judge.mounts_cancelled
+	var granted := _judge.mounts_granted
+	_slams(true)
+	await _until(func() -> bool: return dummy.attack_phase == "windup", 5.0)
+	Net.queue_physics(_local.movement.press_mount)
+	await _wait(1.6)
+	_slams(false)
+	note("slammed during the summon: stage %s, why %s, cancelled +%d, granted +%d, HP %.0f / %.0f" % [
+		PlayerMount.Stage.keys()[_local.sync_mount], _judge.last_mount.get("why", ""), _judge.mounts_cancelled - cancelled,
+		_judge.mounts_granted - granted, _local.hp, _local.stats.max_hp])
+	expect(_local.sync_mount == PlayerMount.Stage.NONE and String(_judge.last_mount.get("why", "")) == "hurt"
+		and _judge.mounts_granted == granted and _local.hp < _local.stats.max_hp,
+		"a_scarecrows_blow_during_the_summon_calls_it_off")
+	await _until(func() -> bool: return _local.state == Player.State.IDLE, 5.0)
+
+	# Within the rider's tolerance: off the horse, on its feet.
+	var held := await _hit_while_mounted(dummy, 150.0, "strong rider")
+	expect(held["mounted"] and float(held["took"]) >= 0.0 and float(held["lost"]) > 0.0, "the_scarecrow_hits_a_rider")
+	expect(not held["launched"] and held["why"] == "hit" and held["hits"] == 1 and held["throws"] == 0,
+		"a_blow_inside_the_riders_tolerance_gets_it_off_the_horse")
+	expect(not held["airborne"] and float(held["rise"]) < 0.1 and held["capsule_back"],
+		"and_it_lands_on_its_feet_where_it_stood")
+	expect(held["lingering"] == 1 and held["vanished"] == 0 and held["seen_lingering"] == 1
+		and held["seen_stage"] == PlayerMount.Stage.NONE,
+		"with_the_horse_left_standing_as_after_any_dismount_on_both_screens")
+
+	# Over it: thrown, the ordinary launch, and the horse gone at once.
+	var thrown := await _hit_while_mounted(dummy, 2.0, "weak rider")
+	expect(thrown["mounted"] and thrown["launched"] and thrown["why"] == "thrown" and thrown["throws"] == 1 and thrown["hits"] == 0,
+		"a_blow_over_the_riders_tolerance_throws_it_off")
+	expect(thrown["airborne"] and float(thrown["rise"]) > 0.05, "and_the_ordinary_launch_applies")
+	expect(thrown["lingering"] == 0 and thrown["vanished"] == 1 and thrown["seen_lingering"] == 0
+		and thrown["seen_stage"] == PlayerMount.Stage.NONE,
+		"and_the_horse_is_gone_at_once_on_both_screens")
+	expect(float(thrown["tolerance"]) < float(held["tolerance"]) and absf(float(thrown["h_speed"]) - float(held["h_speed"])) < 20.0,
+		"the_tolerance_in_the_verdict_is_the_riders_own")
+	await tick_request(func() -> void:
+		placed()
+		_judge.harness_clear_stats(_local)
+		_judge.server_set_hp(_local, _local.stats.max_hp)
+		_local.global_position = _slam_spot(dummy) + Vector3(6.0, 0.0, 6.0)
+		_local.velocity = Vector3.ZERO)
+
+	# The client as the rider: whatever the verdict is, the rest follows it.
+	await Harness.dummy_home(dummy, _judge, _local, mate, get_tree(), note)
+	client_park.rpc_id(_client_peer(), _slam_spot(dummy))
+	await _wait(1.0)
+	client_press_mount.rpc_id(_client_peer())
+	var up := await _until(func() -> bool: return mate.sync_mount == PlayerMount.Stage.MOUNTED, 3.0)
+	await _wait(0.4)
+	var hp := mate.hp
+	var throws := _judge.mount_throws
+	var hits := _judge.mount_hits
+	var vanished := mate.mount.horses_vanished
+	_slams(true)
+	var took := await _until(func() -> bool: return mate.sync_mount == PlayerMount.Stage.NONE, 6.0)
+	_slams(false)
+	await _wait(0.3)
+	var knock: Dictionary = _judge.last_knock.get(_client_peer(), {})
+	var launched := bool(knock.get("launched", false))
+	client_report_body.rpc_id(_client_peer(), mate.get_path(), "client_hit")
+	var own := await _take_report("client_hit")
+	note("client rider slammed: mounted %.2f, off after %.2f s, why %s, knock %.2f vs %.2f -> %s, HP -%.1f; on the host: horse left %d, vanished +%d; on its own screen: stage %s, horse left %d, vanished total %d, capsule off %s" % [
+		up, took, _judge.last_mount.get("why", ""), float(knock.get("h_speed", 0.0)), float(knock.get("tolerance", 0.0)),
+		"launched" if launched else "slid", hp - mate.hp, mate.mount.lingering_count(), mate.mount.horses_vanished - vanished,
+		own.get("stage"), own.get("lingering"), own.get("vanished"), own.get("capsule_off")])
+	expect(up >= 0.0 and took >= 0.0 and hp - mate.hp > 0.0, "the_scarecrow_hits_a_client_on_its_horse")
+	if launched:
+		expect(String(_judge.last_mount.get("why", "")) == "thrown" and _judge.mount_throws == throws + 1
+			and mate.mount.lingering_count() == 0 and int(own.get("lingering", -1)) == 0 and not own.get("capsule_off", true),
+			"the_thrown_client_has_no_horse_left_on_either_screen")
+	else:
+		expect(String(_judge.last_mount.get("why", "")) == "hit" and _judge.mount_hits == hits + 1
+			and mate.mount.lingering_count() == 1 and int(own.get("lingering", -1)) == 1 and not own.get("capsule_off", true),
+			"the_clients_horse_is_left_standing_on_both_screens")
+	Tuning.server.dummy_attack_period = period
+	Tuning.server.dummy_attack_enabled = enabled
+	await tick_request(func() -> void: _judge.server_set_hp(mate, mate.stats.max_hp))
+	await _reset_pair()
+	await _wait(3.0)
+
+
+# ------------------------------------------------- 12 (c): the no-mount-zone slot
+
+func _zone_checks() -> void:
+	note("no-mount zones as shipped: %d; riding allowed at the mark: %s" % [
+		_judge.no_mount_zones.size(), _judge.mount_allowed_at(HOME)])
+	expect(_judge.no_mount_zones.is_empty() and _judge.mount_allowed_at(HOME),
+		"no_zone_is_set_anywhere_riding_is_allowed_everywhere")
+	# A zone put in the slot by hand, around the mark.
+	_judge.no_mount_zones.append(AABB(HOME - Vector3(3.0, 3.0, 3.0), Vector3(6.0, 6.0, 6.0)))
+	var granted := _judge.mounts_granted
+	Net.queue_physics(_local.movement.press_mount)
+	await _wait(1.4)
+	var inside := _local.sync_mount
+	var why := _judge.last_refusal
+	# Asked for outside it, walked into it during the summon.
+	await _put(HOME + Vector3(0.0, 0.0, 6.0), 0.0)
+	Net.queue_physics(_local.movement.press_mount)
+	await tick_request(func() -> void: _local.movement.set_target(HOME))
+	await _wait(1.4)
+	var walked_in := _local.sync_mount
+	var why_walked := String(_judge.last_mount.get("why", ""))
+	await tick_request(func() -> void: _local.movement.cancel_target())
+	# Outside it, the horse comes.
+	await _put(HOME + Vector3(0.0, 0.0, 6.0), 0.0)
+	var outside := await _get_on()
+	await _get_off()
+	_judge.no_mount_zones.clear()
+	await _put(HOME, 0.0)
+	var cleared := await _get_on()
+	await _get_off()
+	note("with a zone around the mark: asked inside -> %s (%s); asked outside and walked in -> %s (%s); asked outside -> mounted %s; zone removed -> mounted %s" % [
+		PlayerMount.Stage.keys()[inside], why, PlayerMount.Stage.keys()[walked_in], why_walked, outside, cleared])
+	expect(inside == PlayerMount.Stage.NONE and why == "no_mount_zone" and _judge.mounts_granted - granted == 2,
+		"a_body_inside_a_zone_in_the_slot_is_refused_the_horse")
+	expect(walked_in == PlayerMount.Stage.NONE and why_walked == "no_mount_zone",
+		"and_one_that_walks_in_during_the_summon_does_not_get_it")
+	expect(outside and cleared, "outside_the_zone_and_with_the_slot_empty_again_the_horse_comes")
+	await _wait(3.2)
+
+
 # ------------------------------------------------------------------- RPCs
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -869,6 +1187,13 @@ func client_park(point: Vector3) -> void:
 @rpc("authority", "call_remote", "reliable")
 func client_press_mount() -> void:
 	Net.queue_physics(_local.movement.press_mount)
+
+
+# Server -> client: send a skill intent whatever this body is doing.
+@rpc("authority", "call_remote", "reliable")
+func client_send_skill(skill: String) -> void:
+	Net.queue_physics(func() -> void:
+		ServerAuthority.submit_intent(_local, ServerAuthority.Intent.SKILL, {"skill": skill, "direction": Vector3.FORWARD}))
 
 
 # Server -> client: stand at `from`, get on, ride to `to`; with `bail`, get

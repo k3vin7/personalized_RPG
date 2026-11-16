@@ -178,6 +178,8 @@ func _release_dash_key(physical_keycode: int) -> bool:
 const MOUNT_ACTION := "mount"
 # For the checks: presses that went out as a request.
 var mount_presses := 0
+# Jump and dash presses that did nothing because the body was on the horse.
+var mounted_presses_dropped := 0
 
 
 func mount_key_label() -> String:
@@ -222,6 +224,18 @@ func _release_mount_key(physical_keycode: int) -> bool:
 
 # The one key: no horse asks for one, a horse (or one on its way) sends it
 # off. A request either way; the stage that comes back is the server's.
+# A skill key on the horse: no skill, just off. Asked for once; the stage
+# that comes back is the server's.
+func dismount_for_skill() -> void:
+	if player.sync_mount != PlayerMount.Stage.MOUNTED:
+		return
+	skill_dismounts += 1
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.MOUNT, {"on": false})
+
+
+var skill_dismounts := 0
+
+
 func press_mount() -> void:
 	if player.state == Player.State.DEAD:
 		return
@@ -250,6 +264,10 @@ func note_pushed() -> void:
 
 
 func press_jump() -> void:
+	if player.is_mounted():
+		# Riding: no jump off the horse's back. Counted for the checks.
+		mounted_presses_dropped += 1
+		return
 	if player.is_incapacitated():
 		# M-1: the windup and the recovery take every order but the cancel;
 		# M-2: so does lying knocked down.
@@ -277,6 +295,9 @@ func press_jump() -> void:
 # What the jump actually is, once something has decided to cast it.
 func cast_jump() -> void:
 	_disarm()
+	if player.is_mounted():
+		mounted_presses_dropped += 1
+		return
 	_jump_buffer_left = JUMP_BUFFER
 	_catch_buffer_left = CATCH_BUFFER
 
@@ -286,6 +307,9 @@ func request_jump() -> void:
 
 
 func press_dash() -> void:
+	if player.is_mounted():
+		mounted_presses_dropped += 1
+		return
 	if player.is_incapacitated():
 		return
 	if Tuning.values.smart_key_enabled:
@@ -1212,6 +1236,9 @@ func seconds_since_dash() -> float:
 
 func request_dash() -> bool:
 	_disarm()
+	if player.is_mounted():
+		mounted_presses_dropped += 1
+		return false
 	if player.is_incapacitated() or not player.is_grounded_state() or _dash_cooldown_left > 0.0:
 		return false
 	var plan := dash_plan()

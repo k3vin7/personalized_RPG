@@ -593,6 +593,13 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 	var actor := actor_for(sender)
 	if actor == null or not _shape_is_valid(kind, payload):
 		return _refuse(sender, kind, "shape")
+	# Riding: on the horse a body moves and nothing else. The owner's own
+	# keys already turn a skill press into getting off; this is the server
+	# saying the same to a press that crossed the mount on the wire.
+	if actor.sync_mount == PlayerMount.Stage.MOUNTED and _blocked_while_mounted(kind, payload):
+		last_refusal = "mounted"
+		mounted_refusals += 1
+		return _refuse(sender, kind, "mounted")
 	var result: Variant = null
 	match kind:
 		Intent.SHOVE:
@@ -1043,6 +1050,8 @@ func can_grab(actor: Player, target: Node3D) -> bool:
 		return false                      # being carried, so not grabbing
 	if holder_of(target) != 0:
 		return false                      # someone reached it first
+	if target is Player and (target as Player).sync_mount == PlayerMount.Stage.MOUNTED:
+		return false                      # a rider is not picked up off the horse
 	if actor.state == Player.State.DEAD or not actor.is_grounded_state():
 		return false
 	if target is Player:
@@ -1325,6 +1334,8 @@ func send_force(target: Node, event: Dictionary) -> void:
 		launched = _rule_knockback(target as Player, event)
 	elif target is Dummy:
 		launched = _rule_dummy_knockback(target as Dummy, event)
+	if target is Player:
+		_mount_on_force(target as Player, event, launched)
 	var holder_peer := holder_of(target)
 	if holder_peer != 0 and launched:
 		_end_hold(holder_peer, "target_pushed")
@@ -1595,10 +1606,15 @@ func server_damage(player: Player, amount: float, cause: String, hit_id := 0) ->
 		return
 	server_set_hp(player, player.hp - amount)
 	player.note_hit(hit_id if hit_id > 0 else ForceSystem.next_id(), amount)
-	# Riding: a body that is hurt while it is calling its horse does not get it.
+	# Riding: a body that is hurt while it is calling its horse does not get it,
+	# and one that is hurt on the horse gets off it, on its feet. Whether the
+	# same blow also throws it is the knockback verdict's (_mount_on_force).
 	if player.sync_mount == PlayerMount.Stage.SUMMONING:
 		mounts_cancelled += 1
 		_set_mount(player, PlayerMount.Stage.NONE, "hurt")
+	elif player.sync_mount == PlayerMount.Stage.MOUNTED:
+		mount_hits += 1
+		_set_mount(player, PlayerMount.Stage.NONE, "hit")
 	if player.hp <= 0.0:
 		server_kill(player, cause)
 
@@ -2196,6 +2212,18 @@ func _rule_weapon(actor: Player, kind: int) -> Variant:
 # on starts the summon clock (mount_summon_time, the server's), and the body
 # is on the horse when it runs out; off gets down at once.
 var _mount_summons := {}
+# Counted for the checks: rides ended by a hit that the body stood through,
+# rides ended by being thrown, and intents refused for being on the horse.
+var mount_hits := 0
+var mount_throws := 0
+var mounted_refusals := 0
+# The physics frame each peer's ride last ended on, and why: a blow takes the
+# HP first and is judged for knockback after, in the same step.
+var _mount_ended_frame := {}
+# Where nobody may ride. A slot for the world's data: boxes in world space,
+# filled by whatever will own the map's zones. Empty: riding is allowed
+# everywhere.
+var no_mount_zones: Array[AABB] = []
 # When each peer last got off, for the move check's grace.
 var _mount_ended := {}
 const MOUNT_SPEED_GRACE := 0.6
@@ -2236,9 +2264,57 @@ func _mount_refusal(actor: Player, standing: bool) -> String:
 		return "holding"
 	if holder_of(actor) != 0:
 		return "held"
+	if not mount_allowed_at(actor.global_position):
+		return "no_mount_zone"
 	if standing and actor.state != Player.State.IDLE and actor.state != Player.State.MOVE:
 		return "not_standing"
 	return ""
+
+
+# Whether a body standing here may be on a horse: outside every no-mount zone.
+func mount_allowed_at(at: Vector3) -> bool:
+	for zone: AABB in no_mount_zones:
+		if zone.has_point(at):
+			return false
+	return true
+
+
+# What a rider may not ask for: every skill, the shove, the grab and the
+# throw, a raised shield and a charge. Lowering a shield or ending a charge
+# is let through, like getting off.
+func _blocked_while_mounted(kind: int, payload: Dictionary) -> bool:
+	match kind:
+		Intent.SKILL, Intent.SHOVE, Intent.GRAB, Intent.THROW:
+			return true
+		Intent.BLOCK, Intent.CHARGE:
+			return bool(payload.get("on", false))
+	return false
+
+
+# A force on a rider, once the knockback verdict is in. Launched: thrown off,
+# the ordinary launch applies and the horse is gone at once. Held its ground
+# and it hurt: off the horse, on its feet (server_damage already did that if
+# the HP came off first; a blow whose damage is only in the event is caught
+# here). The tolerance in the verdict is the rider's own.
+func _mount_on_force(target: Player, event: Dictionary, launched: bool) -> void:
+	var peer := target.get_multiplayer_authority()
+	var mounted := target.sync_mount == PlayerMount.Stage.MOUNTED
+	var ended: Dictionary = _mount_ended_frame.get(peer, {})
+	var just_hit := int(ended.get("frame", -1)) == Engine.get_physics_frames() and String(ended.get("why", "")) == "hit"
+	if launched and (mounted or just_hit):
+		if mounted:
+			_set_mount(target, PlayerMount.Stage.NONE, "thrown")
+		else:
+			mount_hits -= 1
+			last_mount["why"] = "thrown"
+		mount_throws += 1
+		# Tells every screen the horse does not stay behind this time.
+		target.sync_mount_thrown += 1
+		print("PLAYGROUND_MOUNT_THROWN peer=%s h_speed=%.2f tolerance=%.2f" % [
+			target.name, float(event.get("knock_h_speed", 0.0)), float(event.get("knock_tolerance", 0.0))])
+	elif mounted and float(event.get("damage", 0.0)) > 0.0:
+		mount_hits += 1
+		_set_mount(target, PlayerMount.Stage.NONE, "hit")
 
 
 func _set_mount(actor: Player, stage: int, why: String) -> void:
@@ -2249,6 +2325,11 @@ func _set_mount(actor: Player, stage: int, why: String) -> void:
 		mounts_granted += 1
 	elif actor.sync_mount == PlayerMount.Stage.MOUNTED:
 		_mount_ended[peer] = float(Time.get_ticks_msec()) / 1000.0
+		_mount_ended_frame[peer] = {"frame": Engine.get_physics_frames(), "why": why}
+	if stage == PlayerMount.Stage.MOUNTED and _blocks.has(peer):
+		# A raised shield does not ride along.
+		_blocks.erase(peer)
+		_tell_block(actor, false)
 	actor.sync_mount = stage
 	last_mount = {"peer": peer, "stage": stage, "why": why,
 		"at": float(Time.get_ticks_msec()) / 1000.0}
@@ -2308,8 +2389,12 @@ func _tick_mounts(delta: float) -> void:
 		return
 	for node in Net.spawn_root.get_children():
 		var player := node as Player
-		if player != null and player.sync_dead and player.sync_mount != PlayerMount.Stage.NONE:
+		if player == null or player.sync_mount == PlayerMount.Stage.NONE:
+			continue
+		if player.sync_dead:
 			_set_mount(player, PlayerMount.Stage.NONE, "dead")
+		elif holder_of(player) != 0:
+			_set_mount(player, PlayerMount.Stage.NONE, "held")
 
 
 # What the server holds this peer to be carrying: its own copy's sync_weapon,

@@ -123,6 +123,10 @@ var sync_offhand: int = WeaponKinds.Kind.NONE
 # synchronizer like the weapon. The owner asks (Intent.MOUNT); the server
 # runs the summon clock and writes this; every peer shows what arrives.
 var sync_mount: int = PlayerMount.Stage.NONE
+# Riding: counts the times this body was thrown off its horse (the server's,
+# with the stage). A change tells every screen that this dismount leaves no
+# horse standing behind.
+var sync_mount_thrown := 0
 # C-1c: the owner's raised shield, on the pose synchronizer for the picture
 # on other screens. The server keeps its own record of the block.
 var sync_blocking := false
@@ -653,6 +657,8 @@ func _physics_process(delta: float) -> void:
 	# Riding: the stage follows the server's word on every peer, the owner too.
 	if mount != null and sync_mount != mount.stage:
 		mount.apply(sync_mount)
+	if mount != null and sync_mount_thrown != mount.thrown_seen:
+		mount.on_thrown(sync_mount_thrown)
 	# M-5: the weapon follows the server's word on every peer, the owner too.
 	if sync_weapon != weapon:
 		_apply_weapon(sync_weapon)

@@ -30,6 +30,10 @@ var stage: int = Stage.NONE
 # How many times this screen has put the body on a horse / taken it off.
 var mounts_shown := 0
 var dismounts_shown := 0
+# The server's count of throws this screen has acted on, and how many times
+# a horse was taken away at once rather than left standing.
+var thrown_seen := 0
+var horses_vanished := 0
 
 var _horse: Node3D
 var _shape_node: CollisionShape3D
@@ -129,6 +133,25 @@ func apply(new_stage: int) -> void:
 	player.on_mount_changed()
 	print("PLAYGROUND_MOUNT_SHOWN peer=%s on=%d stage=%s" % [
 		player.name, multiplayer.get_unique_id(), Stage.keys()[stage]])
+
+
+# Thrown off: the horse is gone at once. The count and the stage travel
+# together but are read one after the other, so this covers both orders --
+# the horse still under the body, and the one just left behind.
+func on_thrown(count: int) -> void:
+	var first := thrown_seen == 0 and count > 0 and mounts_shown == 0
+	thrown_seen = count
+	if first:
+		return # A body that arrived on this screen with old throws on it.
+	horses_vanished += 1
+	for entry: Dictionary in _lingering:
+		var node := entry["node"] as Node3D
+		if is_instance_valid(node):
+			node.queue_free()
+	_lingering.clear()
+	if stage == Stage.MOUNTED and _horse != null:
+		_horse.queue_free()
+		_horse = null
 
 
 func _get_on() -> void:
