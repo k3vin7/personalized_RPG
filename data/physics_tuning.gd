@@ -982,7 +982,7 @@ extends Resource
 			mount_seat_above = value
 # The horse's top speed: this times the walk of a bare level-1 human
 # (Player.get_mount_speed). Nothing about the rider changes it.
-@export var mount_speed_mult: float = 3.3:
+@export var mount_speed_mult: float = 2.31:
 	set(value):
 		if Tuning.may_write(self):
 			mount_speed_mult = value

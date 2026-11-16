@@ -61,10 +61,15 @@ extends Resource
 # camera_pitch_deg (18 m, 55 deg, the values QuarterCamera carried as
 # constants until now); at 0, camera_near_mult x the distance at
 # camera_near_pitch_deg (9 m lying down at 35 deg). No rotation.
-@export var camera_zoom: float = 1.0
-@export var camera_distance: float = 18.0
+# 2026-11-17: the zoom is set by how much ground shows across the middle of
+# the screen. At the camera's 40 degree fov on a 16:9 view that is 1.294 x
+# the distance, so 50 m across is 38.64 m away (zoom 1), 20 m across is
+# 0.4 of that (zoom 0), and the default 40 m across is zoom 2/3. The tilt
+# still runs between the same two angles.
+@export var camera_zoom: float = 0.6667
+@export var camera_distance: float = 38.64
 @export var camera_pitch_deg: float = 55.0
-@export var camera_near_mult: float = 0.5
+@export var camera_near_mult: float = 0.4
 @export var camera_near_pitch_deg: float = 35.0
 @export var camera_zoom_step: float = 0.1
 @export var camera_zoom_smoothing: float = 10.0
