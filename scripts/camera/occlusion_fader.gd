@@ -49,7 +49,12 @@ func _physics_process(delta: float) -> void:
 	# Fading them all has two effects beyond visibility: the character can never
 	# be hidden, and a faded wall stops taking the click, so the ground behind
 	# it can be aimed at. The dither keeps the wall readable as a wall.
-	var line := target.global_position.z
+	# 2026-11-17: the view can be turned, so "nearer the camera" is measured
+	# along the flat direction to the camera rather than along +Z. Unturned,
+	# that is +Z and the wall's own near_z, as before.
+	var to_camera := -camera.get_camera_flat_forward()
+	var unturned := absf(to_camera.x) < 0.0001 and to_camera.z > 0.0
+	var line := target.global_position.z if unturned else target.global_position.dot(to_camera)
 	for node in get_tree().get_nodes_in_group(WALL_GROUP):
 		var wall := node as CollisionObject3D
 		if wall == null:
@@ -64,7 +69,8 @@ func _physics_process(delta: float) -> void:
 		if not is_instance_valid(body):
 			_levels.erase(instance_id)
 			continue
-		var in_front: bool = float(body.get_meta("near_z", -INF)) > line + FRONT_MARGIN
+		var nearest := float(body.get_meta("near_z", -INF)) if unturned else _nearest_along(body, to_camera)
+		var in_front: bool = nearest > line + FRONT_MARGIN
 		var wanted := FADE_HIDDEN if in_front else FADE_VISIBLE
 		var level := lerpf(float(entry["level"]), wanted, 1.0 - exp(-FADE_SPEED * delta))
 		entry["level"] = level
@@ -77,6 +83,21 @@ func _physics_process(delta: float) -> void:
 			var body := entry["body"] as CollisionObject3D
 			if is_instance_valid(body):
 				_faded.append(body.get_rid())
+
+
+# How far toward the camera a wall reaches: the furthest corner of its drawn
+# boxes along that direction.
+func _nearest_along(body: Node3D, to_camera: Vector3) -> float:
+	var nearest := -INF
+	for child in body.get_children():
+		var mesh_instance := child as MeshInstance3D
+		if mesh_instance == null or mesh_instance.mesh == null:
+			continue
+		var box := mesh_instance.get_aabb()
+		var placed := mesh_instance.global_transform
+		for i in 8:
+			nearest = maxf(nearest, (placed * box.get_endpoint(i)).dot(to_camera))
+	return nearest
 
 
 func _apply_fade(body: Node3D, level: float) -> void:

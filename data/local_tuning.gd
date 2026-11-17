@@ -66,7 +66,10 @@ extends Resource
 # the distance, so 50 m across is 38.64 m away (zoom 1), 20 m across is
 # 0.4 of that (zoom 0), and the default 40 m across is zoom 2/3. The tilt
 # still runs between the same two angles.
-@export var camera_zoom: float = 0.6667
+# 2026-11-17 (later): the game starts nine wheel steps in from the far end,
+# zoom 0.1 -- 17.77 m away at 37 deg, about 23 m of ground across. The far
+# end (zoom 1) is where it was.
+@export var camera_zoom: float = 0.1
 @export var camera_distance: float = 38.64
 @export var camera_pitch_deg: float = 55.0
 @export var camera_near_mult: float = 0.4
@@ -77,6 +80,18 @@ extends Resource
 # the view over the ground at this many metres a second (Shift: three times
 # that); F2 again goes back to the body. Drawn only.
 @export var camera_pan_speed: float = 40.0
+# 2026-11-17, a trial: degrees the view turns about the body for one notch
+# of the wheel. (The wheel no longer zooms; the middle button steps the zoom.)
+@export var camera_turn_step_deg: float = 15.0
+
+@export_group("Interior")
+# 건물 진입 a: inside a building, on this screen only. How many metres of
+# ground stay lit outside each door (the rest of the outside is black), how
+# strong the light in each doorway is, and how long the change takes. All
+# three are stand-in values.
+@export var interior_door_glimpse: float = 3.0
+@export var interior_door_light: float = 2.0
+@export var interior_fade_time: float = 0.3
 
 @export_group("Model")
 # 2026-11-06: which gait the model draws for a moving body. Drawn only; the

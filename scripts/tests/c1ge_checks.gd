@@ -83,13 +83,18 @@ func _data_checks() -> void:
 	note("camera: zoom %.2f, distance %.1f m at %.0f deg; near %.2f x at %.0f deg; wheel step %.2f, smoothing %.1f" % [
 		v.camera_zoom, v.camera_distance, v.camera_pitch_deg, v.camera_near_mult, v.camera_near_pitch_deg,
 		v.camera_zoom_step, v.camera_zoom_smoothing])
-	expect(absf(v.camera_distance - 18.0) < 0.001 and absf(v.camera_pitch_deg - 55.0) < 0.001
-		and absf(v.camera_near_mult - 0.5) < 0.001 and absf(v.camera_near_pitch_deg - 35.0) < 0.001
-		and absf(v.camera_zoom - 1.0) < 0.001,
-		"the_defaults_are_18m_55deg_far_and_half_the_distance_at_35deg_near_starting_far")
-	expect(absf(QuarterCamera.distance_for(1.0) - 18.0) < 0.001 and absf(QuarterCamera.pitch_deg_for(1.0) - 55.0) < 0.001
-		and absf(QuarterCamera.distance_for(0.0) - 9.0) < 0.001 and absf(QuarterCamera.pitch_deg_for(0.0) - 35.0) < 0.001
-		and absf(QuarterCamera.distance_for(0.5) - 13.5) < 0.001 and absf(QuarterCamera.pitch_deg_for(0.5) - 45.0) < 0.001,
+	# 2026-11-17: far is 50 m of ground across (38.64 m away), near is 0.4 of
+	# that, and the game starts nine wheel steps in from the far end.
+	expect(absf(v.camera_distance - 38.64) < 0.001 and absf(v.camera_pitch_deg - 55.0) < 0.001
+		and absf(v.camera_near_mult - 0.4) < 0.001 and absf(v.camera_near_pitch_deg - 35.0) < 0.001
+		and absf(v.camera_zoom - 0.1) < 0.001,
+		"the_defaults_are_38_64m_55deg_far_and_0_4_of_the_distance_at_35deg_near_starting_at_zoom_0_1")
+	expect(absf(QuarterCamera.distance_for(v.camera_zoom) - 17.774) < 0.001
+		and absf(QuarterCamera.pitch_deg_for(v.camera_zoom) - 37.0) < 0.001,
+		"the_starting_view_is_17_77m_away_at_37deg")
+	expect(absf(QuarterCamera.distance_for(1.0) - 38.64) < 0.001 and absf(QuarterCamera.pitch_deg_for(1.0) - 55.0) < 0.001
+		and absf(QuarterCamera.distance_for(0.0) - 15.456) < 0.001 and absf(QuarterCamera.pitch_deg_for(0.0) - 35.0) < 0.001
+		and absf(QuarterCamera.distance_for(0.5) - 27.048) < 0.001 and absf(QuarterCamera.pitch_deg_for(0.5) - 45.0) < 0.001,
 		"distance_and_tilt_interpolate_together_on_the_one_zoom_number")
 	var was: float = v.camera_near_pitch_deg
 	v.camera_near_pitch_deg = 25.0
@@ -183,31 +188,37 @@ func _aim_checks() -> void:
 # ------------------------------------------------- 4: the wheel
 
 func _wheel_checks() -> void:
+	# 2026-11-17: the wheel turns the view and no longer zooms; the middle
+	# button steps the zoom near -> default -> far -> near.
 	var camera := _local.camera
-	camera.set_zoom_now(1.0)
+	var stops := camera.zoom_stops()
+	camera.set_zoom_now(stops[1])
 	await _wait(0.2)
 	var steps := camera.wheel_steps
+	var yaw_was := camera.yaw_deg
+	var turn: float = Tuning.values.camera_turn_step_deg
 	for _n in 3:
 		_wheel(MOUSE_BUTTON_WHEEL_UP)
 		await get_tree().process_frame
-	var after_up: float = Tuning.values.camera_zoom
 	_wheel(MOUSE_BUTTON_WHEEL_DOWN)
-	await get_tree().process_frame
-	var after_down: float = Tuning.values.camera_zoom
-	for _n in 20:
-		_wheel(MOUSE_BUTTON_WHEEL_UP)
+	await _wait(1.5)
+	var zoom_after_wheel: float = Tuning.values.camera_zoom
+	note("wheel: 3 up, 1 down -> yaw %.2f from %.2f (step %.1f), notches %d, zoom %.3f" % [
+		camera.yaw_deg, yaw_was, turn, camera.wheel_steps - steps, zoom_after_wheel])
+	expect(absf(camera.yaw_deg - (yaw_was + 2.0 * turn)) < 0.05 and camera.wheel_steps - steps == 4
+		and absf(zoom_after_wheel - stops[1]) < 0.001,
+		"the_wheel_turns_the_view_one_step_a_notch_and_does_not_zoom")
+	var seen: Array[float] = []
+	for _n in 3:
+		_wheel(MOUSE_BUTTON_MIDDLE)
 		await get_tree().process_frame
-	var floor_level: float = Tuning.values.camera_zoom
+		seen.append(Tuning.values.camera_zoom)
 	await _wait(0.8)
-	note("wheel: 3 up -> zoom %.2f (step %.2f), 1 down -> %.2f, 20 more up -> %.2f (clamped), notches taken %d, shown %.3f, camera %.2f m / %.1f deg" % [
-		after_up, Tuning.values.camera_zoom_step, after_down, floor_level, camera.wheel_steps - steps, camera.zoom_shown(),
-		camera.view_distance(), camera.view_pitch_deg()])
-	expect(absf(after_up - (1.0 - 3.0 * Tuning.values.camera_zoom_step)) < 0.001
-		and absf(after_down - (1.0 - 2.0 * Tuning.values.camera_zoom_step)) < 0.001
-		and absf(floor_level) < 0.001 and camera.wheel_steps - steps == 24,
-		"wheel_up_is_closer_down_is_farther_by_one_step_and_the_level_stops_at_0")
-	expect(absf(camera.view_distance() - 9.0) < 0.05 and absf(camera.view_pitch_deg() - 35.0) < 0.05,
-		"and_at_the_floor_the_view_is_9m_at_35deg")
+	note("middle button from the default: %s (stops %s), camera %.2f m / %.1f deg" % [
+		seen, stops, camera.view_distance(), camera.view_pitch_deg()])
+	expect(absf(seen[0] - stops[2]) < 0.001 and absf(seen[1] - stops[0]) < 0.001 and absf(seen[2] - stops[1]) < 0.001,
+		"the_middle_button_steps_default_to_far_to_near_to_default")
+	camera.set_yaw(yaw_was)
 
 
 func _wheel(index: int) -> void:

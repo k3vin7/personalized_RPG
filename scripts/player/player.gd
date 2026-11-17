@@ -188,6 +188,8 @@ var _swing_active := false
 # 임시 캐릭터 a: the floating hands, when no model is drawn. A sword skill's
 # swing is the main hand's (and the trail the blade's) while this is set.
 var hands: PlayerHands
+# 건물 진입: this screen's view of the building the body is in (local only).
+var interior_view: InteriorView
 var _hands_swing := false
 var swings_started := 0
 # C-0: hitstop, in render frames: the swing and the trail hold still.
@@ -364,6 +366,11 @@ func _ready() -> void:
 		fader.name = "OcclusionFader"
 		camera.add_child(fader)
 		fader.setup(camera, self)
+
+		interior_view = InteriorView.new()
+		interior_view.name = "InteriorView"
+		camera.add_child(interior_view)
+		interior_view.setup(camera, self)
 
 		var bars := StatusBars.new()
 		bars.name = "StatusBars"

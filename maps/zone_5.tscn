@@ -1,5 +1,149 @@
 [gd_scene format=3 uid="uid://dwfx4x32t4g6k"]
 
+[ext_resource type="Script" uid="uid://dmp15amwblyu4" path="res://scripts/world/building_interior.gd" id="interior_script"]
+
+[sub_resource type="StandardMaterial3D" id="mat_pub_wall"]
+albedo_color = Color(0.9, 0.88, 0.84, 1)
+roughness = 1.0
+
+[sub_resource type="BoxShape3D" id="pub_shape_wall_z_0_0"]
+size = Vector3(0.5, 3, 13)
+
+[sub_resource type="BoxMesh" id="pub_mesh_wall_z_0_0"]
+material = SubResource("mat_pub_wall")
+size = Vector3(0.5, 3, 13)
+
+[sub_resource type="BoxShape3D" id="pub_shape_wall_z_1_0"]
+size = Vector3(0.5, 3, 2.5)
+
+[sub_resource type="BoxMesh" id="pub_mesh_wall_z_1_0"]
+material = SubResource("mat_pub_wall")
+size = Vector3(0.5, 3, 2.5)
+
+[sub_resource type="BoxShape3D" id="pub_shape_wall_z_1_over_1"]
+size = Vector3(0.5, 0.5, 2)
+
+[sub_resource type="BoxMesh" id="pub_mesh_wall_z_1_over_1"]
+material = SubResource("mat_pub_wall")
+size = Vector3(0.5, 0.5, 2)
+
+[sub_resource type="BoxShape3D" id="pub_shape_wall_z_1_2"]
+size = Vector3(0.5, 3, 5)
+
+[sub_resource type="BoxMesh" id="pub_mesh_wall_z_1_2"]
+material = SubResource("mat_pub_wall")
+size = Vector3(0.5, 3, 5)
+
+[sub_resource type="BoxShape3D" id="pub_shape_wall_z_4_0"]
+size = Vector3(0.5, 3, 15.5)
+
+[sub_resource type="BoxMesh" id="pub_mesh_wall_z_4_0"]
+material = SubResource("mat_pub_wall")
+size = Vector3(0.5, 3, 15.5)
+
+[sub_resource type="BoxShape3D" id="pub_shape_wall_z_4_over_1"]
+size = Vector3(0.5, 0.5, 2)
+
+[sub_resource type="BoxMesh" id="pub_mesh_wall_z_4_over_1"]
+material = SubResource("mat_pub_wall")
+size = Vector3(0.5, 0.5, 2)
+
+[sub_resource type="BoxShape3D" id="pub_shape_wall_z_4_2"]
+size = Vector3(0.5, 3, 5.5)
+
+[sub_resource type="BoxMesh" id="pub_mesh_wall_z_4_2"]
+material = SubResource("mat_pub_wall")
+size = Vector3(0.5, 3, 5.5)
+
+[sub_resource type="BoxShape3D" id="pub_shape_wall_x_7_0"]
+size = Vector3(10, 3, 0.5)
+
+[sub_resource type="BoxMesh" id="pub_mesh_wall_x_7_0"]
+material = SubResource("mat_pub_wall")
+size = Vector3(10, 3, 0.5)
+
+[sub_resource type="BoxShape3D" id="pub_shape_wall_x_8_0"]
+size = Vector3(6.5, 3, 0.5)
+
+[sub_resource type="BoxMesh" id="pub_mesh_wall_x_8_0"]
+material = SubResource("mat_pub_wall")
+size = Vector3(6.5, 3, 0.5)
+
+[sub_resource type="BoxShape3D" id="pub_shape_wall_x_9_0"]
+size = Vector3(17, 3, 0.5)
+
+[sub_resource type="BoxMesh" id="pub_mesh_wall_x_9_0"]
+material = SubResource("mat_pub_wall")
+size = Vector3(17, 3, 0.5)
+
+[sub_resource type="BoxShape3D" id="pub_shape_post_0_2"]
+size = Vector3(0.5, 3, 0.5)
+
+[sub_resource type="BoxMesh" id="pub_mesh_post_0_2"]
+material = SubResource("mat_pub_wall")
+size = Vector3(0.5, 3, 0.5)
+
+[sub_resource type="BoxShape3D" id="pub_shape_post_0_4"]
+size = Vector3(0.5, 3, 0.5)
+
+[sub_resource type="BoxMesh" id="pub_mesh_post_0_4"]
+material = SubResource("mat_pub_wall")
+size = Vector3(0.5, 3, 0.5)
+
+[sub_resource type="BoxShape3D" id="pub_shape_post_2_0"]
+size = Vector3(0.5, 3, 0.5)
+
+[sub_resource type="BoxMesh" id="pub_mesh_post_2_0"]
+material = SubResource("mat_pub_wall")
+size = Vector3(0.5, 3, 0.5)
+
+[sub_resource type="BoxShape3D" id="pub_shape_post_2_2"]
+size = Vector3(0.5, 3, 0.5)
+
+[sub_resource type="BoxMesh" id="pub_mesh_post_2_2"]
+material = SubResource("mat_pub_wall")
+size = Vector3(0.5, 3, 0.5)
+
+[sub_resource type="BoxShape3D" id="pub_shape_post_5_0"]
+size = Vector3(0.5, 3, 0.5)
+
+[sub_resource type="BoxMesh" id="pub_mesh_post_5_0"]
+material = SubResource("mat_pub_wall")
+size = Vector3(0.5, 3, 0.5)
+
+[sub_resource type="BoxShape3D" id="pub_shape_post_5_4"]
+size = Vector3(0.5, 3, 0.5)
+
+[sub_resource type="BoxMesh" id="pub_mesh_post_5_4"]
+material = SubResource("mat_pub_wall")
+size = Vector3(0.5, 3, 0.5)
+
+[sub_resource type="StandardMaterial3D" id="mat_pub_wood"]
+albedo_color = Color(0.5, 0.34, 0.2, 1)
+roughness = 1.0
+
+[sub_resource type="StandardMaterial3D" id="mat_interior_room"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0.2, 0.8, 1, 0.25)
+
+[sub_resource type="BoxMesh" id="pub_room_main"]
+material = SubResource("mat_interior_room")
+size = Vector3(10, 3, 23)
+
+[sub_resource type="BoxMesh" id="pub_room_side"]
+material = SubResource("mat_interior_room")
+size = Vector3(7, 3, 13)
+
+[sub_resource type="StandardMaterial3D" id="mat_interior_door"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(1, 0.8, 0.2, 0.6)
+
+[sub_resource type="BoxMesh" id="pub_door"]
+material = SubResource("mat_interior_door")
+size = Vector3(0.5, 2.5, 2)
+
 [sub_resource type="StandardMaterial3D" id="mat_dungeon"]
 transparency = 1
 albedo_color = Color(0.6, 0.2, 0.9, 0.5)
@@ -51,54 +195,354 @@ size = Vector3(18, 5, 13)
 transform = Transform3D(0.7071067, 0, -0.7071067, 0, 1, 0, 0.7071067, 0, 0.7071067, -15.0767765, 3.2, 15.123224)
 size = Vector3(3.5, 2.5, 1)
 
-[node name="pub" type="CSGCombiner3D" parent="building_center" unique_id=203752346]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0, 5)
+[node name="pub" type="Node3D" parent="." unique_id=203752346]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9, 0, 2)
 
-[node name="front door" type="CSGBox3D" parent="building_center/pub" unique_id=315328047]
-transform = Transform3D(0, 0, -0.9999999, 0, 1, 0, 0.9999999, 0, 0, 9.3, 1.7, 12)
-size = Vector3(2, 2.5, 1)
+[node name="floor1" type="CSGCombiner3D" parent="pub" unique_id=1265163138]
+use_collision = true
 
-[node name="floor1" type="CSGBox3D" parent="building_center/pub" unique_id=1148907713]
-transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 13, 2, 15)
-size = Vector3(18, 3, 8)
+[node name="bar" type="CSGCombiner3D" parent="pub/floor1" unique_id=585626045]
 
-[node name="floor1_2" type="CSGBox3D" parent="building_center/pub" unique_id=1981621682]
-transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 5.5, 2, 20)
+[node name="table" type="CSGBox3D" parent="pub/floor1/bar" unique_id=486124997]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 1.1, 11)
+size = Vector3(1, 1.2, 9)
+material = SubResource("mat_pub_wood")
+
+[node name="table2" type="CSGBox3D" parent="pub/floor1/bar" unique_id=208174272]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15.5, 1.75, 10.6)
+size = Vector3(0.4, 0.1, 8.2)
+material = SubResource("mat_pub_wood")
+
+[node name="table3" type="CSGBox3D" parent="pub/floor1/bar" unique_id=1185262128]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 16, 1.1, 15)
+size = Vector3(1, 1.2, 1)
+material = SubResource("mat_pub_wood")
+
+[node name="table4" type="CSGBox3D" parent="pub/floor1/bar" unique_id=1711843175]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 16.1, 1.75, 14.5)
+size = Vector3(0.4, 0.1, 0.8)
+material = SubResource("mat_pub_wood")
+
+[node name="table5" type="CSGBox3D" parent="pub/floor1/bar" unique_id=634934070]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 18.75, 1.1, 15)
+size = Vector3(1, 1.2, 1.5)
+material = SubResource("mat_pub_wood")
+
+[node name="table6" type="CSGBox3D" parent="pub/floor1/bar" unique_id=1249395078]
+transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, 18.75, 1.75, 14.5)
+size = Vector3(0.4, 0.1, 1.5)
+material = SubResource("mat_pub_wood")
+
+[node name="chair" type="CSGCylinder3D" parent="pub/floor1/bar" unique_id=1454036406]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 0.9, 8.5)
+radius = 0.15
+height = 0.8
+material = SubResource("mat_pub_wood")
+
+[node name="chair2" type="CSGCylinder3D" parent="pub/floor1/bar" unique_id=1973503942]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 0.9, 10)
+radius = 0.15
+height = 0.8
+material = SubResource("mat_pub_wood")
+
+[node name="chair3" type="CSGCylinder3D" parent="pub/floor1/bar" unique_id=1794027315]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 0.9, 11.5)
+radius = 0.15
+height = 0.8
+material = SubResource("mat_pub_wood")
+
+[node name="chair4" type="CSGCylinder3D" parent="pub/floor1/bar" unique_id=1321319691]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14, 0.9, 13)
+radius = 0.15
+height = 0.8
+material = SubResource("mat_pub_wood")
+
+[node name="tables" type="CSGCombiner3D" parent="pub/floor1" unique_id=984303185]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 13, -0.2, 20)
+
+[node name="table3" type="CSGCombiner3D" parent="pub/floor1/tables" unique_id=420074711]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.799999, 0, -2.7999992)
+
+[node name="table" type="CSGBox3D" parent="pub/floor1/tables/table3" unique_id=624363311]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.65, 0)
+size = Vector3(1.4, 0.1, 1.4)
+material = SubResource("mat_pub_wood")
+
+[node name="table4" type="CSGCombiner3D" parent="pub/floor1/tables" unique_id=1107880528]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9.8, 0, -2.7999992)
+
+[node name="table" type="CSGBox3D" parent="pub/floor1/tables/table4" unique_id=1691165404]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.65, 0)
+size = Vector3(1.4, 0.1, 1.4)
+material = SubResource("mat_pub_wood")
+
+[node name="table6" type="CSGCombiner3D" parent="pub/floor1/tables" unique_id=1605225334]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.7999992, 0, 3.2000008)
+
+[node name="table" type="CSGBox3D" parent="pub/floor1/tables/table6" unique_id=1831553571]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.65, 0)
+size = Vector3(1.4, 0.1, 1.4)
+material = SubResource("mat_pub_wood")
+
+[node name="table7" type="CSGCombiner3D" parent="pub/floor1/tables" unique_id=975886506]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.799999, 0, 3.2000008)
+
+[node name="table" type="CSGBox3D" parent="pub/floor1/tables/table7" unique_id=2069980737]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.65, 0)
+size = Vector3(1.4, 0.1, 1.4)
+material = SubResource("mat_pub_wood")
+
+[node name="table8" type="CSGCombiner3D" parent="pub/floor1/tables" unique_id=1041397064]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9.8, 0, 3.2)
+
+[node name="table" type="CSGBox3D" parent="pub/floor1/tables/table8" unique_id=297906395]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.65, 0)
+size = Vector3(1.4, 0.1, 1.4)
+material = SubResource("mat_pub_wood")
+
+[node name="table9" type="CSGCombiner3D" parent="pub/floor1/tables" unique_id=100375312]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.7999992, 0, 8.800001)
+
+[node name="table" type="CSGBox3D" parent="pub/floor1/tables/table9" unique_id=934512141]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.65, 0)
+size = Vector3(1.4, 0.1, 1.4)
+material = SubResource("mat_pub_wood")
+
+[node name="table10" type="CSGCombiner3D" parent="pub/floor1/tables" unique_id=492251458]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.799999, 0, 8.800001)
+
+[node name="table" type="CSGBox3D" parent="pub/floor1/tables/table10" unique_id=362301080]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.65, 0)
+size = Vector3(1.4, 0.1, 1.4)
+material = SubResource("mat_pub_wood")
+
+[node name="table11" type="CSGCombiner3D" parent="pub/floor1/tables" unique_id=1617818]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9.8, 0, 8.800001)
+
+[node name="table" type="CSGBox3D" parent="pub/floor1/tables/table11" unique_id=1665285375]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.65, 0)
+size = Vector3(1.4, 0.1, 1.4)
+material = SubResource("mat_pub_wood")
+
+[node name="floor2" type="CSGBox3D" parent="pub" unique_id=289783179]
+use_collision = true
+transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 14.5, 5, 18)
+size = Vector3(24, 3, 11)
+
+[node name="floor2_2" type="CSGBox3D" parent="pub" unique_id=798313160]
+use_collision = true
+transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 5.5, 5, 23)
+size = Vector3(14, 3, 7)
+
+[node name="floor3" type="CSGBox3D" parent="pub" unique_id=1242298377]
+use_collision = true
+transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 11, 8, 23)
+size = Vector3(14, 3, 18)
+
+[node name="basement" type="CSGBox3D" parent="pub" unique_id=1411121341]
+use_collision = true
+transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 5.5, -1.1, 20)
 size = Vector3(8, 3, 7)
 
-[node name="floor2" type="CSGBox3D" parent="building_center/pub" unique_id=289783179]
-transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 13, 5, 15)
-size = Vector3(18, 3, 8)
+[node name="interior" type="Node3D" parent="pub" unique_id=1605047195]
+script = ExtResource("interior_script")
+upstairs = [NodePath("../floor2"), NodePath("../floor2_2"), NodePath("../floor3")]
 
-[node name="floor2_2" type="CSGBox3D" parent="building_center/pub" unique_id=798313160]
-transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 5.5, 5, 20)
-size = Vector3(8, 3, 7)
+[node name="rooms" type="Node3D" parent="pub/interior" unique_id=1294630027]
 
-[node name="floor3" type="CSGBox3D" parent="building_center/pub" unique_id=1242298377]
-transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 9.5, 8, 20)
-size = Vector3(8, 3, 15)
+[node name="main" type="MeshInstance3D" parent="pub/interior/rooms" unique_id=1998624617]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14.5, 2, 18)
+mesh = SubResource("pub_room_main")
 
-[node name="basement" type="CSGBox3D" parent="building_center/pub" unique_id=1411121341]
-transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 5.5, -1, 20)
-size = Vector3(8, 3, 7)
+[node name="side" type="MeshInstance3D" parent="pub/interior/rooms" unique_id=748802669]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 2, 23)
+mesh = SubResource("pub_room_side")
 
-[node name="back door" type="CSGBox3D" parent="building_center/pub" unique_id=1224892410]
-transform = Transform3D(0, 0, -0.9999999, 0, 1, 0, 0.9999999, 0, 0, 16.7, 2, 14)
-size = Vector3(2, 3, 1)
+[node name="doors" type="Node3D" parent="pub/interior" unique_id=1704411289]
+
+[node name="front" type="MeshInstance3D" parent="pub/interior/doors" unique_id=1562050991]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9.25, 1.75, 10)
+mesh = SubResource("pub_door")
+
+[node name="back" type="MeshInstance3D" parent="pub/interior/doors" unique_id=1454361474]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 19.75, 1.75, 23)
+mesh = SubResource("pub_door")
+
+[node name="walls" type="Node3D" parent="pub/interior"]
+
+[node name="wall_z_0_0" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.25, 2, 23)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/wall_z_0_0"]
+shape = SubResource("pub_shape_wall_z_0_0")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/wall_z_0_0"]
+mesh = SubResource("pub_mesh_wall_z_0_0")
+
+[node name="wall_z_1_0" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9.25, 2, 7.75)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/wall_z_1_0"]
+shape = SubResource("pub_shape_wall_z_1_0")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/wall_z_1_0"]
+mesh = SubResource("pub_mesh_wall_z_1_0")
+
+[node name="wall_z_1_over_1" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9.25, 3.25, 10)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/wall_z_1_over_1"]
+shape = SubResource("pub_shape_wall_z_1_over_1")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/wall_z_1_over_1"]
+mesh = SubResource("pub_mesh_wall_z_1_over_1")
+
+[node name="wall_z_1_2" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9.25, 2, 13.5)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/wall_z_1_2"]
+shape = SubResource("pub_shape_wall_z_1_2")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/wall_z_1_2"]
+mesh = SubResource("pub_mesh_wall_z_1_2")
+
+[node name="wall_z_4_0" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 19.75, 2, 14.25)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/wall_z_4_0"]
+shape = SubResource("pub_shape_wall_z_4_0")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/wall_z_4_0"]
+mesh = SubResource("pub_mesh_wall_z_4_0")
+
+[node name="wall_z_4_over_1" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 19.75, 3.25, 23)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/wall_z_4_over_1"]
+shape = SubResource("pub_shape_wall_z_4_over_1")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/wall_z_4_over_1"]
+mesh = SubResource("pub_mesh_wall_z_4_over_1")
+
+[node name="wall_z_4_2" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 19.75, 2, 26.75)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/wall_z_4_2"]
+shape = SubResource("pub_shape_wall_z_4_2")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/wall_z_4_2"]
+mesh = SubResource("pub_mesh_wall_z_4_2")
+
+[node name="wall_x_7_0" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 14.5, 2, 6.25)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/wall_x_7_0"]
+shape = SubResource("pub_shape_wall_x_7_0")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/wall_x_7_0"]
+mesh = SubResource("pub_mesh_wall_x_7_0")
+
+[node name="wall_x_8_0" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.75, 2, 16.25)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/wall_x_8_0"]
+shape = SubResource("pub_shape_wall_x_8_0")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/wall_x_8_0"]
+mesh = SubResource("pub_mesh_wall_x_8_0")
+
+[node name="wall_x_9_0" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 11, 2, 29.75)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/wall_x_9_0"]
+shape = SubResource("pub_shape_wall_x_9_0")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/wall_x_9_0"]
+mesh = SubResource("pub_mesh_wall_x_9_0")
+
+[node name="post_0_2" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.25, 2, 16.25)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/post_0_2"]
+shape = SubResource("pub_shape_post_0_2")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/post_0_2"]
+mesh = SubResource("pub_mesh_post_0_2")
+
+[node name="post_0_4" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.25, 2, 29.75)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/post_0_4"]
+shape = SubResource("pub_shape_post_0_4")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/post_0_4"]
+mesh = SubResource("pub_mesh_post_0_4")
+
+[node name="post_2_0" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9.25, 2, 6.25)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/post_2_0"]
+shape = SubResource("pub_shape_post_2_0")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/post_2_0"]
+mesh = SubResource("pub_mesh_post_2_0")
+
+[node name="post_2_2" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9.25, 2, 16.25)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/post_2_2"]
+shape = SubResource("pub_shape_post_2_2")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/post_2_2"]
+mesh = SubResource("pub_mesh_post_2_2")
+
+[node name="post_5_0" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 19.75, 2, 6.25)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/post_5_0"]
+shape = SubResource("pub_shape_post_5_0")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/post_5_0"]
+mesh = SubResource("pub_mesh_post_5_0")
+
+[node name="post_5_4" type="StaticBody3D" parent="pub/interior/walls"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 19.75, 2, 29.75)
+collision_mask = 0
+
+[node name="Shape" type="CollisionShape3D" parent="pub/interior/walls/post_5_4"]
+shape = SubResource("pub_shape_post_5_4")
+
+[node name="Mesh" type="MeshInstance3D" parent="pub/interior/walls/post_5_4"]
+mesh = SubResource("pub_mesh_post_5_4")
 
 [node name="blacksmith" type="CSGCombiner3D" parent="building_center" unique_id=224082351]
 transform = Transform3D(-1, 0, 8.742278e-08, 0, 1, 0, -8.742278e-08, 0, -1, -21, 0, -21)
 
 [node name="display" type="CSGBox3D" parent="building_center/blacksmith" unique_id=2006070612]
-transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, -4, 2, -2.0000005)
-size = Vector3(8, 3, 8)
+transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, -4, 3, -2)
+size = Vector3(8, 5, 8)
 
 [node name="fire" type="CSGBox3D" parent="building_center/blacksmith" unique_id=1219115152]
-transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 4, 2, -6)
-size = Vector3(16, 3, 8)
+transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 4, 3, -6)
+size = Vector3(16, 5, 8)
 
 [node name="basement" type="CSGBox3D" parent="building_center/blacksmith" unique_id=1317781656]
-transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 0, -1, -2)
+transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 0, -1.1, -2)
 size = Vector3(8, 3, 16)
 
 [node name="front door" type="CSGBox3D" parent="building_center/blacksmith" unique_id=1504095419]
@@ -113,12 +557,12 @@ size = Vector3(5, 1, 2)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0, 7)
 
 [node name="display" type="CSGBox3D" parent="building_center/shop" unique_id=1771507143]
-transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 16, 2, -4.5000005)
-size = Vector3(15, 3, 8)
+transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 17.5, 3, -4.5000005)
+size = Vector3(15, 5, 11)
 
-[node name="floor" type="CSGBox3D" parent="building_center/shop" unique_id=778231029]
-transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 16, -1, -9)
-size = Vector3(6, 3, 8)
+[node name="basement" type="CSGBox3D" parent="building_center/shop" unique_id=778231029]
+transform = Transform3D(0, 0, -0.99999994, 0, 1, 0, 0.99999994, 0, 0, 17.5, -2.6, -1.0000007)
+size = Vector3(8, 6, 11)
 
 [node name="front door" type="CSGBox3D" parent="building_center/shop" unique_id=463694241]
 transform = Transform3D(0, 0, -0.9999999, 0, 1, 0, 0.9999999, 0, 0, 12.3, 1.7, -8)
@@ -168,6 +612,10 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -2)
 
 [node name="house" type="CSGBox3D" parent="building_SE/house1" unique_id=289803706]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 2, -31)
+size = Vector3(8, 3, 8)
+
+[node name="house2" type="CSGBox3D" parent="building_SE/house1" unique_id=1080224323]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 5, -31)
 size = Vector3(8, 3, 8)
 
 [node name="field" type="CSGBox3D" parent="building_SE/house1" unique_id=1389746973]
@@ -231,6 +679,10 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9, 0, -50)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 2, -26)
 size = Vector3(8, 3, 8)
 
+[node name="house2" type="CSGBox3D" parent="building_SE/house4" unique_id=2101942760]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 5, -26)
+size = Vector3(8, 3, 8)
+
 [node name="field" type="CSGBox3D" parent="building_SE/house4" unique_id=470278257]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -26, 0.1, -20.5)
 size = Vector3(24, 1, 25)
@@ -289,6 +741,10 @@ transform = Transform3D(-4.371139e-08, 0, 1, 0, 1, 0, -1, 0, -4.371139e-08, -27.
 
 [node name="house" type="CSGBox3D" parent="building_NE/house6" unique_id=1835072368]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 2, -26)
+size = Vector3(8, 3, 8)
+
+[node name="house2" type="CSGBox3D" parent="building_NE/house6" unique_id=1890923215]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9.999999, 5, -26)
 size = Vector3(8, 3, 8)
 
 [node name="field" type="CSGBox3D" parent="building_NE/house6" unique_id=2119739407]
@@ -722,6 +1178,10 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0, 25)
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 2, -47)
 size = Vector3(8, 3, 10)
 
+[node name="house3" type="CSGBox3D" parent="floor_S/house6" unique_id=1853735027]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -13, 5, -47)
+size = Vector3(8, 3, 10)
+
 [node name="house2" type="CSGBox3D" parent="floor_S/house6" unique_id=655251363]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6.5, 2, -50)
 size = Vector3(5, 3, 4)
@@ -744,6 +1204,6 @@ size = Vector3(3, 4, 0.3)
 material = SubResource("mat_dungeon")
 
 [node name="dungeon_2" type="CSGBox3D" parent="." unique_id=1352476634]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -67, 2.5, -68)
+transform = Transform3D(0.49999997, 0, 0.8660253, 0, 1, 0, -0.8660253, 0, 0.49999997, -67, 2.5, -68)
 size = Vector3(3, 4, 0.3)
 material = SubResource("mat_dungeon")

@@ -23,6 +23,16 @@ var camera: Camera3D
 
 # The view's heading, degrees about Y. 0 looks along -Z.
 var yaw_deg := 0.0
+# 2026-11-17, a trial: the wheel turns the view about the body, one
+# Tuning.values.camera_turn_step_deg a notch, and yaw_deg eases after this.
+# Everything that reads the view (the click ray, the aim, the dash, the wall
+# fade, the opened building's camera-side walls) reads it as it is now, so it
+# all follows. The middle button steps the zoom round three stops instead.
+var yaw_wanted_deg := 0.0
+const TURN_SMOOTHING := 10.0
+# The zoom the game started at: the middle stop.
+var _zoom_default := 0.1
+var zoom_stop_presses := 0
 
 var _offset := Vector3.ZERO
 # The zoom the view is showing, easing toward Tuning.values.camera_zoom.
@@ -50,6 +60,7 @@ func _ready() -> void:
 	# work order calls for a view with no rotation, and re-aiming every frame
 	# would swing the angle with the follow lag.
 	_zoom_shown = clampf(Tuning.values.camera_zoom, 0.0, 1.0)
+	_zoom_default = _zoom_shown
 	_apply_view(_zoom_shown)
 
 
@@ -64,6 +75,7 @@ func set_pitch(degrees: float) -> void:
 # Jumps there: a heading is set when a map starts, not eased into.
 func set_yaw(degrees: float) -> void:
 	yaw_deg = degrees
+	yaw_wanted_deg = degrees
 	_apply_view(_zoom_shown)
 	if is_instance_valid(target) and target.is_inside_tree():
 		_smoothed = target.global_position + _offset
@@ -117,7 +129,27 @@ func _apply_view(zoom: float) -> void:
 	rotation = Vector3(-pitch, yaw, 0.0)
 
 
-# The wheel. Up is closer. Anything the UI took (the panel's own scroll) does
+# The three zoom stops the middle button goes round: near (for now, halfway
+# between the default and the nearest), the default the game starts at, far
+# (the farthest the view goes).
+func zoom_stops() -> Array[float]:
+	var stops: Array[float] = [_zoom_default * 0.5, _zoom_default, 1.0]
+	return stops
+
+
+# The next stop after the one the zoom is nearest to: near -> default -> far
+# -> near.
+func next_zoom_stop() -> float:
+	var stops := zoom_stops()
+	var nearest := 0
+	for i in stops.size():
+		if absf(stops[i] - Tuning.values.camera_zoom) < absf(stops[nearest] - Tuning.values.camera_zoom):
+			nearest = i
+	return stops[(nearest + 1) % stops.size()]
+
+
+# The wheel turns the view about the body, one step a notch; the middle
+# button steps the zoom. Anything the UI took (the panel's own scroll) does
 # not reach here.
 func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
@@ -130,15 +162,19 @@ func _unhandled_input(event: InputEvent) -> void:
 	var button := event as InputEventMouseButton
 	if button == null or not button.pressed:
 		return
-	var step: float = Tuning.values.camera_zoom_step
+	var step: float = Tuning.values.camera_turn_step_deg
 	if button.button_index == MOUSE_BUTTON_WHEEL_UP:
-		Tuning.values.camera_zoom = clampf(Tuning.values.camera_zoom - step, 0.0, 1.0)
+		yaw_wanted_deg += step
 	elif button.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-		Tuning.values.camera_zoom = clampf(Tuning.values.camera_zoom + step, 0.0, 1.0)
+		yaw_wanted_deg -= step
+	elif button.button_index == MOUSE_BUTTON_MIDDLE:
+		Tuning.values.camera_zoom = next_zoom_stop()
+		zoom_stop_presses += 1
+		Tuning.notify_changed()
+		return
 	else:
 		return
 	wheel_steps += 1
-	Tuning.notify_changed()
 
 
 # Looking around (2026-11-17): F2 on, the arrow keys slide the view over the
@@ -184,6 +220,11 @@ func _process(delta: float) -> void:
 	_zoom_shown = lerpf(_zoom_shown, wanted_zoom, 1.0 - exp(-Tuning.values.camera_zoom_smoothing * delta))
 	if absf(_zoom_shown - wanted_zoom) < 0.0005:
 		_zoom_shown = wanted_zoom
+	# The heading eases after the wheel. Not wrapped: the two only ever differ
+	# by the notches not yet turned.
+	yaw_deg = lerpf(yaw_deg, yaw_wanted_deg, 1.0 - exp(-TURN_SMOOTHING * delta))
+	if absf(yaw_deg - yaw_wanted_deg) < 0.01:
+		yaw_deg = yaw_wanted_deg
 	_apply_view(_zoom_shown)
 	# Position only. The character drifts a little off centre while moving and
 	# recentres when it stops, which is the follow lag showing itself honestly
@@ -194,6 +235,10 @@ func _process(delta: float) -> void:
 	var wanted := target.global_position + _offset + _pan
 	if _smoothed == Vector3.INF:
 		_smoothed = global_position
+	if yaw_deg != yaw_wanted_deg:
+		# Turning: the camera swings about the body rather than cutting the
+		# corner after it, so the body stays where it is on the screen.
+		_smoothed = wanted
 	_smoothed = _smoothed.lerp(wanted, 1.0 - exp(-follow_smoothing * delta))
 	global_position = _smoothed + _shake_offset(delta)
 

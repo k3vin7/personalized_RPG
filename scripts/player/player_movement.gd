@@ -1648,6 +1648,14 @@ func _click_to_target() -> void:
 	var mouse := player.get_viewport().get_mouse_position()
 	var from := player.camera.camera.project_ray_origin(mouse)
 	var to := from + player.camera.camera.project_ray_normal(mouse) * 500.0
+	if not Tuning.server.climb_enabled:
+		# 건물 진입 b: the click is for a floor to walk on, and nothing else
+		# takes it. (With climbing on, a wall is something to click: below.)
+		var floor_hit := _click_floor(from, to)
+		if not floor_hit.is_empty():
+			order_from_surface(floor_hit.get("collider") as CollisionObject3D,
+				floor_hit["position"] as Vector3, Vector3.UP)
+		return
 	var query := PhysicsRayQueryParameters3D.create(from, to, CLICK_MASK)
 	query.collide_with_areas = false
 	# A wall that is currently faded out must not take the click: the player is
@@ -1660,6 +1668,70 @@ func _click_to_target() -> void:
 		hit.get("collider") as CollisionObject3D,
 		hit["position"] as Vector3,
 		hit.get("normal", Vector3.ZERO) as Vector3)
+
+
+# 건물 진입 b: the floor a click means. The ray goes through whatever it
+# meets that is not a floor to walk on -- walls (drawn or not), roofs, the
+# sides and tops of furniture -- and stops at the first one that is:
+#
+#   - it faces up (TOP_SURFACE, the line a move order has always used);
+#   - inside an opened building, it is not above that building's ceiling, so
+#     the floor upstairs lets the click through to the one the body is on;
+#   - the body can walk to it (the navigation path from the body ends on it).
+#
+# If no surface on the ray can be walked to, the first that faces up (and is
+# not upstairs) is the answer, as it was before: an order to somewhere out of
+# reach still walks to the nearest place.
+#
+# Only the click is ruled here. No collider is asked to change.
+const CLICK_PIERCE_MAX := 48
+const CLICK_PIERCE_STEP := 0.05
+const CLICK_REACH_FLAT := 0.75
+const CLICK_REACH_HEIGHT := 1.0
+
+
+func _click_floor(from: Vector3, to: Vector3) -> Dictionary:
+	var space := player.get_world_3d().direct_space_state
+	var direction := (to - from).normalized()
+	var ceiling := INF
+	var view := player.interior_view
+	if view != null and is_instance_valid(view.shown) and view.shown.inside:
+		ceiling = view.shown.ceiling_y()
+	var excluded := OcclusionFader.faded_rids()
+	var start := from
+	var fallback := {}
+	for _n in CLICK_PIERCE_MAX:
+		if (to - start).dot(direction) <= CLICK_PIERCE_STEP:
+			break
+		var query := PhysicsRayQueryParameters3D.create(start, to, CLICK_MASK)
+		query.collide_with_areas = false
+		query.hit_back_faces = false
+		query.exclude = excluded
+		var hit := space.intersect_ray(query)
+		if hit.is_empty():
+			break
+		var point := hit["position"] as Vector3
+		var normal := hit.get("normal", Vector3.ZERO) as Vector3
+		if normal.dot(Vector3.UP) >= TOP_SURFACE and point.y <= ceiling - 0.05:
+			if _click_reachable(point):
+				return hit
+			if fallback.is_empty():
+				fallback = hit
+		start = point + direction * CLICK_PIERCE_STEP
+	return fallback
+
+
+# Whether the body can walk to a point: the navigation path from the body
+# ends on it. With no map to ask (not baked yet), every floor counts.
+func _click_reachable(point: Vector3) -> bool:
+	var map := player.get_world_3d().navigation_map
+	if NavigationServer3D.map_get_iteration_id(map) == 0:
+		return true
+	var path := NavigationServer3D.map_get_path(map, player.global_position, point, true)
+	if path.is_empty():
+		return false
+	var end := path[path.size() - 1]
+	return _flat_distance(end, point) <= CLICK_REACH_FLAT and absf(end.y - point.y) <= CLICK_REACH_HEIGHT
 
 
 # F follow-up: what the right button means, decided by the surface the cursor
