@@ -33,21 +33,25 @@ const SETTLE := 1.6
 const SAME_PLACE := 0.15
 
 # name -> [where the feet are in the pub, the storey a screen should say, on
-# a landing, how high (for "is the other drawn": -1 cellar, 0 outside)]
+# a landing, how high (for "is the other drawn": -1 cellar, 0 outside), and
+# -- where a storey has more than one -- which space of it (the rooms that
+# open into each other)]
 const PLACES := {
 	"cellar": [Vector3(13.0, -3.0, 20.0), "storey_b1", false, -1],
-	"ground": [Vector3(14.5, 0.5, 11.5), "storey_1", false, 1],
-	"ground_b": [Vector3(10.6, 0.5, 18.5), "storey_1", false, 1],
-	"second": [Vector3(14.0, 3.5, 12.0), "storey_2", false, 2],
+	"ground": [Vector3(14.5, 0.5, 11.5), "storey_1", false, 1, "hall"],
+	"ground_b": [Vector3(10.6, 0.5, 18.5), "storey_1", false, 1, "hall"],
+	"kitchen": [Vector3(13.0, 0.5, 24.0), "storey_1", false, 1, "kitchen"],
+	"second": [Vector3(15.5, 3.5, 12.0), "storey_2", false, 2, "hall"],
+	"second_room": [Vector3(11.5, 3.5, 13.3), "storey_2", false, 2, "room_w2"],
 	"landing": [Vector3(4.0, 3.5, 24.7), "storey_2", true, 2],
-	"third": [Vector3(14.0, 6.5, 24.0), "storey_3", false, 3],
+	"third": [Vector3(14.0, 6.5, 23.0), "storey_3", false, 3],
 	"outside": [Vector3(4.0, 0.5, 8.0), "", false, 0],
 }
 # [host's place, client's place]
 const PAIRS := [
 	["ground", "ground_b"], ["ground", "second"], ["ground", "outside"], ["ground", "cellar"],
 	["second", "ground"], ["second", "third"], ["cellar", "ground"], ["outside", "ground"],
-	["landing", "ground"], ["third", "second"],
+	["landing", "ground"], ["third", "second"], ["ground", "kitchen"], ["kitchen", "ground_b"], ["second", "second_room"],
 ]
 
 var _world: Node3D
@@ -170,10 +174,13 @@ func run(world: Node3D) -> void:
 static func _should_see(viewer: String, other: String) -> bool:
 	var mine: int = PLACES[viewer][3]
 	var theirs: int = PLACES[other][3]
-	# From outside, everybody; from inside, whoever is on the same storey.
+	# From outside, everybody; from inside, whoever is on the same storey and
+	# in the same space of it.
 	if mine == 0:
 		return true
-	return theirs == mine
+	var my_space: String = PLACES[viewer][4] if PLACES[viewer].size() > 4 else ""
+	var their_space: String = PLACES[other][4] if PLACES[other].size() > 4 else ""
+	return theirs == mine and my_space == their_space
 
 
 func _pairing(host_place: String, client_place: String) -> void:

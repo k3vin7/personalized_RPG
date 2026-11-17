@@ -11,10 +11,13 @@ extends Node
 #                        that what is under its feet belongs to; on the
 #                        world's own ground, a ground storey once the body is
 #                        wholly through its door.
-#   what is drawn        of that building: the storey the body is on, the
-#                        stairs that touch it, and the lit strip outside each
-#                        of its doors. Not drawn: every other storey, the
-#                        roof, and everything that is not this building.
+#   what is drawn        of that building: of the storey the body is on, the
+#                        space it is in (the rooms that open into each other
+#                        with no door between; BuildingInterior), the stairs
+#                        that stand in that space, and a strip beyond each of
+#                        its doors. Not drawn: the storey's other spaces, every
+#                        other storey, the roof, and everything that is not
+#                        this building.
 #   what takes a click   what is drawn.
 #
 # "Everything that is not this building" is not painted over: the camera
@@ -60,6 +63,8 @@ var _actors_in := 0.0
 var _suns: Array = []
 var _sun_was: Array[float] = []
 var _dimmed := false
+# The space of the storey the body is in, as the picture was last built.
+var _space := -1
 
 
 func setup(view: QuarterCamera, follow: Player) -> void:
@@ -97,9 +102,16 @@ func _process(delta: float) -> void:
 		# In or out of a building: black first, then the change.
 		_cover = minf(1.0, _cover + rate)
 		if _cover >= 1.0:
+			if now != null:
+				now.current_space = -1
+				_space = now.update_space(target.global_position, target.radius())
 			_change_to(now, new_zone, new_landing)
 	else:
-		if now != storey or new_zone != zone or new_landing != on_landing:
+		if now != storey and now != null:
+			now.current_space = -1
+		var space := now.update_space(target.global_position, target.radius()) if now != null else -1
+		if now != storey or new_zone != zone or new_landing != on_landing or space != _space:
+			_space = space
 			_change_to(now, new_zone, new_landing)
 		_cover = maxf(0.0, _cover - rate)
 	_cover_rect.color.a = _cover
@@ -208,7 +220,12 @@ func stair_drawn(stair: BuildingStair) -> bool:
 		return true
 	if on_landing and zone != null and stair.lower_storey() == storey and stair.footprint().intersects(zone.footprint()):
 		return false
-	return is_drawn(stair.lower_storey()) or is_drawn(stair.upper_storey())
+	# Of the storey the body is on, the stairs that stand in the space it is
+	# in: one that starts there, one that comes up there.
+	var to_world := stair.global_transform
+	if is_drawn(stair.lower_storey()) and storey.space_of_world(to_world * stair.foot) == storey.current_space:
+		return true
+	return is_drawn(stair.upper_storey()) and storey.space_of_world(to_world * stair.landing_centre) == storey.current_space
 
 
 # ------------------------------------------------------------ what takes a click
@@ -232,7 +249,7 @@ func takes_click(collider: Node, point: Vector3) -> bool:
 		# cut down or not at all -- the top of a cut-down wall is as high as the
 		# floor above, and a click that landed there sent the body upstairs.
 		if is_drawn(owner_storey):
-			return owner_storey.is_floor(collider)
+			return owner_storey.floor_takes_click(collider, point)
 		# From on a stair, the landing it goes up to (drawn as a patch of
 		# floor while the storey it is part of is not).
 		return zone != null and owner_storey == zone.upper_storey() and owner_storey.is_floor(collider) and zone.in_landing(point)
@@ -240,11 +257,12 @@ func takes_click(collider: Node, point: Vector3) -> bool:
 	# strip outside a door of the storey the body is on, or -- from on a
 	# stair that goes up to a ground storey -- its landing, as above.
 	for other in storey.storeys():
-		if not other.is_ground() or not other.over_floor(point):
+		if not other.is_ground():
 			continue
 		if is_drawn(other):
-			return true
-		if zone != null and other == zone.upper_storey() and zone.in_landing(point):
+			if other.over_floor(point):
+				return true
+		elif zone != null and other == zone.upper_storey() and other.over_floor(point, true) and zone.in_landing(point):
 			return true
 	return storey.on_door_strip(point)
 
@@ -366,8 +384,12 @@ func _actors() -> Array[Node3D]:
 
 
 func _show_actors() -> void:
+	# Another body is drawn when it stands on the storey the local one is on,
+	# in the same space.
 	for actor in _actors():
-		_put_on(actor, SEEN_LAYER if is_drawn(_storey_under(actor.global_position)) else OUTSIDE_LAYER)
+		var seen := is_drawn(_storey_under(actor.global_position)) \
+			and storey.space_of_world(actor.global_position) == storey.current_space
+		_put_on(actor, SEEN_LAYER if seen else OUTSIDE_LAYER)
 
 
 # The storey of whatever is under a point (no memory, no size): for bodies
@@ -390,7 +412,7 @@ func _storey_under(at: Vector3) -> BuildingInterior:
 		return standing_on
 	for node in get_tree().get_nodes_in_group(BuildingInterior.GROUP):
 		var ground := node as BuildingInterior
-		if ground != null and ground.is_ground() and ground.over_floor(hit["position"] as Vector3):
+		if ground != null and ground.is_ground() and ground.over_floor(hit["position"] as Vector3, true):
 			return ground
 	return null
 
