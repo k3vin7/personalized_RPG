@@ -327,6 +327,18 @@ func _run_smoke() -> void:
 		get_tree().root.add_child(c1e)
 		c1e.run(self)
 		return
+	if Net.auto_only == "TP":
+		var tp := preload("res://scripts/tests/tp_checks.gd").new()
+		tp.name = "TpChecks"
+		get_tree().root.add_child(tp)
+		tp.run(self)
+		return
+	if Net.auto_only == "OW":
+		var ow := preload("res://scripts/tests/ow_checks.gd").new()
+		ow.name = "OwChecks"
+		get_tree().root.add_child(ow)
+		ow.run(self)
+		return
 	if Net.auto_only == "C1d":
 		var c1d := preload("res://scripts/tests/c1d_checks.gd").new()
 		c1d.name = "C1dChecks"

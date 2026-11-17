@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="WeaponDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/weapon_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "great_sword"
+label = "큰 칼"
+kind = 6
+hands = 1
+attack_field = "weapon_attack_sword"
+attack_power_value = 10.0
+skill_ids = PackedStringArray("thrust", "side_cut", "overhead_cut", "parry")
+family = "sword"
+tuning_prefix = "great_sword"
+weight = 4.0
+skill_mults = {
+"*.reach": "reach_mult",
+"*.windup": "windup_mult"
+}
+reach_mult = 1.25
+windup_mult = 1.15

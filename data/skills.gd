@@ -31,6 +31,7 @@ const PATHS := {
 const BARE_IDS := ["shove", "grab", "punch", "kick"]
 
 static var _cache := {}
+static var _variants := {}
 
 
 static func get_def(id: String) -> SkillDef:
@@ -51,3 +52,41 @@ static func is_known(id: String) -> bool:
 
 static func all_ids() -> Array:
 	return PATHS.keys()
+
+
+# The skill as the body holding these two kinds casts it. A weapon's skill in
+# the hand of a member of that weapon's family (the great sword's thrust) is
+# the same skill with that weapon's multipliers on its numbers: one copy per
+# (skill, weapon), with SkillDef.wielded set, so every def.value() down the
+# line -- the server's ruling, the range on the ground, the hand -- reads the
+# same scaled number. Bare skills and the family's own weapon are the file.
+static func for_holder(id: String, main_kind: int, off_kind: int) -> SkillDef:
+	var base := get_def(id)
+	if base == null or base.weapon_id == "bare":
+		return base
+	for kind: int in [main_kind, off_kind]:
+		var weapon := Weapons.def_for_kind(kind)
+		if weapon == null or weapon.family_id() != base.weapon_id:
+			continue
+		if weapon.id == base.weapon_id:
+			return base
+		var key := "%s@%s" % [id, weapon.id]
+		if not _variants.has(key):
+			var copy := base.duplicate() as SkillDef
+			copy.wielded = weapon
+			_variants[key] = copy
+		return _variants[key] as SkillDef
+	return base
+
+
+# The file's def and every weapon's copy of it: a local slider that moves a
+# drawn-only field writes them all.
+static func every_copy(id: String) -> Array[SkillDef]:
+	var out: Array[SkillDef] = []
+	var base := get_def(id)
+	if base != null:
+		out.append(base)
+	for key: String in _variants:
+		if key.begins_with(id + "@"):
+			out.append(_variants[key])
+	return out

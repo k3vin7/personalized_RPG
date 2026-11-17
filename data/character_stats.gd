@@ -21,6 +21,9 @@ extends Resource
 @export var weight_override: float = NAN
 
 @export var gear_weight: float = 0.0
+# What is in the two hands, off the WeaponDefs. Not sent: every peer has the
+# server's word on the weapons and the same table, so Player derives it.
+var weapon_weight: float = 0.0
 
 # C-1a: the allocated points, one count per ability in Ability order. An
 # ability is the race's number plus points x Tuning.server.stat_point_weight.
@@ -110,7 +113,7 @@ var max_stamina: float:
 
 
 func total_weight() -> float:
-	return race_weight + gear_weight + held_weight
+	return race_weight + gear_weight + weapon_weight + held_weight
 
 
 func ratio() -> float:

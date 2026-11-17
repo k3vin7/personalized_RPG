@@ -14,3 +14,4 @@ intellect = 10.0
 height_cm = 220.0
 body_weight = 140.0
 large_mount = true
+usable_weapons = PackedStringArray("sword", "shield", "bow", "spear", "staff", "great_sword", "great_shield")

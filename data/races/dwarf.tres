@@ -13,3 +13,4 @@ vitality = 100.0
 intellect = 50.0
 height_cm = 150.0
 body_weight = 90.0
+usable_weapons = PackedStringArray("sword", "shield", "bow", "spear", "staff")

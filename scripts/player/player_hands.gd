@@ -22,7 +22,7 @@ extends Node3D
 # Nothing about a path is written here as a number: reach, the arc, where it
 # starts, which way it turns, how long it takes, the windup and the recovery
 # are all read off the SkillDef (whose sword values are Tuning.server's), and
-# the blade's length off WeaponKinds. A slider that moves the ruling moves
+# the blade's length off the WeaponDef in the hand. A slider that moves the ruling moves
 # the hand. The constants below are the look of the hands themselves.
 #
 # Lives under Player's Visual container, in its space: the lean, the lying
@@ -144,13 +144,13 @@ func rest_off() -> Transform3D:
 
 # Hilt to tip of what the main hand holds, along the hand's -Z.
 func blade_length() -> float:
-	return WeaponKinds.SWORD_LENGTH if player.weapon == WeaponKinds.Kind.SWORD else 0.0
+	return Weapons.length_of(player.weapon)
 
 
 # Whether this skill's motion is the hand's: a sword skill, with the sword
 # in the hand.
 func drives(def: SkillDef) -> bool:
-	return def != null and def.weapon_id == "sword" and player.weapon == WeaponKinds.Kind.SWORD
+	return def != null and def.weapon_id == "sword" and Weapons.family_id_of(player.weapon) == def.weapon_id
 
 
 # A sword skill that neither sweeps nor thrusts stands the blade as a guard

@@ -27,9 +27,12 @@ extends Dummy
 # by, all of them chase. A dead wolf is back on its mark, full, after
 # wolf_respawn_time.
 #
-# Being hit does not stop it: a push it holds against slides it and the bite
-# goes on. A push past its tolerance throws it, and a body in the air has
-# nothing to leap from, so that does end the bite.
+# A blow in the windup breaks the bite: any force event whose power is at
+# least wolf_interrupt_power (0: every blow -- an early monster) ends it, the
+# judge drops the booked strike, and the wolf stands for wolf_interrupt_pause
+# before it tries again. The leap itself cannot be broken that way. A push
+# past its tolerance throws it at any time, and a body in the air has nothing
+# to leap from, so that ends the bite too.
 #
 # At 0 HP the body is gone on every screen and a carcass (WolfCorpse, a rock
 # in every rule) lies where it fell for wolf_corpse_time.
@@ -73,6 +76,7 @@ var mode := Mode.IDLE
 # Who it is after: the peer it noticed, replaced by whoever hits it.
 var target_peer := 0
 var bites_started := 0
+var bites_interrupted := 0
 var corpses_made := 0
 var deaths := 0
 var respawns := 0
@@ -459,6 +463,19 @@ func _cancel_bite(why: String) -> void:
 	_set_attack_phase("")
 
 
+# Broken in the windup by a blow it held against: the booked strike is gone
+# and the wolf stands, shown as stunned on every screen, before it may wind
+# up again.
+func _interrupt_bite() -> void:
+	if ServerAuthority.instance != null:
+		ServerAuthority.instance.cancel_strike(self, "interrupted")
+	bites_interrupted += 1
+	_stand()
+	_phase_left = Tuning.server.wolf_interrupt_pause
+	_set_attack_phase("stunned")
+	print("PLAYGROUND_WOLF_INTERRUPTED wolf=%s pause=%.2f" % [name, _phase_left])
+
+
 # ------------------------------------------------------------ being hit
 
 func apply_force_event(event: Dictionary) -> void:
@@ -471,6 +488,8 @@ func apply_force_event(event: Dictionary) -> void:
 	# against (a slide) leaves the bite alone.
 	if bool(event.get("knock_launched", true)):
 		_cancel_bite("launched")
+	elif attack_phase == "windup" and float(event.get("base_power", 0.0)) >= Tuning.server.wolf_interrupt_power:
+		_interrupt_bite()
 	# Whoever hit it last is who it is after, and its pack's. On the way home
 	# only a hitter inside the leash of its mark turns it round.
 	var source := int(event.get("source_peer", 0))

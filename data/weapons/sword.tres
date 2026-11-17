@@ -11,3 +11,6 @@ hands = 1
 attack_field = "weapon_attack_sword"
 attack_power_value = 10.0
 skill_ids = PackedStringArray("thrust", "side_cut", "overhead_cut", "parry")
+tuning_prefix = "sword"
+length = 1.43
+weight = 2.0

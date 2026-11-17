@@ -30,3 +30,13 @@ extends Resource
 # Riding: this race sits a bigger horse (the same model scaled by the
 # server's mount_large_scale). The speed is the same for every race.
 @export var large_mount: bool = false
+
+@export_group("Weapons")
+# Weapon ids (data/weapons) a body of this race may take in hand. The server
+# rules a weapon request against this list; empty hands are not on it and are
+# everyone's. A weapon only some races hold is a line here, not a branch.
+@export var usable_weapons: PackedStringArray = PackedStringArray()
+
+
+func can_use(weapon_id: String) -> bool:
+	return usable_weapons.has(weapon_id)

@@ -30,6 +30,8 @@ const CELL_SIZE := 0.25
 @export var capsule_body := true
 
 var world_map: BlockoutMap
+# Debug builds only (MapTeleport.create_for): F3 on the open map.
+var map_teleport: MapTeleport
 var _region: NavigationRegion3D
 var _players_root: Node3D
 var _spawner: MultiplayerSpawner
@@ -100,11 +102,16 @@ func _on_bake_finished() -> void:
 		local.camera.set_yaw(camera_yaw_degrees)
 	if local != null:
 		local.draw_as_capsule(capsule_body)
-	# The map (minimap top-right, Tab for the whole world), up = the camera's up.
+	# The map (minimap top-right, M for the whole world, Tab for the walk
+	# map). North is the heading the camera starts on; the full map keeps it
+	# up, the other two turn with the camera.
 	world_map = BlockoutMap.new()
 	world_map.name = "BlockoutMap"
-	world_map.setup(self, camera_yaw_degrees, scene_file_path.get_file().get_basename())
 	add_child(world_map)
+	world_map.setup(self, camera_yaw_degrees, scene_file_path.get_file().get_basename())
+	map_teleport = MapTeleport.create_for(world_map)
+	if map_teleport != null:
+		add_child(map_teleport)
 	print("WORLD_WALK_SPAWN local=%s peer=%d at=%s" % [
 		local != null, multiplayer.get_unique_id(),
 		local.global_position if local != null else Vector3.INF])
@@ -117,8 +124,60 @@ func _on_bake_finished() -> void:
 			_ride_check(local)
 		elif argument == "--click-check":
 			_click_check(local)
+		elif argument == "--map-colours":
+			_map_colours()
 		elif argument.begins_with("--shot="):
 			_take_shots(argument.trim_prefix("--shot="))
+
+
+# --map-colours: how many colours the map's picture is made of (the picture
+# is the scene from above, so a scene of one grey is a map of one grey).
+# Prints the groups and quits; nothing is saved.
+func _map_colours() -> void:
+	var waited := 0.0
+	while world_map.pictures_taken == 0 and waited < 10.0:
+		await get_tree().create_timer(0.2).timeout
+		waited += 0.2
+	var groups := world_map.colour_census()
+	var size := world_map.picture.get_size() if world_map.picture != null else Vector2.ZERO
+	print("WORLD_MAP_COLOURS picture=%s extent=%s labels=%d groups=%d" % [size, world_map.extent.size, world_map.labels.size(), groups.size()])
+	print("WORLD_MAP_WALK polygons=%d rim_edges=%d" % [world_map.walk_polygons, world_map.walk_edges.size() / 2])
+	# Each map drawn for a few frames, so a mistake in the drawing is an error
+	# here and not a surprise on the first key press.
+	world_map.toggle_walk()
+	for _frame in 5:
+		await get_tree().process_frame
+	world_map.toggle_walk()
+	world_map.toggle_full()
+	for _frame in 5:
+		await get_tree().process_frame
+	world_map.toggle_full()
+	print("WORLD_MAP_DRAWN turn=%.2f walk_scale=%.2f full_size=%s" % [world_map.walk_map.turn, world_map.walk_map.scale_px, world_map.full_map.size])
+	for group in groups:
+		var colour: Color = group["colour"]
+		print("WORLD_MAP_COLOUR #%s share=%.1f%%" % [colour.to_html(false), float(group["share"]) * 100.0])
+	# The small things (a building, a mark) are a sliver of the picture: counted
+	# separately, down to a hundredth of a percent.
+	var fine := world_map.colour_census(16, 0.0001)
+	var small := PackedStringArray()
+	for group in fine:
+		if float(group["share"]) < 0.002:
+			small.append("#%s %.2f%%" % [(group["colour"] as Color).to_html(false), float(group["share"]) * 100.0])
+	print("WORLD_MAP_COLOURS_SMALL groups=%d %s" % [small.size(), ", ".join(small)])
+	var image := world_map.picture.get_image() if world_map.picture != null else null
+	var opaque := 0
+	if image != null:
+		for y in range(0, image.get_height(), 4):
+			for x in range(0, image.get_width(), 4):
+				if image.get_pixel(x, y).a > 0.5:
+					opaque += 1
+		print("WORLD_MAP_COVER opaque=%.1f%%" % (float(opaque) * 1600.0 / float(image.get_width() * image.get_height())))
+	for label in world_map.labels:
+		var at: Vector2 = label["at"]
+		var px := (at - world_map.extent.position) / world_map.extent.size * Vector2(image.get_size()) if image != null else Vector2.ZERO
+		print("WORLD_MAP_LABEL %s at=%s pixel=#%s" % [label["text"], at,
+			image.get_pixelv(Vector2i(px)).to_html(true) if image != null else "-"])
+	get_tree().quit()
 
 
 # Saves the view with the minimap, then again with the full map open
@@ -186,8 +245,8 @@ func _walk_check(local: Player) -> void:
 	await get_tree().process_frame
 	var opened := world_map.is_full_open()
 	world_map.toggle_full()
-	print("WORLD_WALK_CHECK map shapes=%d labels=%d extent=%s body_px=%s of %s north_px=%s tab_opens=%s closes=%s" % [
-		world_map.shapes.size(), world_map.labels.size(), world_map.extent.size,
+	print("WORLD_WALK_CHECK map pictures=%d labels=%d extent=%s body_px=%s of %s north_px=%s tab_opens=%s closes=%s" % [
+		world_map.pictures_taken, world_map.labels.size(), world_map.extent.size,
 		mini.px_of(local.global_position), mini.size,
 		mini.px_of(local.global_position + north * 20.0) - mini.px_of(local.global_position),
 		opened, not world_map.is_full_open()])

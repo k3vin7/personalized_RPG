@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="WeaponDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/weapon_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "great_shield"
+label = "큰 방패"
+kind = 7
+hands = 2
+attack_field = "weapon_attack_shield"
+attack_power_value = 6.0
+skill_ids = PackedStringArray("shield_raise", "shield_bash", "shield_throw", "shield_slam")
+family = "shield"
+tuning_prefix = "great_shield"
+weight = 8.0
+skill_mults = {
+"shield_raise.shape_angle_deg": "block_mult",
+"shield_bash.width": "width_mult"
+}
+width_mult = 1.25
+block_mult = 1.25
+visual_scale = 1.25

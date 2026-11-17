@@ -93,6 +93,10 @@ enum ArcPlane {
 # the damage itself.
 @export var damage: float = 0.0
 @export var weapon_id: String = "bare"
+# Set only on the copy Skills.for_holder makes for a family member of
+# weapon_id (the great sword): value() multiplies by that weapon's numbers.
+# Null on the file's own def.
+var wielded: WeaponDef = null
 @export var knock_power: float = 0.0
 # C-1a: the '스태미나' column. A fixed cost per cast; 0 stamina refuses the
 # cast at the intent (C-1b/C-1d spend it, this stage carries it).
@@ -256,11 +260,22 @@ func catch_force_value() -> float:
 # The number for `field`: the server's slider when the table has it, this
 # resource's own value otherwise.
 func value(field: String) -> float:
+	var number := float(get(field))
 	if tuning_prefix != "":
 		var key := "%s_%s" % [tuning_prefix, TUNING_SUFFIX.get(field, field)]
 		if Tuning.is_server_field(key):
-			return float(Tuning.server.get(key))
-	return float(get(field))
+			number = float(Tuning.server.get(key))
+	if wielded != null:
+		number *= wielded.mult_for(id, field)
+	return number
+
+
+# The attack power behind the '피해' coefficient: the weapon in the hand when
+# this is a weapon's copy, the skill's own weapon otherwise.
+func attack_power() -> float:
+	if wielded != null:
+		return wielded.attack_power()
+	return Weapons.attack_power_for(weapon_id)
 
 
 func server_intent() -> int:

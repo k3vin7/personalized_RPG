@@ -42,6 +42,7 @@ const GROUP_LABELS := {
 	"Combat": "전투 튜닝 (서버 승인) — 무기 공격력 · 방어력 · 치명타",
 	"Sword": "검 4기술 (서버 승인) — 찌르기 · 횡베기 · 종베기 · 흘리기",
 	"Shield": "방패 4기술 (서버 승인) — 들기 · 밀기 · 던지기 · 찍기",
+	"Weapon variants": "무기 무게 · 큰 칼 · 큰 방패 (서버 승인, 임시)",
 	"Dash combo": "돌진 조합 (서버 승인) — 창 · 배율 · 치트 허용 오차",
 	"Wolf": "늑대 (서버 승인) — 인식 · 물기 · 몸 · 시체",
 }
@@ -140,6 +141,8 @@ const FIELD_LABELS := {
 	"wolf_bite_recovery": "물기 후딜 (초)",
 	"wolf_bite_damage": "물기 피해",
 	"wolf_lunge_time": "뛰는 데 걸리는 시간 (초)",
+	"wolf_interrupt_power": "물기 준비를 끊는 타격 힘 (0 = 아무 공격이나)",
+	"wolf_interrupt_pause": "끊긴 뒤 멈춰 있는 시간 (초)",
 	"wolf_run_speed_mult": "늑대 달리기 배율 (인간 맨몸 이속 대비)",
 	"wolf_walk_speed_mult": "늑대 서성임 배율 (인간 맨몸 이속 대비)",
 	"wolf_wander_radius": "서성이는 반경 (m)",
@@ -165,7 +168,14 @@ const FIELD_LABELS := {
 	"block_tolerance_mult": "자세 100%의 허용치 보정(임시)",
 	"block_recover_fraction": "막기 재개 스태미나 비율(임시)",
 	"shield_throw_range": "방패 던지기 사거리",
-	"shield_weight": "방패 무게(임시)",
+	"shield_weight": "방패 무게 — 손에 든 것·던진 것 (임시)",
+	"sword_weight": "검 무게 (kg)",
+	"great_sword_reach_mult": "큰 칼 길이·사거리 배율 (검 대비)",
+	"great_sword_windup_mult": "큰 칼 선딜 배율 (검 대비)",
+	"great_sword_weight": "큰 칼 무게 (kg)",
+	"great_shield_block_mult": "큰 방패 막기 각도 배율 (방패 대비)",
+	"great_shield_width_mult": "큰 방패 밀치기 폭 배율 (방패 대비)",
+	"great_shield_weight": "큰 방패 무게 (kg)",
 	"shield_slam_height_bonus": "찍기 m당 피해 보정",
 	"dash_combo_window": "돌진 조합 창",
 	"dash_combo_mult_max": "돌진 조합 최대 배율(간격 0)",
@@ -538,7 +548,9 @@ func _build_ui() -> void:
 				current,
 				limits.x,
 				limits.y,
-				func(new_value: float) -> void: def.set(field, new_value)))
+				func(new_value: float) -> void:
+					for copy in Skills.every_copy(id):
+						copy.set(field, new_value)))
 
 
 # A fold: a button with the title, and a box under it that the button shows
@@ -639,8 +651,10 @@ func _refresh_choice_buttons() -> void:
 		button.modulate = Color(0.7, 1.0, 0.7) if mine else Color.WHITE
 	for kind: int in _weapon_buttons.keys():
 		var button: Button = _weapon_buttons[kind]
-		var mine := kind == player.weapon
-		button.disabled = mine
+		var mine := kind != WeaponKinds.Kind.NONE and (kind == player.weapon or kind == player.offhand)
+		# Greyed when this body's race may not hold it (the server would
+		# refuse the request; this only saves the click).
+		button.disabled = mine or not Weapons.usable_by(player.stats.race, kind)
 		button.modulate = Color(0.7, 1.0, 0.7) if mine else Color.WHITE
 
 

@@ -63,6 +63,11 @@ enum Intent {
 	# Riding: the horse asked for (on) or left (off). A request: the server
 	# runs the summon clock and writes the stage (Player.sync_mount).
 	MOUNT,
+	# Debug only: the map's click. Where on the ground plane (x, z); the
+	# server finds the nearest floor a body can walk on and moves the body
+	# down the respawn's path. Refused outright unless debug_tools is on,
+	# which it is only in a debug build.
+	DEBUG_TELEPORT,
 }
 
 # Anything that can be picked up joins this group and offers
@@ -665,6 +670,8 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 			result = _rule_block(actor, bool(payload.get("on", false)))
 		Intent.MOUNT:
 			result = _rule_mount(actor, bool(payload.get("on", false)))
+		Intent.DEBUG_TELEPORT:
+			result = _rule_debug_teleport(actor, Vector3(float(payload["x"]), 0.0, float(payload["z"])))
 	if result == null:
 		return _refuse(sender, kind, "refused")
 	granted_intents += 1
@@ -715,6 +722,12 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 			return true
 		Intent.CHARGE, Intent.BLOCK, Intent.MOUNT:
 			return payload.get("on") is bool
+		Intent.DEBUG_TELEPORT:
+			for axis in ["x", "z"]:
+				var number: Variant = payload.get(axis)
+				if not (number is float or number is int) or not is_finite(float(number)):
+					return false
+			return true
 		Intent.SKILL:
 			if payload.has("dash_gap"):
 				var gap: Variant = payload["dash_gap"]
@@ -1684,7 +1697,7 @@ func apply_hit(attacker: Node3D, target: Node3D, def: SkillDef, ctx: Dictionary)
 	if ctx.has("raw_damage"):
 		base = float(ctx["raw_damage"])
 	elif def != null:
-		base = def.value("damage") * Weapons.attack_power_for(def.weapon_id)
+		base = def.value("damage") * def.attack_power()
 	base *= float(ctx.get("mult", 1.0))
 	var crit := _roll_crit(attacker, peer)
 	var rolled := base * (Tuning.server.crit_mult if crit else 1.0)
@@ -1852,20 +1865,82 @@ func server_respawn(player: Player) -> void:
 	server_set_stamina(player, player.stats.max_stamina)
 	player.sync_dead = false
 	_respawn_left.erase(peer)
-	_fall_watch.erase(peer)
 	_kill_grace[peer] = RESPAWN_KILL_GRACE if not player.is_local() else 0.0
 	var at := free_spawn_point(player)
+	print("PLAYGROUND_RESPAWN_AT peer=%s at=(%.2f, %.2f, %.2f)" % [player.name, at.x, at.y, at.z])
+	_send_body_to(player, at, "holder_respawned")
+
+
+# The moving half of a respawn, and the one way the server puts a body
+# somewhere else: the owner is told where (it moves itself, with the
+# teleport's blind on its collision -- Player.apply_respawn), what it was
+# carrying is put down, and the move check is told to expect the jump.
+func _send_body_to(player: Player, at: Vector3, hold_ends_as: String) -> void:
+	var peer := player.get_multiplayer_authority()
+	_fall_watch.erase(peer)
 	# The server asked for this teleport, so it does not warn about it. Long
 	# enough to outlive a round trip: a client's body does not move until the
 	# message telling it to has arrived, and by then two samples are long gone.
 	forgive_move(peer, "", MOVE_FORGIVE_SAMPLES if player.is_local() else 30)
 	if _holds.has(peer):
-		_end_hold(peer, "holder_respawned")
-	print("PLAYGROUND_RESPAWN_AT peer=%s at=(%.2f, %.2f, %.2f)" % [player.name, at.x, at.y, at.z])
+		_end_hold(peer, hold_ends_as)
 	if player.is_local():
 		player.apply_respawn(at)
 	else:
 		apply_respawn.rpc_id(peer, at)
+
+
+# ------------------------------------------------------ debug: the teleport
+# Off in a release build, on the server as on the client: the request is
+# refused here whatever sent it. (A check turns it off to see the refusal.)
+var debug_tools := OS.is_debug_build()
+var debug_teleports := 0
+var debug_teleports_refused := 0
+var last_debug_teleport := {}
+
+# How far above and below the world a floor is looked for under a click.
+const TELEPORT_PROBE := 2000.0
+# The body is set down this far above the floor the map found (the baked map
+# sits within a cell of the real one) and lands.
+const TELEPORT_DROP := 0.3
+
+
+# The floor a body can walk on nearest to the vertical line through `spot`:
+# the navigation map's own answer, so inside a wall, a building or thin air
+# comes out as the nearest place a body can stand. INF when there is no map.
+func walkable_near(world: World3D, spot: Vector3) -> Vector3:
+	var nav := world.navigation_map
+	if not nav.is_valid() or NavigationServer3D.map_get_iteration_id(nav) == 0:
+		return Vector3.INF
+	return NavigationServer3D.map_get_closest_point_to_segment(nav,
+		Vector3(spot.x, TELEPORT_PROBE, spot.z), Vector3(spot.x, -TELEPORT_PROBE, spot.z))
+
+
+func _rule_debug_teleport(actor: Player, spot: Vector3) -> Variant:
+	var why := ""
+	if not debug_tools:
+		why = "not_debug"
+	elif actor.sync_dead:
+		why = "dead"
+	elif holder_of(actor) != 0:
+		why = "held"
+	var floor_at := Vector3.INF
+	if why == "":
+		floor_at = walkable_near(actor.get_world_3d(), spot)
+		if not floor_at.is_finite():
+			why = "no_floor"
+	if why != "":
+		last_refusal = why
+		debug_teleports_refused += 1
+		print("PLAYGROUND_DEBUG_TELEPORT_REFUSED peer=%s why=%s" % [actor.name, why])
+		return null
+	var at := floor_at + Vector3(0.0, actor.half_height() + TELEPORT_DROP, 0.0)
+	debug_teleports += 1
+	last_debug_teleport = {"peer": actor.get_multiplayer_authority(), "asked": spot, "floor": floor_at, "at": at}
+	print("PLAYGROUND_DEBUG_TELEPORT peer=%s asked=(%.2f, %.2f) floor=(%.2f, %.2f, %.2f)" % [
+		actor.name, spot.x, spot.z, floor_at.x, floor_at.y, floor_at.z])
+	_send_body_to(actor, at, "holder_teleported")
+	return true
 
 
 # DOC: an empty spawn point, not necessarily the body's own: two bodies arriving
@@ -2213,6 +2288,14 @@ func _rule_race(actor: Player, kind: int) -> Variant:
 	# C-1a: the stand is a fresh sheet: no points on it.
 	actor.stats.clear_points()
 	actor.stats.gear_weight = 0.0
+	# What the new race may not hold leaves the hand (the race's own list).
+	if not Weapons.usable_by(kind, actor.sync_weapon):
+		print("PLAYGROUND_WEAPON_DROPPED peer=%s kind=%s why=race" % [actor.name, WeaponKinds.LABELS.get(actor.sync_weapon, "?")])
+		actor.sync_weapon = WeaponKinds.Kind.NONE
+	if not Weapons.usable_by(kind, actor.sync_offhand):
+		print("PLAYGROUND_WEAPON_DROPPED peer=%s kind=%s why=race" % [actor.name, WeaponKinds.LABELS.get(actor.sync_offhand, "?")])
+		actor.sync_offhand = WeaponKinds.Kind.NONE
+		_blocks.erase(peer)
 	server_set_hp(actor, actor.hp)
 	forgive_move(peer, "race_changed")
 	print("PLAYGROUND_RACE peer=%s race=%s strength=%.0f weight=%.0f max_hp=%.0f max_stamina=%.0f" % [
@@ -2233,9 +2316,16 @@ func _rule_weapon(actor: Player, kind: int) -> Variant:
 		last_refusal = "holding"
 		print("PLAYGROUND_WEAPON_REFUSED peer=%s why=holding" % actor.name)
 		return null
-	# C-1c: the shield is the off hand's; NONE empties both hands; the rest
-	# is the main hand's. A block cannot outlive the shield.
-	if kind == WeaponKinds.Kind.SHIELD:
+	# Who may hold what is the race's list (RaceData.usable_weapons).
+	if not Weapons.usable_by(actor.stats.race, kind):
+		last_refusal = "race"
+		weapons_refused_by_race += 1
+		print("PLAYGROUND_WEAPON_REFUSED peer=%s kind=%s why=race race=%s" % [
+			actor.name, WeaponKinds.LABELS.get(kind, "?"), Races.label_for(actor.stats.race)])
+		return null
+	# C-1c: the shield's family is the off hand's; NONE empties both hands;
+	# the rest is the main hand's. A block cannot outlive the shield.
+	if Weapons.is_off_hand(kind):
 		actor.sync_offhand = kind
 	elif kind == WeaponKinds.Kind.NONE:
 		actor.sync_weapon = kind
@@ -2243,6 +2333,8 @@ func _rule_weapon(actor: Player, kind: int) -> Variant:
 		_blocks.erase(peer)
 	else:
 		actor.sync_weapon = kind
+	# The body is now heavier or lighter by what is in its hands.
+	forgive_move(peer, "weapon_changed")
 	print("PLAYGROUND_WEAPON peer=%s kind=%s main=%s off=%s" % [actor.name, WeaponKinds.LABELS.get(kind, "?"),
 		WeaponKinds.LABELS.get(actor.sync_weapon, "?"), WeaponKinds.LABELS.get(actor.sync_offhand, "?")])
 	return true
@@ -2451,13 +2543,28 @@ func offhand_of(peer: int) -> int:
 	return actor.sync_offhand if actor != null else WeaponKinds.Kind.NONE
 
 
-# Whether the peer's hands hold what a WeaponDef asks for.
+# Whether the peer's hands hold what a WeaponDef asks for: that weapon or a
+# member of its family (the great sword casts the sword's four).
 func holds_weapon(peer: int, def: WeaponDef) -> bool:
 	if def == null:
 		return false
 	if def.hands == SkillDef.Hands.OFF_HAND:
-		return offhand_of(peer) == def.kind
-	return weapon_of(peer) == def.kind
+		return Weapons.family_id_of(offhand_of(peer)) == def.id
+	return Weapons.family_id_of(weapon_of(peer)) == def.id
+
+
+# Whether the off hand holds one of the shield's family.
+func holds_shield(peer: int) -> bool:
+	return Weapons.family_kind(offhand_of(peer)) == WeaponKinds.Kind.SHIELD
+
+
+# The raise's angle for this body: the shield_raise skill as its off hand
+# casts it (a family member's multiplier on it), never past a full turn.
+func block_angle(peer: int) -> float:
+	var def := Skills.for_holder("shield_raise", WeaponKinds.Kind.NONE, offhand_of(peer))
+	if def == null:
+		return Tuning.server.shield_raise_angle
+	return minf(def.value("shape_angle_deg"), 360.0)
 
 
 # ------------------------------------------------------------ C-1c: the block
@@ -2483,7 +2590,7 @@ func _rule_block(actor: Player, on: bool) -> Variant:
 	if actor.sync_dead or not actor.is_grounded_state():
 		print("PLAYGROUND_BLOCK_REFUSED by=%s why=state_%s" % [actor.name, Player.State.keys()[actor.state]])
 		return null
-	if offhand_of(peer) != WeaponKinds.Kind.SHIELD:
+	if not holds_shield(peer):
 		print("PLAYGROUND_BLOCK_REFUSED by=%s why=no_shield" % actor.name)
 		return null
 	if _block_lockout.has(peer):
@@ -2528,7 +2635,7 @@ func _block_guards(target: Player, attacker: Node3D) -> float:
 	if forward.length_squared() < 0.0001 or offset.length_squared() < 0.0001:
 		return posture
 	var angle := rad_to_deg(forward.normalized().angle_to(offset.normalized()))
-	if angle > Tuning.server.shield_raise_angle * 0.5:
+	if angle > block_angle(target.get_multiplayer_authority()) * 0.5:
 		return -1.0
 	return posture
 
@@ -2573,7 +2680,7 @@ func block_result(raised: bool) -> void:
 func _tick_blocks() -> void:
 	for peer: int in _blocks.keys():
 		var actor := actor_for(peer)
-		if actor == null or actor.sync_dead or not actor.is_grounded_state() or offhand_of(peer) != WeaponKinds.Kind.SHIELD:
+		if actor == null or actor.sync_dead or not actor.is_grounded_state() or not holds_shield(peer):
 			_blocks.erase(peer)
 	for peer: int in _block_lockout.keys():
 		var actor := actor_for(peer)
@@ -2590,26 +2697,30 @@ func _tick_blocks() -> void:
 # speed lands it the table's range away. The hand is empty from here until
 # the grab key on the shield puts it back (_rule_grab).
 var _shield_seq := 0
+var weapons_refused_by_race := 0
 var shields_thrown := 0
 var last_shield_throw := {}
 
 
 func _rule_weapon_throw(actor: Player, def: SkillDef, direction: Vector3) -> Variant:
 	var peer := actor.get_multiplayer_authority()
-	if offhand_of(peer) != WeaponKinds.Kind.SHIELD or actor.sync_dead:
+	if not holds_shield(peer) or actor.sync_dead:
 		return null
 	var forward := Vector3(direction.x, 0.0, direction.z)
 	if forward.length_squared() < 0.0001:
 		return null
 	forward = forward.normalized()
+	# The body that leaves the hand is the weapon that was in it.
+	var thrown_kind := offhand_of(peer)
 	actor.sync_offhand = WeaponKinds.Kind.NONE
 	_blocks.erase(peer)
+	forgive_move(peer, "shield_thrown")
 	_shield_seq += 1
 	var shield_name := "Shield_%d" % _shield_seq
 	var from := actor.hand_position() + forward * (actor.radius() + 0.3)
-	var shield := _spawn_shield(shield_name, from)
+	var shield := _spawn_shield(shield_name, from, thrown_kind)
 	if multiplayer.has_multiplayer_peer():
-		spawn_shield.rpc(shield_name, from)
+		spawn_shield.rpc(shield_name, from, thrown_kind)
 	# Flat, from the hand: the range is where it meets the ground again
 	# under gravity, so the speed is range / fall time.
 	var gravity: float = maxf(Tuning.server.gravity, 0.01)
@@ -2626,13 +2737,14 @@ func _rule_weapon_throw(actor: Player, def: SkillDef, direction: Vector3) -> Var
 	return true
 
 
-func _spawn_shield(shield_name: String, at: Vector3) -> Shield:
+func _spawn_shield(shield_name: String, at: Vector3, kind: int = WeaponKinds.Kind.SHIELD) -> Shield:
 	var existing := get_parent().get_node_or_null(shield_name)
 	if existing != null:
 		existing.queue_free()
 		existing.name = shield_name + "_old"
 	var shield := Shield.new()
-	shield.setup(shield_name, at, Tuning.server.shield_weight)
+	shield.weapon_kind = kind
+	shield.setup(shield_name, at, Weapons.weight_of(kind))
 	get_parent().add_child(shield)
 	return shield
 
@@ -2641,10 +2753,12 @@ func _spawn_shield(shield_name: String, at: Vector3) -> Shield:
 # replicate (CLAUDE.md 1), so each peer builds its own copy; its position
 # then rides Rock.push_state like a rock's.
 @rpc("any_peer", "call_remote", "reliable")
-func spawn_shield(shield_name: String, at: Vector3) -> void:
+func spawn_shield(shield_name: String, at: Vector3, kind: int = WeaponKinds.Kind.SHIELD) -> void:
 	if not result_is_server_sent("spawn_shield", multiplayer.get_remote_sender_id()):
 		return
-	_spawn_shield(shield_name, at)
+	if Weapons.family_kind(kind) != WeaponKinds.Kind.SHIELD:
+		return
+	_spawn_shield(shield_name, at, kind)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -2658,12 +2772,15 @@ func despawn_shield(shield_name: String) -> void:
 
 
 # The grab key on a shield on the ground: back into an empty off hand, the
-# object gone on every peer. A full off hand lifts it like a rock instead.
+# object gone on every peer. A full off hand lifts it like a rock instead,
+# and so does a race whose list does not name this shield.
 func _pick_up_shield(actor: Player, shield: Shield) -> bool:
 	var peer := actor.get_multiplayer_authority()
 	if offhand_of(peer) != WeaponKinds.Kind.NONE or not can_grab(actor, shield):
 		return false
-	actor.sync_offhand = WeaponKinds.Kind.SHIELD
+	if not Weapons.usable_by(actor.stats.race, shield.weapon_kind):
+		return false
+	actor.sync_offhand = shield.weapon_kind
 	var shield_name := shield.name
 	if multiplayer.has_multiplayer_peer():
 		despawn_shield.rpc(shield_name)
@@ -2680,7 +2797,9 @@ func _pick_up_shield(actor: Player, shield: Shield) -> bool:
 # forged or a stale one. Judged against the server's copy of the body, which
 # has to be standing.
 func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
-	var def := Skills.get_def(String(payload.get("skill", "")))
+	# The skill as this body's hands cast it: a family member's copy carries
+	# that weapon's multipliers into every number read below.
+	var def := Skills.for_holder(String(payload.get("skill", "")), actor.sync_weapon, actor.sync_offhand)
 	if def == null or actor.sync_dead:
 		return null
 	var peer := actor.get_multiplayer_authority()

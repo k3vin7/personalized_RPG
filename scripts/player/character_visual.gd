@@ -394,7 +394,10 @@ func measured_height() -> float:
 # the rest. Hangs off the right hand bone. The node's -Z is the blade, so
 # Player's weapon_length_mult scale on Z still lengthens it.
 static func build_weapon_mesh(kind: int) -> Node3D:
-	if kind == WeaponKinds.Kind.SWORD:
+	# The model is the family's, at the weapon's own size.
+	var family := Weapons.family_kind(kind)
+	var ratio := Weapons.size_ratio_of(kind)
+	if family == WeaponKinds.Kind.SWORD:
 		var packed := _generate(SWORD_PATH)
 		if packed != null:
 			var root := Node3D.new()
@@ -403,16 +406,16 @@ static func build_weapon_mesh(kind: int) -> Node3D:
 			# The sword's own length runs along +Y; turned so it runs along
 			# the node's -Z, at the length the order names.
 			mesh.rotation_degrees.x = -90.0
-			mesh.scale = Vector3.ONE * (SWORD_LENGTH / SWORD_MODEL_LENGTH)
+			mesh.scale = Vector3.ONE * (SWORD_LENGTH / SWORD_MODEL_LENGTH) * ratio
 			root.add_child(mesh)
 			return root
-	if kind == WeaponKinds.Kind.SHIELD:
+	if family == WeaponKinds.Kind.SHIELD:
 		var packed := _generate(SHIELD_PATH)
 		if packed != null:
 			var root := Node3D.new()
 			var mesh := packed.instantiate() as Node3D
 			mesh.name = "ShieldMesh"
-			mesh.scale = Vector3.ONE * SHIELD_SCALE
+			mesh.scale = Vector3.ONE * SHIELD_SCALE * ratio
 			root.add_child(mesh)
 			return root
 	return WeaponKinds.build_mesh(kind)

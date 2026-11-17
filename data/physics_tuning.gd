@@ -592,7 +592,7 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			thrust_cooldown = value
-@export var thrust_range: float = 2.2:
+@export var thrust_range: float = 2.86:
 	set(value):
 		if Tuning.may_write(self):
 			thrust_range = value
@@ -630,7 +630,7 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			side_cut_cooldown = value
-@export var side_cut_range: float = 1.8:
+@export var side_cut_range: float = 2.34:
 	set(value):
 		if Tuning.may_write(self):
 			side_cut_range = value
@@ -673,7 +673,7 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			overhead_cut_cooldown = value
-@export var overhead_cut_range: float = 1.8:
+@export var overhead_cut_range: float = 2.34:
 	set(value):
 		if Tuning.may_write(self):
 			overhead_cut_range = value
@@ -911,6 +911,44 @@ extends Resource
 		if Tuning.may_write(self):
 			shield_slam_height_bonus = value
 
+@export_group("Weapon variants")
+# Weapons as bodies in the hand, and the family members' multipliers
+# (WeaponDef.tuning_prefix names these; data/weapons/*.tres holds the same
+# defaults). All temporary. A weapon's weight rides the body while it is in a
+# hand (CharacterStats.weapon_weight); the shield's is shield_weight above.
+@export var sword_weight: float = 2.0:
+	set(value):
+		if Tuning.may_write(self):
+			sword_weight = value
+# The great sword: the sword's four with the blade and every reach x this,
+# every windup x that.
+@export var great_sword_reach_mult: float = 1.25:
+	set(value):
+		if Tuning.may_write(self):
+			great_sword_reach_mult = value
+@export var great_sword_windup_mult: float = 1.15:
+	set(value):
+		if Tuning.may_write(self):
+			great_sword_windup_mult = value
+@export var great_sword_weight: float = 4.0:
+	set(value):
+		if Tuning.may_write(self):
+			great_sword_weight = value
+# The great shield: the shield's four with the raise's angle x block_mult
+# (capped at a full turn) and the bash's width x width_mult.
+@export var great_shield_block_mult: float = 1.25:
+	set(value):
+		if Tuning.may_write(self):
+			great_shield_block_mult = value
+@export var great_shield_width_mult: float = 1.25:
+	set(value):
+		if Tuning.may_write(self):
+			great_shield_width_mult = value
+@export var great_shield_weight: float = 8.0:
+	set(value):
+		if Tuning.may_write(self):
+			great_shield_weight = value
+
 @export_group("Survival")
 @export var fall_damage_min_height: float = 4.0:
 	set(value):
@@ -1039,14 +1077,14 @@ extends Resource
 		if Tuning.may_write(self):
 			wolf_leash_range = value
 # Metres to the target at which it stops and winds up the bite.
-@export var wolf_bite_start_range: float = 3.0:
+@export var wolf_bite_start_range: float = 2.0:
 	set(value):
 		if Tuning.may_write(self):
 			wolf_bite_start_range = value
 # The bite (data/skills/wolf_bite.tres, tuning_prefix wolf_bite): _range is
 # how far it leaps, and with _width the path the telegraph shows and the
 # judge rules; _damage is the HP itself (bare, coefficient x 1).
-@export var wolf_bite_range: float = 3.5:
+@export var wolf_bite_range: float = 2.5:
 	set(value):
 		if Tuning.may_write(self):
 			wolf_bite_range = value
@@ -1062,6 +1100,17 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			wolf_bite_recovery = value
+# A blow in the windup breaks the bite when its power (the force event's) is
+# at least this: 0 is every blow. Per species -- a bear's will be high.
+@export var wolf_interrupt_power: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_interrupt_power = value
+# How long it stands after a broken bite before it may wind up again.
+@export var wolf_interrupt_pause: float = 0.8:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_interrupt_pause = value
 @export var wolf_bite_damage: float = 8.0:
 	set(value):
 		if Tuning.may_write(self):

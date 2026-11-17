@@ -11,6 +11,10 @@ enum Kind {
 	SPEAR,
 	SHIELD,
 	STAFF,
+	# Family members (WeaponDef.family). Added at the end: the number is what
+	# travels on the synchronizer.
+	GREAT_SWORD,
+	GREAT_SHIELD,
 }
 
 const LABELS := {
@@ -20,6 +24,8 @@ const LABELS := {
 	Kind.SPEAR: "창",
 	Kind.SHIELD: "방패",
 	Kind.STAFF: "스태프",
+	Kind.GREAT_SWORD: "큰 칼",
+	Kind.GREAT_SHIELD: "큰 방패",
 }
 
 const COLORS := {
@@ -29,22 +35,25 @@ const COLORS := {
 	Kind.SPEAR: "b8c4d0",
 	Kind.SHIELD: "4a6fa5",
 	Kind.STAFF: "8f6bc9",
+	Kind.GREAT_SWORD: "c9d2dc",
+	Kind.GREAT_SHIELD: "3c5a88",
 }
 
 
 # Primitive stand-ins, shaped enough to tell apart at quarter view distance.
-# Hilt to tip of the stand-in sword, along the node's -Z. The floating hand
-# (PlayerHands) puts the tip on the edge of a skill's range with this.
-const SWORD_LENGTH := 1.1
-
-
+# The shape is the family's (a great sword is a sword), the size the weapon's
+# own: a blade is its WeaponDef's length hilt to tip along the node's -Z --
+# the floating hand (PlayerHands) puts the tip on the edge of a skill's range
+# with the same number -- and the rest scale by its size ratio.
 static func build_mesh(kind: int) -> Node3D:
 	var root := Node3D.new()
 	var color := Color(COLORS.get(kind, "ffffff"))
-	match kind:
+	var ratio := Weapons.size_ratio_of(kind)
+	match Weapons.family_kind(kind):
 		Kind.SWORD:
-			root.add_child(_part(Vector3(0.07, 0.07, SWORD_LENGTH), Vector3(0.0, 0.0, -SWORD_LENGTH * 0.5), color))
-			root.add_child(_part(Vector3(0.26, 0.06, 0.06), Vector3(0.0, 0.0, -0.02), Color("3b3027")))
+			var blade := Weapons.length_of(kind)
+			root.add_child(_part(Vector3(0.07 * ratio, 0.07 * ratio, blade), Vector3(0.0, 0.0, -blade * 0.5), color))
+			root.add_child(_part(Vector3(0.26 * ratio, 0.06 * ratio, 0.06 * ratio), Vector3(0.0, 0.0, -0.02), Color("3b3027")))
 		Kind.BOW:
 			var arc := _part(Vector3(0.06, 1.3, 0.06), Vector3(0.0, 0.0, -0.1), color)
 			arc.rotation_degrees.x = 12.0
@@ -54,7 +63,7 @@ static func build_mesh(kind: int) -> Node3D:
 			root.add_child(_part(Vector3(0.06, 0.06, 2.0), Vector3(0.0, 0.0, -0.9), Color("6b5236")))
 			root.add_child(_part(Vector3(0.12, 0.12, 0.34), Vector3(0.0, 0.0, -2.0), color))
 		Kind.SHIELD:
-			root.add_child(_part(Vector3(0.7, 0.9, 0.08), Vector3(0.0, 0.0, -0.1), color))
+			root.add_child(_part(Vector3(0.7 * ratio, 0.9 * ratio, 0.08), Vector3(0.0, 0.0, -0.1), color))
 		Kind.STAFF:
 			root.add_child(_part(Vector3(0.07, 0.07, 1.7), Vector3(0.0, 0.0, -0.75), Color("6b5236")))
 			var orb := MeshInstance3D.new()

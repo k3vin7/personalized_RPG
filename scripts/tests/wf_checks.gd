@@ -388,7 +388,7 @@ func _client_bitten_checks() -> void:
 	await _quiet()
 	var mate := _mate()
 	var hp_before := mate.hp
-	client_watch.rpc_id(_client_peer(), "mate_watch", 5.0)
+	client_watch.rpc_id(_client_peer(), "mate_watch", 8.0)
 	client_park.rpc_id(_client_peer(), _by_wolf(Vector3(8.0, 0.0, 0.0)))
 	var noticed := await _until(func() -> bool: return _wolf.target_peer == _client_peer(), 3.0)
 	expect(noticed >= 0.0, "the_clients_body_is_noticed")
@@ -450,7 +450,10 @@ func _no_flinch_checks() -> void:
 		hp_before, _wolf.hp, punch.value("damage"), _wolf.target_peer])
 	expect(is_equal_approx(_wolf.hp, hp_before - punch.value("damage")), "a_cast_punch_takes_its_damage_off_the_wolf")
 	expect(_wolf.mode == Wolf.Mode.CHASE and _wolf.target_peer == 1, "a_blow_makes_the_hitter_its_target")
-	# In the windup: a thrust it holds against. No stagger -- the bite lands.
+	# In the windup, with the break set out of a thrust's reach: a thrust it
+	# holds against. No stagger -- the bite lands.
+	var break_power: float = Tuning.server.wolf_interrupt_power
+	Tuning.server.wolf_interrupt_power = 1000.0
 	expect(await _until(_phase_is("windup"), 4.0) >= 0.0, "flinch_it_winds_up")
 	var cancelled := _judge.strikes_cancelled
 	var host_hp := _local.hp
@@ -463,6 +466,40 @@ func _no_flinch_checks() -> void:
 	await _until(_phase_is("recovery"), 1.5)
 	expect(_judge.strikes_cancelled == cancelled and is_equal_approx(_local.hp, host_hp - Tuning.server.wolf_bite_damage),
 		"the_bite_still_lands_after_the_blow")
+	# The shipped value (0: every blow): the same thrust in the next windup
+	# breaks the bite. Nothing is ruled, nobody is bitten, and it stands for
+	# the pause before it winds up again.
+	Tuning.server.wolf_interrupt_power = break_power
+	expect(is_zero_approx(break_power), "the_wolfs_bite_ships_broken_by_any_blow")
+	expect(await _until(_phase_is("windup"), 4.0) >= 0.0, "break_it_winds_up")
+	cancelled = _judge.strikes_cancelled
+	host_hp = _local.hp
+	var broken := _wolf.bites_interrupted
+	heading = _wolf.attack_direction()
+	await _hit(_local, "thrust", -heading)
+	note("thrust in the windup, break at %.1f: launched %s, phase %s, interrupted +%d, cancelled +%d" % [
+		break_power, _wolf.last_launched, _wolf.attack_phase, _wolf.bites_interrupted - broken,
+		_judge.strikes_cancelled - cancelled])
+	expect(not _wolf.last_launched and _wolf.attack_phase == "stunned" and _wolf.bites_interrupted == broken + 1
+		and _judge.strikes_cancelled == cancelled + 1, "a_blow_in_the_windup_breaks_the_bite")
+	await _wait(0.3)
+	client_view.rpc_id(_client_peer(), "broken")
+	var seen := await _take_report("broken")
+	expect(String(seen.get("phase", "")) == "stunned", "the_client_sees_it_stand_broken")
+	var stood := await _until(func() -> bool: return _wolf.attack_phase != "stunned", 3.0)
+	note("it stood %.2f s more after the look (pause %.2f); host hp %.1f -> %.1f" % [
+		stood, Tuning.server.wolf_interrupt_pause, host_hp, _local.hp])
+	expect(stood >= 0.0 and is_equal_approx(_local.hp, host_hp), "the_broken_bite_costs_nothing_and_the_pause_ends")
+	# The leap cannot be broken: a thrust during it changes nothing.
+	expect(await _until(_phase_is("lunge"), 5.0) >= 0.0, "break_it_leaps")
+	broken = _wolf.bites_interrupted
+	await _hit(_local, "thrust", -_wolf.attack_direction())
+	note("thrust in the leap: phase %s, interrupted +%d" % [_wolf.attack_phase, _wolf.bites_interrupted - broken])
+	expect(_wolf.bites_interrupted == broken and (_wolf.attack_phase == "lunge" or _wolf.attack_phase == "recovery"),
+		"a_blow_in_the_leap_does_not_break_it")
+	# The two thrusts above are not part of what the shove below measures:
+	# with them the shove would be the killing blow.
+	_wolf.hp = _wolf.max_hp()
 	# In the next windup: a shove, which is past it.
 	expect(await _until(_phase_is("windup"), 4.0) >= 0.0, "flinch_it_winds_up_again")
 	cancelled = _judge.strikes_cancelled

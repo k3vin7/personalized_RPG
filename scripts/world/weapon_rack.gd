@@ -1,7 +1,7 @@
 class_name WeaponRack
 extends Node3D
 
-# Five pedestals. Standing on one and pressing the interact key takes that
+# Seven pedestals. Standing on one and pressing the interact key takes that
 # weapon, which is a choice and nothing more: there is no combat here. The
 # choice replicates, so the other player sees what you are carrying.
 
@@ -14,16 +14,20 @@ var _zones: Array[Area3D] = []
 
 
 func _ready() -> void:
+	# The five stay where they were; the family members stand at the two
+	# ends. Who may take which is the server's ruling off the race's list.
 	var kinds := [
+		WeaponKinds.Kind.GREAT_SWORD,
 		WeaponKinds.Kind.SWORD,
 		WeaponKinds.Kind.BOW,
 		WeaponKinds.Kind.SPEAR,
 		WeaponKinds.Kind.SHIELD,
 		WeaponKinds.Kind.STAFF,
+		WeaponKinds.Kind.GREAT_SHIELD,
 	]
 	for index in kinds.size():
 		var kind: int = kinds[index]
-		var offset := Vector3((float(index) - 2.0) * SPACING, 0.0, 0.0)
+		var offset := Vector3((float(index) - 3.0) * SPACING, 0.0, 0.0)
 		_build_pedestal(kind, offset)
 
 	add_to_group(INTERACT_GROUP)

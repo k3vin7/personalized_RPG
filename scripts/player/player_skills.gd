@@ -83,7 +83,7 @@ func fill_slots() -> void:
 	for id in Skills.BARE_IDS:
 		bare.append(Skills.get_def(id))
 	var weapon: int = player.weapon
-	var one_hand_weapon := weapon != WeaponKinds.Kind.NONE and weapon != WeaponKinds.Kind.SHIELD
+	var one_hand_weapon := weapon != WeaponKinds.Kind.NONE and not Weapons.is_off_hand(weapon)
 	# No weapon, or only a shield in the off hand: the main hand is bare, so the
 	# bare four take the first four and the rest stand empty (shield skills are
 	# C-1c's). A one-hand weapon: its WeaponDef's skill_ids take the first
@@ -101,12 +101,12 @@ func fill_slots() -> void:
 		var def := Weapons.def_for_kind(weapon)
 		if def != null:
 			for offset in mini(def.skill_ids.size(), 4):
-				slots[offset] = Skills.get_def(def.skill_ids[offset])
+				slots[offset] = Skills.for_holder(def.skill_ids[offset], weapon, shield)
 	if shield != WeaponKinds.Kind.NONE:
 		var off := Weapons.def_for_kind(shield)
 		if off != null:
 			for offset in mini(off.skill_ids.size(), 4):
-				slots[4 + offset] = Skills.get_def(off.skill_ids[offset])
+				slots[4 + offset] = Skills.for_holder(off.skill_ids[offset], weapon, shield)
 
 
 func slot_def(index: int) -> SkillDef:

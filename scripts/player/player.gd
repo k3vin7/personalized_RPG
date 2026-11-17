@@ -652,6 +652,9 @@ func _lying() -> float:
 func _sync_stats() -> void:
 	if stats == null:
 		return
+	# What the two hands hold weighs on the body: off the server's word on
+	# the weapons and the server's table, the same on every peer.
+	stats.weapon_weight = Weapons.weight_of(sync_weapon) + Weapons.weight_of(sync_offhand)
 	if vitals_are_mine():
 		sync_race = stats.race
 		sync_strength_override = stats.strength_override
@@ -751,7 +754,7 @@ func _physics_process(delta: float) -> void:
 		if sync_skill_at > 0.0:
 			remote_phases_seen += 1
 			last_remote_phase_delay = Time.get_unix_time_from_system() - sync_skill_at
-		show_skill_phase(Skills.get_def(sync_skill_id) if sync_skill_id != "" else null, sync_skill_phase)
+		show_skill_phase(Skills.for_holder(sync_skill_id, sync_weapon, sync_offhand) if sync_skill_id != "" else null, sync_skill_phase)
 	if _teleport_blind_left > 0.0:
 		_teleport_blind_left -= delta
 		if _teleport_blind_left <= 0.0:
@@ -956,7 +959,7 @@ func set_weapon(kind: int) -> void:
 		return
 	# C-1c: the shield goes to the off hand; the rest to the main hand. NONE
 	# empties both.
-	if kind == WeaponKinds.Kind.SHIELD:
+	if Weapons.is_off_hand(kind):
 		if offhand == kind:
 			return
 	elif kind == weapon and (kind != WeaponKinds.Kind.NONE or offhand == WeaponKinds.Kind.NONE):

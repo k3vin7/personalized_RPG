@@ -4,27 +4,40 @@
 transparency = 1
 albedo_color = Color(0.6, 0.2, 0.9, 0.5)
 
+[sub_resource type="StandardMaterial3D" id="mat_map_road"]
+albedo_color = Color(0.55, 0.42, 0.28, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_map_grass"]
+albedo_color = Color(0.45, 0.62, 0.32, 1)
+
+[sub_resource type="StandardMaterial3D" id="mat_map_wall"]
+albedo_color = Color(0.5, 0.5, 0.53, 1)
+
 [node name="5to6" type="Node3D" unique_id=1841982765]
 
 [node name="field" type="CSGBox3D" parent="." unique_id=1375178674]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 20, 0, -270)
 use_collision = true
 size = Vector3(100, 1, 360)
+material = SubResource("mat_map_grass")
 
 [node name="road" type="CSGBox3D" parent="." unique_id=817538009]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -270)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.02, -270)
 use_collision = true
 size = Vector3(6, 1, 360)
+material = SubResource("mat_map_road")
 
 [node name="checkpoint_zone5" type="CSGBox3D" parent="." unique_id=290759534]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 2, -113)
 use_collision = true
 size = Vector3(4, 3, 6)
+material = SubResource("mat_map_wall")
 
 [node name="checkpoint_zone5_2" type="CSGBox3D" parent="." unique_id=1762695226]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 2, -114.5)
 use_collision = true
 size = Vector3(4, 3, 3)
+material = SubResource("mat_map_wall")
 
 [node name="dungeon_3" type="CSGBox3D" parent="." unique_id=1923188193]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 48, 2.5, -143)
