@@ -16,7 +16,16 @@ extends Dummy
 #           windup, then leaps along it (the judge rules the path at the end
 #           of the windup, where the telegraph is full) and cannot move for
 #           the recovery
-#   return  wolf_leash_range from its mark it walks back, deaf until it is home
+#   return  wolf_leash_range from its mark (and its target past it too) it
+#           goes home, faster than it runs, and is full again when it arrives.
+#           On the way a blow turns it only if the hitter stands inside the
+#           leash of its mark.
+#
+# 늑대 b: the chase and the way home follow the navigation mesh the players'
+# own move orders use (the world's one baked map); the leap is a straight
+# line. Wolves under one parent node are a pack: what one notices, or is hit
+# by, all of them chase. A dead wolf is back on its mark, full, after
+# wolf_respawn_time.
 #
 # Being hit does not stop it: a push it holds against slides it and the bite
 # goes on. A push past its tolerance throws it, and a body in the air has
@@ -52,6 +61,13 @@ const PUSH_SETTLED := 0.5
 # queues it), so the body stays for this many steps and the carcass leaves
 # with the speed the blow gave it.
 const DEATH_STEPS := 3
+# The path is asked for again this often, or at once when its goal has moved
+# this far; a point of it this near is behind the body.
+const REPATH_SECONDS := 0.3
+const REPATH_MOVED := 1.0
+const PATH_POINT_REACHED := 0.4
+# The eye line to the target, off the ground by this much.
+const SIGHT_LIFT := 0.3
 
 var mode := Mode.IDLE
 # Who it is after: the peer it noticed, replaced by whoever hits it.
@@ -59,6 +75,9 @@ var target_peer := 0
 var bites_started := 0
 var corpses_made := 0
 var deaths := 0
+var respawns := 0
+# How many path answers had more than a straight line in them (the checks).
+var detours := 0
 
 var _bite_direction := Vector3.FORWARD
 var _pushed := false
@@ -69,6 +88,11 @@ var _dying := 0
 var _dead := false
 var _corpse_name := ""
 var _corpse_left := 0.0
+var _respawn_left := 0.0
+var _path := PackedVector3Array()
+var _path_index := 0
+var _path_goal := Vector3.INF
+var _path_age := 0.0
 
 
 func max_hp() -> float:
@@ -85,6 +109,10 @@ func strength() -> float:
 
 func race_label() -> String:
 	return "늑대"
+
+
+func species() -> String:
+	return "wolf"
 
 
 func body_radius() -> float:
@@ -185,8 +213,13 @@ func _decide(delta: float) -> void:
 			_wander_wait = Tuning.server.wolf_wander_pause
 			_wander_left = 0.0
 			_stand()
+			# Home: whatever was done to it on the way out is undone.
+			if hp < max_hp():
+				hp = max_hp()
+				_refresh()
+			print("PLAYGROUND_WOLF_HOME wolf=%s hp=%.0f" % [name, hp])
 		else:
-			_go(home, run_speed(), delta)
+			_go_path(home, run_speed() * Tuning.server.wolf_return_speed_mult, delta)
 		return
 	if mode == Mode.IDLE:
 		var seen := _nearest_player(Tuning.server.wolf_aggro_range)
@@ -200,21 +233,68 @@ func _decide(delta: float) -> void:
 		target = _nearest_player(Tuning.server.wolf_aggro_range)
 		if target != null:
 			target_peer = target.get_multiplayer_authority()
-	if target == null or from_home >= Tuning.server.wolf_leash_range:
-		_give_up("leash" if target != null else "no_target")
+	if target == null:
+		_give_up("no_target")
+		return
+	# Past the leash, after a body that is past it too. (A body inside it is
+	# toward home from here, which is where a blow on the way back sends it.)
+	if from_home >= Tuning.server.wolf_leash_range and not _inside_leash(target):
+		_give_up("leash")
 		return
 	var to_target := _flat(target.global_position - global_position)
-	if to_target.length() <= Tuning.server.wolf_bite_start_range:
+	if to_target.length() <= Tuning.server.wolf_bite_start_range and _sees(target):
 		_begin_bite(to_target)
 	else:
-		_go(target.global_position, run_speed(), delta)
+		_go_path(target.global_position, run_speed(), delta)
 
 
+# Its own senses, or a blow: it is after `peer`, and so is its pack.
 func _notice(peer: int) -> void:
+	_set_target(peer)
+	for mate in pack():
+		mate.alerted(peer)
+
+
+# A pack mate noticed `peer` or was hit by it. One walking home answers the
+# way it answers a blow of its own.
+func alerted(peer: int) -> void:
+	if _dead or _dying > 0 or not is_multiplayer_authority():
+		return
+	var player := _living_player(peer)
+	if player == null or (mode == Mode.RETURN and not _inside_leash(player)):
+		return
+	_set_target(peer)
+
+
+func _set_target(peer: int) -> void:
 	target_peer = peer
 	if mode != Mode.CHASE:
 		mode = Mode.CHASE
 		print("PLAYGROUND_WOLF_NOTICED wolf=%s target=%d" % [name, peer])
+
+
+# The pack: the other wolves under the same parent node.
+func pack() -> Array[Wolf]:
+	var out: Array[Wolf] = []
+	if get_parent() == null:
+		return out
+	for child in get_parent().get_children():
+		var mate := child as Wolf
+		if mate != null and mate != self:
+			out.append(mate)
+	return out
+
+
+func _inside_leash(player: Player) -> bool:
+	return _flat(player.global_position - home).length() <= Tuning.server.wolf_leash_range
+
+
+# Nothing solid between it and the target: a bite does not start through a
+# wall or a stand of trees, however near the body on the other side is.
+func _sees(target: Player) -> bool:
+	var query := PhysicsRayQueryParameters3D.create(
+		global_position + Vector3.UP * SIGHT_LIFT, target.global_position, Layers.TERRAIN)
+	return get_world_3d().direct_space_state.intersect_ray(query).is_empty()
 
 
 func _give_up(why: String) -> void:
@@ -251,6 +331,28 @@ func _go(to: Vector3, speed: float, delta: float) -> void:
 	velocity.x = heading.x * speed
 	velocity.z = heading.z * speed
 	rotation.y = lerp_angle(rotation.y, RangeShapes.yaw_for(heading), minf(1.0, TURN_RATE * delta))
+
+
+# Toward `to` along the navigation mesh -- the one the world baked, which is
+# the one a player's move order is answered from. Where there is no mesh (or
+# no answer) it goes straight.
+func _go_path(to: Vector3, speed: float, delta: float) -> void:
+	_path_age += delta
+	if _path_goal == Vector3.INF or _path_age >= REPATH_SECONDS or _flat(to - _path_goal).length() > REPATH_MOVED:
+		_path_goal = to
+		_path_age = 0.0
+		_path_index = 0
+		_path = PackedVector3Array()
+		var map := get_world_3d().navigation_map
+		# A map that has not been built yet answers with an error, not a path.
+		if NavigationServer3D.map_get_iteration_id(map) > 0:
+			_path = NavigationServer3D.map_get_path(map, global_position, to, true)
+			if _path.size() > 2:
+				detours += 1
+	while _path_index < _path.size() - 1 \
+			and _flat(_path[_path_index] - global_position).length() <= PATH_POINT_REACHED:
+		_path_index += 1
+	_go(_path[_path_index] if not _path.is_empty() else to, speed, delta)
 
 
 func _stand() -> void:
@@ -369,9 +471,11 @@ func apply_force_event(event: Dictionary) -> void:
 	# against (a slide) leaves the bite alone.
 	if bool(event.get("knock_launched", true)):
 		_cancel_bite("launched")
-	# Whoever hit it last is who it is after. Not while it is walking home.
+	# Whoever hit it last is who it is after, and its pack's. On the way home
+	# only a hitter inside the leash of its mark turns it round.
 	var source := int(event.get("source_peer", 0))
-	if source > 0 and mode != Mode.RETURN and _dying == 0 and _living_player(source) != null:
+	var hitter := _living_player(source) if source > 0 and _dying == 0 else null
+	if hitter != null and (mode != Mode.RETURN or _inside_leash(hitter)):
 		_notice(source)
 
 
@@ -394,6 +498,8 @@ func set_hold_display(peer: int) -> void:
 # ------------------------------------------------------------ dying
 
 func _physics_process(delta: float) -> void:
+	if is_multiplayer_authority():
+		_corpse_step(delta)
 	if _dead:
 		if is_multiplayer_authority():
 			_dead_step(delta)
@@ -415,6 +521,8 @@ func _die() -> void:
 	var carried := velocity
 	deaths += 1
 	_set_attack_phase("dead")
+	_respawn_left = Tuning.server.wolf_respawn_time
+	_retire_corpse()
 	_corpse_name = "%s_corpse_%d" % [name, corpses_made]
 	corpses_made += 1
 	_corpse_left = Tuning.server.wolf_corpse_time
@@ -432,22 +540,60 @@ func _die() -> void:
 
 # The dead body's part on the server: the phase keeps going out, slowly, so
 # a peer that joins late (or dropped the last packet) hides its copy; and the
-# carcass's clock.
+# clock that puts it back on its mark.
 func _dead_step(delta: float) -> void:
 	_state_left -= delta
 	if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 		_state_left = ServerAuthority.VIEW_HEARTBEAT
 		push_state.rpc(global_position, 0.0, "dead", hit_ids, hit_damages, rotation.y)
+	_respawn_left -= delta
+	if _respawn_left <= 0.0:
+		_respawn()
+
+
+# Back on its mark as if it had always been there. The phase leaving "dead"
+# is what shows it again on every screen; the mark is where the next state
+# packet puts it.
+func _respawn() -> void:
+	respawns += 1
+	global_position = home
+	sync_position = home
+	velocity = Vector3.ZERO
+	hp = max_hp()
+	mode = Mode.IDLE
+	target_peer = 0
+	_pushed = false
+	_path_goal = Vector3.INF
+	_wander_left = 0.0
+	_wander_wait = Tuning.server.wolf_wander_pause
+	_phase_left = 0.0
+	_set_attack_phase("")
+	# Blind for a moment, like every placed body (CLAUDE.md 9).
+	_blind_left = SyncRules.TELEPORT_BLIND
+	collision_layer = 0
+	_state_left = 0.0
+	_refresh()
+	print("PLAYGROUND_WOLF_RESPAWNED wolf=%s at=(%.2f, %.2f, %.2f)" % [name, home.x, home.y, home.z])
+
+
+# The carcass's clock, alive or dead (it can outlast the respawn).
+func _corpse_step(delta: float) -> void:
 	if _corpse_name == "":
 		return
 	_corpse_left -= delta
 	if _corpse_left <= 0.0:
-		var gone := _corpse_name
-		_corpse_name = ""
-		_remove_corpse(gone)
-		if multiplayer.has_multiplayer_peer():
-			hide_corpse.rpc(gone)
-		print("PLAYGROUND_WOLF_CORPSE_GONE wolf=%s corpse=%s" % [name, gone])
+		_retire_corpse()
+
+
+func _retire_corpse() -> void:
+	if _corpse_name == "":
+		return
+	var gone := _corpse_name
+	_corpse_name = ""
+	_remove_corpse(gone)
+	if multiplayer.has_multiplayer_peer():
+		hide_corpse.rpc(gone)
+	print("PLAYGROUND_WOLF_CORPSE_GONE wolf=%s corpse=%s" % [name, gone])
 
 
 # The phase is how every screen learns it is dead (Dummy.push_state).
@@ -477,7 +623,6 @@ func _make_corpse(corpse_name: String, at: Vector3, yaw: float) -> WolfCorpse:
 	var parent := get_parent()
 	if parent == null:
 		return null
-	_remove_corpse(corpse_name)
 	var body := WolfCorpse.new()
 	var parent_3d := parent as Node3D
 	body.setup(corpse_name, parent_3d.to_local(at) if parent_3d != null else at, Tuning.server.wolf_weight)
@@ -486,11 +631,12 @@ func _make_corpse(corpse_name: String, at: Vector3, yaw: float) -> WolfCorpse:
 	return body
 
 
+# Gone from the game at once, and from the tree a little later: see
+# WolfCorpse.retire() for why the node outlives the carcass.
 func _remove_corpse(corpse_name: String) -> void:
-	var node := get_parent().get_node_or_null(corpse_name) if get_parent() != null else null
+	var node := get_parent().get_node_or_null(corpse_name) as WolfCorpse if get_parent() != null else null
 	if node != null:
-		node.name = corpse_name + "_gone"
-		node.queue_free()
+		node.retire()
 
 
 @rpc("authority", "call_remote", "reliable")
@@ -528,6 +674,7 @@ func harness_place(at: Vector3) -> void:
 	mode = Mode.IDLE
 	target_peer = 0
 	_pushed = false
+	_path_goal = Vector3.INF
 	_wander_left = 0.0
 	_wander_wait = Tuning.server.wolf_wander_pause
 	_refresh()

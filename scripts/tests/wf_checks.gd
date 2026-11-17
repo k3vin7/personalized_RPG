@@ -3,8 +3,8 @@ extends Node
 # 늑대 a: one wolf -- what the server rules and what the second screen is
 # shown. How it looks and feels is the user's to try by hand.
 #
-#   host:   --auto-host --auto-smoke --auto-only=WF --auto-port=P --auto-quit=150
-#   client: --auto-join --auto-smoke --auto-only=WF --auto-port=P --auto-quit=150
+#   host:   --auto-host --auto-smoke --auto-only=WF --auto-port=P --auto-quit=240
+#   client: --auto-join --auto-smoke --auto-only=WF --auto-port=P --auto-quit=240
 #
 # The playground puts one wolf (Wolf_0) on the arena for this run. Measured:
 # the numbers are the server's; it strolls near its mark; it notices a body
@@ -15,6 +15,13 @@ extends Node
 # tolerance does; past the leash it walks home and is deaf on the way; it
 # dies to the table's count of sword thrusts; the carcass is on both screens,
 # is lifted and thrown through the grab and throw doors, and is gone on time.
+#
+# 늑대 b adds: a body behind a wall is reached round its end (the navigation
+# mesh) and not bitten through it; the way home is faster than the run and
+# ends full; on the way home a blow turns it only when the hitter is inside
+# the leash; it is back on its mark after wolf_respawn_time, on both screens;
+# a pack (two more wolves beside it) chases what one of them was hit by or
+# saw, and does not bite itself.
 #
 # Blows in the target and no-flinch checks are handed straight to
 # ServerAuthority.apply_hit (the function under test is what the wolf does
@@ -34,6 +41,7 @@ var _checks := 0
 var _failures := 0
 var _stage_done := ""
 var _reports := {}
+var _mates: Array[Wolf] = []
 
 
 func expect(condition: bool, label: String) -> void:
@@ -142,10 +150,22 @@ func _phase_is(phase: String) -> Callable:
 	return func() -> bool: return _wolf.attack_phase == phase
 
 
-func _hit(attacker: Player, skill: String, direction: Vector3, extra := {}) -> void:
+func _hit(attacker: Player, skill: String, direction: Vector3, extra := {}, target: Wolf = null) -> void:
 	var ctx := {"direction": direction}
 	ctx.merge(extra)
-	await tick_request(func() -> void: _judge.apply_hit(attacker, _wolf, Skills.get_def(skill), ctx))
+	var body := target if target != null else _wolf
+	await tick_request(func() -> void: _judge.apply_hit(attacker, body, Skills.get_def(skill), ctx))
+
+
+# Two more wolves beside the first, under the same parent: a pack. Built on
+# both peers with the same names; the client's before the host's, so no
+# state packet leaves for a node that is not there yet.
+func _build_pack() -> void:
+	for index in 2:
+		var mate := (load("res://scenes/wolf.tscn") as PackedScene).instantiate() as Wolf
+		mate.setup(WOLF_HOME + Vector3(-3.0, 0.0, -2.0 + 4.0 * float(index)), "Wolf_%d" % (index + 1))
+		_world.add_child(mate)
+		_mates.append(mate)
 
 
 func run(world: Node3D) -> void:
@@ -172,11 +192,13 @@ func run(world: Node3D) -> void:
 	await _idle_checks()
 	await _bite_checks()
 	await _dodge_checks()
+	await _path_checks()
 	await _client_bitten_checks()
 	await _target_checks()
 	await _no_flinch_checks()
 	await _leash_checks()
 	await _death_checks()
+	await _pack_checks()
 	print("WF_RESULT peer=%d checks=%d failures=%d" % [_peer_id, _checks, _failures])
 	finish.rpc(_failures)
 	await _wait(1.0)
@@ -189,7 +211,8 @@ func _data_checks() -> void:
 	var fields := ["wolf_aggro_range", "wolf_leash_range", "wolf_bite_start_range", "wolf_bite_range",
 		"wolf_bite_width", "wolf_bite_windup", "wolf_bite_recovery", "wolf_bite_damage", "wolf_lunge_time",
 		"wolf_run_speed_mult", "wolf_walk_speed_mult", "wolf_wander_radius", "wolf_wander_pause",
-		"wolf_weight", "wolf_strength", "wolf_max_hp", "wolf_corpse_time"]
+		"wolf_weight", "wolf_strength", "wolf_max_hp", "wolf_corpse_time",
+		"wolf_return_speed_mult", "wolf_respawn_time"]
 	var missing := 0
 	for field: String in fields:
 		if not Tuning.is_server_field(field):
@@ -234,11 +257,26 @@ func _idle_checks() -> void:
 	expect(modes.size() == 1 and modes.has(Wolf.Mode.IDLE), "nobody_near_it_stays_idle")
 	expect(travelled > 0.3, "idle_it_strolls")
 	expect(farthest <= Tuning.server.wolf_wander_radius + 0.5, "the_stroll_stays_inside_wolf_wander_radius")
+	# A strolling body is a round trip further on by the time the client's
+	# answer is back, so what the client shows is held against where the
+	# server had the wolf over the round trip, not against one instant of it.
+	var trail: Array[Vector3] = []
+	var asked := Time.get_ticks_msec()
 	client_view.rpc_id(_client_peer(), "idle")
+	var back_wait := 0.0
+	while not _reports.has("idle") and back_wait < 15.0:
+		await get_tree().physics_frame
+		back_wait += STEP
+		trail.append(_wolf.global_position)
+	var trip := float(Time.get_ticks_msec() - asked) / 1000.0
 	var got := await _take_report("idle")
 	var seen: Vector3 = got.get("wolf_at", Vector3.INF)
-	note("idle: the client shows it %.2f m from where the host has it" % seen.distance_to(_wolf.global_position))
-	expect(seen.distance_to(_wolf.global_position) < 0.6, "the_client_shows_the_wolf_where_the_server_has_it")
+	var nearest := seen.distance_to(_wolf.global_position)
+	for point: Vector3 in trail:
+		nearest = minf(nearest, seen.distance_to(point))
+	note("idle: answer back in %.2f s; the client shows it %.2f m from where the host has it now, %.2f m from where the host had it during the trip (speed now %.2f)" % [
+		trip, seen.distance_to(_wolf.global_position), nearest, Vector2(_wolf.velocity.x, _wolf.velocity.z).length()])
+	expect(nearest < 0.6, "the_client_shows_the_wolf_where_the_server_has_it")
 
 
 # ----------------------------------------------- noticed, chased, bitten (host)
@@ -313,6 +351,35 @@ func _dodge_checks() -> void:
 	expect(String(_judge.last_strike.get("skill", "")) == "wolf_bite" and int(_judge.last_strike.get("hits", -1)) == 0,
 		"the_bite_was_ruled_and_reached_nobody")
 	expect(absf(leapt - Tuning.server.wolf_bite_range) < 0.4, "it_leaps_wolf_bite_range_to_where_the_body_was")
+
+
+# ------------------------------------------- round the wall, not through it
+
+func _path_checks() -> void:
+	await _park(_stand(FAR))
+	client_park.rpc_id(_client_peer(), CLIENT_FAR)
+	await _wait(0.4)
+	# The wall (playground, WfWall) stands at arena x 14, z 11..18.
+	var wall_x := Regions.ARENA.x + 14.0
+	var wall_end := Regions.ARENA.z + 11.0
+	_wolf.harness_place(Regions.ARENA + Vector3(11.5, Wolf.BODY_RADIUS + 0.05, 16.0))
+	await _wait(0.4)
+	var detours := _wolf.detours
+	var hp_before := _local.hp
+	await _park(_stand(Regions.ARENA + Vector3(17.0, 0.0, 16.0)))
+	var south := _wolf.global_position.z
+	var waited := 0.0
+	while waited < 6.0 and _wolf.attack_phase != "windup":
+		await get_tree().physics_frame
+		waited += STEP
+		south = minf(south, _wolf.global_position.z)
+	note("path: a body 5.5 m away behind the wall; windup after %.2f s at x %.2f (wall %.1f), went as far south as z %.2f (wall end %.1f), %d path answers with a corner" % [
+		waited, _wolf.global_position.x, wall_x, south, wall_end, _wolf.detours - detours])
+	expect(_wolf.attack_phase == "windup", "it_reaches_a_body_behind_a_wall")
+	expect(south < wall_end + 0.3 and _wolf.detours > detours, "it_went_round_the_end_of_the_wall")
+	expect(_wolf.global_position.x > wall_x + 0.3, "the_bite_starts_on_the_bodys_side_of_the_wall")
+	await _until(_phase_is("recovery"), 1.5)
+	expect(is_equal_approx(_local.hp, hp_before - Tuning.server.wolf_bite_damage), "and_the_bite_lands_there")
 
 
 # ------------------------------------------------- the client's body is bitten
@@ -419,19 +486,43 @@ func _no_flinch_checks() -> void:
 func _leash_checks() -> void:
 	await _quiet()
 	var leash: float = Tuning.server.wolf_leash_range
-	Tuning.server.wolf_leash_range = 8.0
-	await _park(_by_wolf(Vector3(10.0, 0.0, 0.0)))
-	await _until(func() -> bool: return _wolf.mode == Wolf.Mode.CHASE, 2.0)
+	Tuning.server.wolf_leash_range = 16.0
+	# 20 m is out of its sight; the blow is what starts the chase.
+	await _park(_by_wolf(Vector3(20.0, 0.0, 0.0)))
+	await _hit(_local, "punch", Vector3(-1.0, 0.0, 0.0))
+	var hurt := _wolf.hp
 	await _park(_by_wolf(Vector3(30.0, 0.0, 0.0)))
 	var gave_up := await _until(func() -> bool: return _wolf.mode == Wolf.Mode.RETURN, 5.0)
 	var out := _flat(_wolf.global_position, WOLF_HOME)
-	note("leash 8 m: gave up after %.2f s, %.2f m from its mark" % [gave_up, out])
-	expect(gave_up >= 0.0 and out >= 8.0 and out < 9.0, "wolf_leash_range_from_its_mark_it_gives_up")
+	note("leash 16 m: gave up after %.2f s, %.2f m from its mark, hp %.0f" % [gave_up, out, hurt])
+	expect(gave_up >= 0.0 and out >= 16.0 and out < 17.0, "wolf_leash_range_from_its_mark_it_gives_up")
 	await _hit(_local, "punch", Vector3(-1.0, 0.0, 0.0))
-	expect(_wolf.mode == Wolf.Mode.RETURN and _wolf.target_peer == 0, "walking_home_it_is_deaf_to_a_blow")
-	var home := await _until(func() -> bool: return _wolf.mode == Wolf.Mode.IDLE, 6.0)
-	note("leash: home after %.2f s, %.2f m from the mark" % [home, _flat(_wolf.global_position, WOLF_HOME)])
-	expect(home >= 0.0 and _flat(_wolf.global_position, WOLF_HOME) <= Wolf.HOME_RADIUS + 0.3, "it_walks_back_to_its_mark")
+	expect(_wolf.mode == Wolf.Mode.RETURN and _wolf.target_peer == 0, "a_blow_from_outside_the_leash_does_not_turn_it")
+	var peak := 0.0
+	var waited := 0.0
+	while waited < 6.0 and _wolf.mode != Wolf.Mode.IDLE:
+		await get_tree().physics_frame
+		waited += STEP
+		peak = maxf(peak, Vector2(_wolf.velocity.x, _wolf.velocity.z).length())
+	var back := _wolf.run_speed() * Tuning.server.wolf_return_speed_mult
+	note("return: home after %.2f s at %.2f m/s (run %.2f x %.2f = %.2f), %.2f m from the mark, hp %.0f / %.0f" % [
+		waited, peak, _wolf.run_speed(), Tuning.server.wolf_return_speed_mult, back,
+		_flat(_wolf.global_position, WOLF_HOME), _wolf.hp, _wolf.max_hp()])
+	expect(_wolf.mode == Wolf.Mode.IDLE and _flat(_wolf.global_position, WOLF_HOME) <= Wolf.HOME_RADIUS + 0.3, "it_goes_back_to_its_mark")
+	expect(absf(peak - back) < 0.3, "it_goes_home_at_wolf_return_speed_mult_times_its_run")
+	expect(hurt < _wolf.max_hp() and is_equal_approx(_wolf.hp, _wolf.max_hp()), "home_it_is_full_again")
+	# Again, and this time the hitter stands inside the leash.
+	await _park(_by_wolf(Vector3(20.0, 0.0, 0.0)))
+	await _hit(_local, "punch", Vector3(-1.0, 0.0, 0.0))
+	await _park(_by_wolf(Vector3(30.0, 0.0, 0.0)))
+	await _until(func() -> bool: return _wolf.mode == Wolf.Mode.RETURN, 5.0)
+	await _park(_by_wolf(Vector3(10.0, 0.0, 4.0)))
+	var still_going := _wolf.mode == Wolf.Mode.RETURN
+	await _hit(_local, "punch", Vector3(-1.0, 0.0, 0.0))
+	note("return, hitter 10.8 m from the mark (leash 16): was going home %s, after the blow mode %s target %d" % [
+		still_going, Wolf.Mode.keys()[_wolf.mode], _wolf.target_peer])
+	expect(still_going, "going_home_it_does_not_notice_a_body_by_sight")
+	expect(_wolf.mode == Wolf.Mode.CHASE and _wolf.target_peer == 1, "a_blow_from_inside_the_leash_turns_it_round")
 	Tuning.server.wolf_leash_range = leash
 
 
@@ -441,8 +532,10 @@ func _death_checks() -> void:
 	await _quiet()
 	var aggro: float = Tuning.server.wolf_aggro_range
 	var keep: float = Tuning.server.wolf_corpse_time
+	var again: float = Tuning.server.wolf_respawn_time
 	Tuning.server.wolf_aggro_range = 0.0
 	Tuning.server.wolf_corpse_time = 8.0
+	Tuning.server.wolf_respawn_time = 13.0
 	await _park(_by_wolf(Vector3(3.0, 0.0, 0.0)))
 	var thrusts := 0
 	while _wolf.hp > 0.0 and thrusts < 10:
@@ -506,6 +599,66 @@ func _death_checks() -> void:
 	got = await _take_report("gone")
 	expect(not bool(got.get("has_corpse", true)), "the_carcass_is_gone_on_the_client_too")
 	Tuning.server.wolf_corpse_time = keep
+	# Back on its mark. Nobody near, so it is found idle.
+	await _park(_stand(FAR))
+	var back := await _until(func() -> bool: return not _wolf.is_dead(), 10.0)
+	var dead_for := float(Time.get_ticks_msec() - died_at) / 1000.0
+	note("respawn: back %.2f s after the death (table %.1f), %.2f m from its mark, hp %.0f / %.0f" % [
+		dead_for, Tuning.server.wolf_respawn_time, _flat(_wolf.global_position, WOLF_HOME), _wolf.hp, _wolf.max_hp()])
+	expect(back >= 0.0 and absf(dead_for - Tuning.server.wolf_respawn_time) < 1.0, "it_is_back_after_wolf_respawn_time")
+	expect(_flat(_wolf.global_position, WOLF_HOME) < 0.5 and is_equal_approx(_wolf.hp, _wolf.max_hp())
+		and _wolf.mode == Wolf.Mode.IDLE, "on_its_mark_full_and_idle")
+	await _wait(0.6)
+	expect(_wolf.visible and _wolf.collision_layer == Layers.DUMMY and _wolf.is_in_group(ServerAuthority.HOLDABLE_GROUP),
+		"and_a_body_again")
+	client_view.rpc_id(_client_peer(), "back")
+	got = await _take_report("back")
+	var shown: Vector3 = got.get("wolf_at", Vector3.INF)
+	note("respawn on the client's screen: shown %s, %.2f m from the server's" % [
+		got.get("wolf_visible", false), shown.distance_to(_wolf.global_position)])
+	expect(bool(got.get("wolf_visible", false)) and shown.distance_to(_wolf.global_position) < 0.6,
+		"the_client_shows_it_again_where_the_server_has_it")
+	Tuning.server.wolf_respawn_time = again
+
+
+# ------------------------------------------------------------------ the pack
+
+func _pack_checks() -> void:
+	await _quiet()
+	client_build_pack.rpc_id(_client_peer())
+	expect(await _wait_stage("pack_built"), "the_client_built_the_pack")
+	_build_pack()
+	await _wait(0.6)
+	expect(_wolf.pack().size() == 2, "three_wolves_under_one_parent_are_a_pack")
+	var aggro: float = Tuning.server.wolf_aggro_range
+	var wander: float = Tuning.server.wolf_wander_radius
+	Tuning.server.wolf_wander_radius = 0.0
+	# Seen by one: 11.5 m from the first, 14.6 m from the two behind it.
+	await _park(_by_wolf(Vector3(11.5, 0.0, 0.0)))
+	await _until(func() -> bool: return _wolf.mode == Wolf.Mode.CHASE, 2.0)
+	await get_tree().physics_frame
+	note("pack, seen by one: modes %s / %s / %s, targets %d / %d / %d" % [
+		Wolf.Mode.keys()[_wolf.mode], Wolf.Mode.keys()[_mates[0].mode], Wolf.Mode.keys()[_mates[1].mode],
+		_wolf.target_peer, _mates[0].target_peer, _mates[1].target_peer])
+	expect(_mates[0].mode == Wolf.Mode.CHASE and _mates[1].mode == Wolf.Mode.CHASE
+		and _mates[0].target_peer == 1 and _mates[1].target_peer == 1, "what_one_sees_the_pack_chases")
+	# Three wolves biting one body for a while: none of them bites a wolf.
+	var host_hp := _local.hp
+	await _wait(4.0)
+	var whole := is_equal_approx(_wolf.hp, _wolf.max_hp()) and is_equal_approx(_mates[0].hp, _mates[0].max_hp()) \
+		and is_equal_approx(_mates[1].hp, _mates[1].max_hp())
+	note("pack, 4 s on one body: host hp %.0f -> %.0f, wolves %.0f / %.0f / %.0f" % [
+		host_hp, _local.hp, _wolf.hp, _mates[0].hp, _mates[1].hp])
+	expect(_local.hp < host_hp, "the_pack_bites_the_body")
+	expect(whole, "the_pack_does_not_bite_itself")
+	# Hit by another: the whole pack turns on the hitter, seen or not.
+	Tuning.server.wolf_aggro_range = 0.0
+	await _hit(_mate(), "punch", Vector3(-1.0, 0.0, 0.0), {}, _mates[0])
+	note("pack, one hit by the client: targets %d / %d / %d" % [_wolf.target_peer, _mates[0].target_peer, _mates[1].target_peer])
+	expect(_wolf.target_peer == _client_peer() and _mates[0].target_peer == _client_peer()
+		and _mates[1].target_peer == _client_peer(), "what_hits_one_the_pack_chases")
+	Tuning.server.wolf_aggro_range = aggro
+	Tuning.server.wolf_wander_radius = wander
 
 
 # ------------------------------------------------------------------ the wire
@@ -520,6 +673,12 @@ func stage_done(name_text: String) -> void:
 func report(key: String, value: Variant) -> void:
 	if multiplayer.is_server() and multiplayer.get_peers().has(multiplayer.get_remote_sender_id()):
 		_reports[key] = value
+
+
+@rpc("authority", "call_remote", "reliable")
+func client_build_pack() -> void:
+	_build_pack()
+	stage_done.rpc_id(1, "pack_built")
 
 
 @rpc("authority", "call_remote", "reliable")

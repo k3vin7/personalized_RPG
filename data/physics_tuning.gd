@@ -1076,6 +1076,11 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			wolf_run_speed_mult = value
+# Walking home after giving up: this times its run.
+@export var wolf_return_speed_mult: float = 1.5:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_return_speed_mult = value
 @export var wolf_walk_speed_mult: float = 0.3:
 	set(value):
 		if Tuning.may_write(self):
@@ -1108,3 +1113,8 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			wolf_corpse_time = value
+# Seconds after its death until it is back on its mark.
+@export var wolf_respawn_time: float = 60.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_respawn_time = value

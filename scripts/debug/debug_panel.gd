@@ -137,6 +137,8 @@ const FIELD_LABELS := {
 	"wolf_strength": "늑대 근력 (넉백 허용치용)",
 	"wolf_max_hp": "늑대 HP",
 	"wolf_corpse_time": "시체가 사라지는 시간 (초)",
+	"wolf_return_speed_mult": "귀환 속도 배율 (달리기 대비)",
+	"wolf_respawn_time": "죽은 뒤 다시 나오는 시간 (초)",
 	"thrust_speed_bonus": "찌르기 속도 보정 계수",
 	"side_cut_angle": "횡베기 부채꼴 각도 (바닥 표시, C-1g-c까지)",
 	"side_cut_arc_deg": "횡베기 호 (판정·연출·궤적, 좌우 합)",

@@ -3126,6 +3126,18 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0)
 	return tally["hits"]
 
 
+# A blow does not land on a body of the caster's own species: a pack does not
+# bite itself. Each body states one species; "" is none, and a body with none
+# is outside the rule -- players (the ally rules are theirs) and scarecrows
+# (one's slam reaches another, as it always did). Different species hit each
+# other.
+func same_species(actor: Node3D, body: Node3D) -> bool:
+	if not (actor is Dummy) or not (body is Dummy):
+		return false
+	var species := (actor as Dummy).species()
+	return species != "" and species == (body as Dummy).species()
+
+
 func _new_tally() -> Dictionary:
 	return {"hits": 0, "downed": 0, "parried": 0, "skipped_airborne": 0, "order": []}
 
@@ -3138,6 +3150,8 @@ func _land_strike(actor: Node3D, def: SkillDef, body: Node3D, forward: Vector3, 
 		caster_strength: float, mult: float, tally: Dictionary) -> bool:
 	var caster := actor as Player
 	if body is Rock and holder_of(body) != 0:
+		return false
+	if same_species(actor, body):
 		return false
 	# C-1b: the side cut leaves a body off the ground alone.
 	if def.skip_airborne and is_airborne(body):

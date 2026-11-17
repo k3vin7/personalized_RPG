@@ -87,6 +87,9 @@ func _ready() -> void:
 		var wolf := (load("res://scenes/wolf.tscn") as PackedScene).instantiate() as Wolf
 		wolf.setup(Regions.ARENA + Vector3(-12.0, Wolf.BODY_RADIUS + 0.05, 8.0), "Wolf_0")
 		add_child(wolf)
+		# A wall the path check stands a body behind: x 68, z 11 to the
+		# arena's north edge, so the only way round is its south end.
+		_box("WfWall", Regions.ARENA + Vector3(14.0, 1.0, 14.5), Vector3(0.5, 2.0, 7.0), Color("6b7078"), WALL_LAYER)
 	_sign("결투장 →", Vector3(18.0, 2.2, 2.0), Color("ffd6a0"))
 	_sign("← 장애물 지형", Vector3(-18.0, 2.2, 14.0), Color("d9f3ff"))
 

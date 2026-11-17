@@ -128,6 +128,13 @@ func body_half_height() -> float:
 	return HALF_HEIGHT
 
 
+# What kind of creature this is, one value per body. A blow does not land on
+# the caster's own species (ServerAuthority.same_species). "" is none: a
+# scarecrow is not a creature, and one's slam reaches another.
+func species() -> String:
+	return ""
+
+
 # The attack this body telegraphs and books with the judge.
 func attack_def() -> SkillDef:
 	return Skills.get_def("dummy_slam")
