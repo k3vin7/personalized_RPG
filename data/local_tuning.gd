@@ -92,6 +92,13 @@ extends Resource
 @export var interior_door_glimpse: float = 3.0
 @export var interior_door_light: float = 2.0
 @export var interior_fade_time: float = 0.3
+# The daylight inside, as a share of what it is outside; and the torches on
+# the posts and the candles on the tables: how strong, and how far they reach.
+@export var interior_brightness: float = 0.6
+@export var interior_torch_energy: float = 1.5
+@export var interior_torch_range: float = 5.0
+@export var interior_candle_energy: float = 0.6
+@export var interior_candle_range: float = 2.5
 
 @export_group("Model")
 # 2026-11-06: which gait the model draws for a moving body. Drawn only; the

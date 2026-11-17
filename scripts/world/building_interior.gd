@@ -43,13 +43,21 @@ extends Node3D
 #     as the room, except where two rooms touch and open into each other;
 #   - a post (thickness x thickness) at every corner, the inner corners where
 #     two rooms meet included; a wall fills only the span between two posts;
-#   - a door's opening cut out of the wall it is in, with the piece over it.
+#   - a door's opening cut out of the wall it is in, with the piece over it
+#     and a post on either side of it;
+#   - more posts along each wall, about `post_spacing` apart, evened out to
+#     the wall's length; a wall piece spans from one post to the next;
+#   - floor: the rooms' floor, drawn only, one polygon;
+#   - lights/torch_*: a torch light high on every second post (lights/ may
+#     hold other lights, such as candle_*; those are left alone).
+#
+# The lights under lights/ are on only while the local body is inside. They
+# are not children of the walls, so a wall that is not drawn keeps its light.
 #
 # Nothing here is ruled on or sent: InteriorView (one, on the local screen)
 # asks whether the local body is inside and drives the picture.
 
 const GROUP := "building_interior"
-const CUT_SHADER := preload("res://shaders/interior_cut.gdshader")
 const MAX_ROOMS := 8
 const MAX_DOORS := 8
 # How far outside a door the "which way is out" probe looks.
@@ -73,16 +81,66 @@ const TOUCH := 0.05
 @export_tool_button("벽 다시 만들기", "Reload") var rebuild_button: Callable = rebuild_walls
 
 @export var wall_thickness := 0.5
-@export var wall_color := Color(0.9, 0.88, 0.84)
+# What "벽 다시 만들기" paints the pieces it makes, and how far apart it
+# stands the posts along a wall (the spans are evened out to fit the wall).
+@export var wall_color := Color("d8cfc4")
+@export var post_color := Color("9c5f40")
+@export var floor_color := Color("8c6650")
+@export var torch_color := Color("ffb060")
+@export var post_spacing := 4.0
+# A wall stands this far back from each face of the posts (which are
+# `wall_thickness` square): the posts stand proud of the wall, as timber.
+@export var wall_inset := 0.1
+# The storey whose posts this one's stand over (the storey below; for a
+# cellar, the one above). Where a wall of this storey runs along a wall of
+# that one, its posts are put where that one's are, so they line up from the
+# ground to the roof. Empty, or no wall there: evenly spaced.
+@export var post_from: NodePath
+# A band along the foot of the outer walls, standing out from the posts: on
+# the ground storey a stone base, on an upper storey the beam that shows
+# where one storey ends and the next begins. 0: none (a cellar).
+@export var trim_height := 0.3
+@export var trim_depth := 0.08
+@export var trim_color := Color("9c5f40")
+# Windows. A box under windows/ (like a door's box, but off the floor) is a
+# window where it stands. With no windows/ node and `auto_windows` on, every
+# stretch of outer wall between two posts that is at least
+# `auto_window_min` long gets one in its middle, `window_size` wide and
+# high, its sill `window_sill` above the floor. A window is a hole to see
+# through: the wall under it and over it stays, and nothing walks through.
+@export var auto_windows := true
+@export var auto_window_min := 2.5
+@export var window_size := Vector2(1.2, 1.2)
+@export var window_sill := 1.0
+# The cut face of a wall that has been cut down for the view.
+@export var cut_color := Color("3a2a22")
+# How thick a floor "벽 다시 만들기" lays. 0: the ground storey -- the ground
+# under it is what bodies stand on, and the floor is only drawn. More: an
+# upper storey -- a slab this thick with a collider, its top at the rooms'
+# floor, with the boxes under holes/ (a stairwell) cut out of it. A hole has
+# to reach an edge of the floor: the outline is one polygon with no islands.
+@export var floor_thickness := 0.0
+# A camera-side wall is not taken away whole: this much of it is left
+# standing, so the room's outline and its doors can still be read. 0: none.
+@export var stub_height := 0.5
+# The rail "벽 다시 만들기" stands round a stair's opening.
+@export var rail_height := 1.0
+@export var rail_thickness := 0.1
+
+# Lays the floor (with its openings) and the rails again, and nothing else.
+@export_tool_button("바닥·난간 다시 만들기", "Reload") var floor_button: Callable = rebuild_floor
 # The floors above: hidden while the local body is inside.
-@export var upstairs: Array[NodePath] = []
+# What belongs to this storey but is not under this node (the furniture).
+@export var members: Array[NodePath] = []
 
 var room_centres := PackedVector3Array()
 var room_halves := PackedVector3Array()
 var door_centres := PackedVector3Array()
 var door_outs := PackedVector3Array()
 var door_halves := PackedVector2Array()
-
+# The window boxes under windows/, in this node's space.
+var window_boxes: Array[AABB] = []
+var _has_window_marks := false
 # Whether the local body is in, kept between frames: it changes only once
 # the body is wholly in or wholly out.
 var inside := false
@@ -94,11 +152,14 @@ var inside := false
 var pieces: Array[Dictionary] = []
 
 var _lights: Array[OmniLight3D] = []
+# The lit strip of ground outside each door, drawn while the body is on this
+# storey (the world's ground is not drawn then).
+var _door_strips: Array[MeshInstance3D] = []
+# The lights under lights/, as saved in the map: torches and candles.
+var _lamps: Array[OmniLight3D] = []
 
-# Every cut material in the world: the view fills them with the opened
-# building's numbers, so that what stands in front of it is not drawn.
-static var world_materials: Array[ShaderMaterial] = []
-static var _world_by_source := {}
+# Instance id of a node listed in some storey's `members` -> that storey.
+static var _member_of := {}
 
 
 func _ready() -> void:
@@ -106,14 +167,18 @@ func _ready() -> void:
 		return
 	_read_marks()
 	_collect_pieces()
+	_collect_lamps()
+	for path in members:
+		var member := get_node_or_null(path)
+		if member != null:
+			_member_of[member.get_instance_id()] = self
 	add_to_group(GROUP)
-	for mark_root in ["rooms", "doors"]:
+	_stair_lamps.clear()
+	for mark_root in ["rooms", "doors", "holes", "windows"]:
 		var marks := get_node_or_null(mark_root) as Node3D
 		if marks != null:
 			marks.visible = false
-	_make_lights()
-	# Deferred: the scene this is part of is not the current one yet.
-	_dress_world.call_deferred()
+	_make_door_marks()
 
 
 func _read_marks() -> void:
@@ -122,6 +187,14 @@ func _read_marks() -> void:
 	door_centres.clear()
 	door_outs.clear()
 	door_halves.clear()
+	window_boxes.clear()
+	var windows := get_node_or_null("windows")
+	_has_window_marks = windows != null
+	if windows != null:
+		for child in windows.get_children():
+			var box := _box_of(child)
+			if box.size != Vector3.ZERO:
+				window_boxes.append(box)
 	var rooms := get_node_or_null("rooms")
 	if rooms != null:
 		for child in rooms.get_children():
@@ -169,6 +242,19 @@ func _in_a_room(at: Vector3, grow: float) -> bool:
 
 # ------------------------------------------------------------ the walls as they stand
 
+func _collect_lamps() -> void:
+	_lamps.clear()
+	var holder := get_node_or_null("lights")
+	if holder == null:
+		return
+	for child in holder.get_children():
+		var lamp := child as OmniLight3D
+		if lamp != null:
+			lamp.shadow_enabled = false
+			lamp.visible = false
+			_lamps.append(lamp)
+
+
 # Reads the pieces under walls/ as they are in the map.
 func _collect_pieces() -> void:
 	pieces.clear()
@@ -187,8 +273,11 @@ func _collect_pieces() -> void:
 		if box.size == Vector3.ZERO:
 			continue
 		var is_post := String(node.name).to_lower().begins_with(POST_PREFIX) or node.is_in_group(POST_GROUP)
+		var rest: Array[Transform3D] = []
+		for found in meshes:
+			rest.append((found as MeshInstance3D).transform)
 		pieces.append({
-			"node": node, "meshes": meshes, "post": is_post, "box": box,
+			"node": node, "meshes": meshes, "rest": rest, "post": is_post, "box": box,
 			"out": Vector3.ZERO if is_post else _facing_of(box), "walls": [] as Array[int]})
 	for i in pieces.size():
 		if not pieces[i]["post"]:
@@ -361,20 +450,366 @@ func rebuild_walls() -> void:
 						touching.append(index)
 			var rect := Rect2(xs[ix], zs[iz], xs[ix + 1] - xs[ix], zs[iz + 1] - zs[iz])
 			var span := _height_span(rect.get_center())
-			var index := _piece(holder, "post_%d_%d" % [ix, iz], rect, span.x, span.y)
-			pieces[index]["post"] = true
+			var index := _piece(holder, "post_%d_%d" % [ix, iz], rect, span.x, span.y, true)
 			pieces[index]["walls"] = touching
+	_build_trim()
+	var floor_holder := _build_floor()
+	var rails_holder := _build_rails()
+	var lights_holder := _build_torches()
 	# Saved with the scene being edited (or, in play, just stood up and read).
 	var scene_root := get_tree().edited_scene_root if Engine.is_editor_hint() else owner
 	if scene_root != null:
-		holder.owner = scene_root
-		for node in holder.find_children("*", "", true, false):
-			node.owner = scene_root
-	print("BuildingInterior: %d pieces under %s" % [pieces.size(), holder.get_path()])
+		for made_holder: Node in [holder, floor_holder, rails_holder, lights_holder]:
+			made_holder.owner = scene_root
+			for node in made_holder.find_children("*", "", true, false):
+				node.owner = scene_root
+	print("BuildingInterior: %d pieces under %s, floor of %d corners, %d lights" % [
+		pieces.size(), holder.get_path(), (floor_holder as CSGPolygon3D).polygon.size(), lights_holder.get_child_count()])
 	if Engine.is_editor_hint():
 		pieces.clear()
 	else:
 		_collect_pieces()
+		_collect_lamps()
+
+
+# The band along the foot of each outer wall: a mesh under that wall's own
+# node, so it goes when the wall is cut down. It reaches half a post past
+# each end of the wall, so the bands of neighbouring walls meet in front of
+# the post between them.
+const TRIM_NAME := "Trim"
+const THRESHOLD_HEIGHT := 0.06
+
+
+func _build_trim() -> void:
+	var material := _flat_material(trim_color)
+	for piece in pieces:
+		var outward: Vector3 = piece["out"]
+		if piece["post"] or outward == Vector3.ZERO:
+			continue
+		var body := piece["node"] as Node3D
+		var size := ((body.get_node("Shape") as CollisionShape3D).shape as BoxShape3D).size
+		var floor_y := _height_span(Vector2(body.position.x, body.position.z)).x
+		if String(body.name).contains("_over_"):
+			# The piece over a door: a threshold under it, on the floor.
+			var sill := MeshInstance3D.new()
+			sill.name = "Threshold"
+			var sill_box := BoxMesh.new()
+			sill_box.size = Vector3(size.x, THRESHOLD_HEIGHT, wall_thickness) if absf(outward.x) < 0.5 \
+				else Vector3(wall_thickness, THRESHOLD_HEIGHT, size.z)
+			sill_box.material = _post_material
+			sill.mesh = sill_box
+			sill.position = Vector3(0.0, floor_y - body.position.y + THRESHOLD_HEIGHT * 0.5, 0.0)
+			body.add_child(sill)
+			continue
+		if absf(body.position.y - size.y * 0.5 - floor_y) > 0.05 or trim_height <= 0.0:
+			continue
+		var along_x := absf(outward.x) < 0.5
+		var reach := (size.x if along_x else size.z) + wall_thickness
+		var band := MeshInstance3D.new()
+		band.name = TRIM_NAME
+		var box := BoxMesh.new()
+		box.size = Vector3(reach if along_x else trim_depth, trim_height, trim_depth if along_x else reach)
+		box.material = material
+		band.mesh = box
+		band.position = outward * (wall_thickness * 0.5 + trim_depth * 0.5) + Vector3(0.0, -size.y * 0.5 + trim_height * 0.5, 0.0)
+		body.add_child(band)
+
+
+func rebuild_floor() -> void:
+	_read_marks()
+	var made: Array[Node] = [_build_floor(), _build_rails()]
+	var scene_root := get_tree().edited_scene_root if Engine.is_editor_hint() else owner
+	if scene_root != null:
+		for made_holder in made:
+			made_holder.owner = scene_root
+			for node in made_holder.find_children("*", "", true, false):
+				node.owner = scene_root
+	print("BuildingInterior %s: floor of %d corners, %d rails" % [
+		name, (made[0] as CSGPolygon3D).polygon.size(), made[1].get_child_count()])
+
+
+# The stairs of this building that touch this storey, each with the end of
+# it that is on this storey, in this node's space.
+func _stair_ends() -> Array[Vector3]:
+	var ends: Array[Vector3] = []
+	var to_here := global_transform.affine_inverse()
+	for sibling in get_parent().get_children():
+		var stair := sibling as BuildingStair
+		if stair == null:
+			continue
+		if stair.lower_storey() == self:
+			ends.append(to_here * (stair.global_transform * stair.foot))
+		if stair.upper_storey() == self:
+			ends.append(to_here * (stair.global_transform * stair.head))
+	return ends
+
+
+# What a rail is drawn as: uprights, a top bar, a bar half way up and a kerb
+# along the floor. The collider is the one solid box it always was.
+const RAIL_UPRIGHT := 0.08
+const RAIL_BAR := 0.06
+const RAIL_KERB := 0.1
+const RAIL_UPRIGHT_GAP := 1.2
+
+
+func _rail_look(body: Node3D, size: Vector3, material: Material) -> void:
+	var along_x := size.x >= size.z
+	var length := size.x if along_x else size.z
+	var parts: Array = []
+	# [name, middle, size]
+	var bar := Vector3(length, RAIL_BAR, RAIL_BAR) if along_x else Vector3(RAIL_BAR, RAIL_BAR, length)
+	parts.append(["Top", Vector3(0.0, size.y * 0.5 - RAIL_BAR * 0.5, 0.0), bar])
+	parts.append(["Middle", Vector3(0.0, 0.0, 0.0), bar])
+	parts.append(["Kerb", Vector3(0.0, -size.y * 0.5 + RAIL_KERB * 0.5, 0.0),
+		Vector3(length, RAIL_KERB, RAIL_KERB + 0.02) if along_x else Vector3(RAIL_KERB + 0.02, RAIL_KERB, length)])
+	var count := maxi(2, ceili(length / RAIL_UPRIGHT_GAP) + 1)
+	for i in count:
+		var at := -length * 0.5 + RAIL_UPRIGHT * 0.5 + (length - RAIL_UPRIGHT) * float(i) / float(count - 1)
+		parts.append(["Upright%d" % i, Vector3(at, 0.0, 0.0) if along_x else Vector3(0.0, 0.0, at),
+			Vector3(RAIL_UPRIGHT, size.y, RAIL_UPRIGHT)])
+	for part: Array in parts:
+		var mesh := MeshInstance3D.new()
+		mesh.name = String(part[0])
+		var drawn := BoxMesh.new()
+		drawn.size = part[2]
+		drawn.material = material
+		mesh.mesh = drawn
+		mesh.position = part[1]
+		body.add_child(mesh)
+
+
+# A rail along each side of each opening in the floor, except the sides that
+# are a wall already and the sides a stair comes onto or leaves by. A rail
+# also stops RAIL_CLEAR short of a stair's end, wherever that end is: a body
+# has to be able to walk round onto the stair, and a rail right up to its
+# corner closes the way (measured: it cut the cellar off).
+const RAIL_STAIR_GAP := 0.6
+const RAIL_CLEAR := 1.2
+
+
+func _build_rails() -> Node3D:
+	var old := get_node_or_null("rails")
+	if old != null:
+		remove_child(old)
+		old.free()
+	var holder := Node3D.new()
+	holder.name = "rails"
+	add_child(holder)
+	var holes := get_node_or_null("holes")
+	if holes == null:
+		return holder
+	var ends := _stair_ends()
+	var material := _flat_material(post_color)
+	for child in holes.get_children():
+		var box := _box_of(child)
+		if box.size == Vector3.ZERO:
+			continue
+		var level := _height_span(Vector2(box.get_center().x, box.get_center().z)).x
+		var low := Vector2(box.position.x, box.position.z)
+		var high := Vector2(box.end.x, box.end.z)
+		# [from, to, the way out of the opening across this side]
+		var sides := [
+			[Vector2(low.x, low.y), Vector2(high.x, low.y), Vector2(0.0, -1.0)],
+			[Vector2(low.x, high.y), Vector2(high.x, high.y), Vector2(0.0, 1.0)],
+			[Vector2(low.x, low.y), Vector2(low.x, high.y), Vector2(-1.0, 0.0)],
+			[Vector2(high.x, low.y), Vector2(high.x, high.y), Vector2(1.0, 0.0)],
+		]
+		var number := 0
+		for edge: Array in sides:
+			var from: Vector2 = edge[0]
+			var to: Vector2 = edge[1]
+			var outward: Vector2 = edge[2]
+			var middle := (from + to) * 0.5
+			# No floor beyond this side: it is a wall.
+			if _room_at(middle.x + outward.x * OUT_PROBE, middle.y + outward.y * OUT_PROBE) < 0:
+				continue
+			var stair_here := false
+			for end in ends:
+				var flat := Vector2(end.x, end.z)
+				var nearest := Geometry2D.get_closest_point_to_segment(flat, from, to)
+				if nearest.distance_to(flat) <= RAIL_STAIR_GAP and absf(end.y - level) <= 0.5:
+					stair_here = true
+			if stair_here:
+				continue
+			# Trimmed back from each stair end near it.
+			var line := (to - from).normalized()
+			var start := 0.0
+			var stop := from.distance_to(to)
+			for end in ends:
+				if absf(end.y - level) > 0.5:
+					continue
+				var flat := Vector2(end.x, end.z) - from
+				var along := flat.dot(line)
+				var off := absf(flat.cross(line))
+				if off >= RAIL_CLEAR:
+					continue
+				var reach := sqrt(RAIL_CLEAR * RAIL_CLEAR - off * off)
+				# The longer of what is left on either side of the cut.
+				if along - reach - start >= stop - (along + reach):
+					stop = minf(stop, along - reach)
+				else:
+					start = maxf(start, along + reach)
+			if stop - start < rail_thickness * 2.0:
+				continue
+			to = from + line * stop
+			from = from + line * start
+			middle = (from + to) * 0.5
+			var size := Vector3(absf(to.x - from.x) + rail_thickness, rail_height, absf(to.y - from.y) + rail_thickness)
+			var body := StaticBody3D.new()
+			body.name = "rail_%s_%d" % [child.name, number]
+			number += 1
+			body.collision_layer = Layers.WORLD
+			body.collision_mask = 0
+			body.position = Vector3(middle.x, level + rail_height * 0.5, middle.y)
+			var shape := CollisionShape3D.new()
+			shape.name = "Shape"
+			var solid := BoxShape3D.new()
+			solid.size = size
+			shape.shape = solid
+			body.add_child(shape)
+			_rail_look(body, size, material)
+			holder.add_child(body)
+	return holder
+
+
+# The rooms' floor and the doors' thresholds as one piece: a CSGPolygon3D
+# whose outline is the rooms and the doorways joined together, drawn only
+# (the ground under it is what bodies stand on), a hair above that ground.
+# One piece has no seams for anything to show through; the outline can be
+# edited by hand afterwards. Nothing is laid under the walls: where a wall is
+# not drawn there is then nothing to draw.
+#
+# One piece is also one object to the renderer, which lights an object with
+# only so many lights: rendering/limits/opengl/max_lights_per_object is
+# raised in the project settings for this.
+const FLOOR_LIFT := 0.01
+
+
+func _build_floor() -> Node3D:
+	var old := get_node_or_null("floor")
+	if old != null:
+		remove_child(old)
+		old.free()
+	var rects: Array[Rect2] = []
+	var bottom := INF
+	for i in room_centres.size():
+		rects.append(Rect2(
+			room_centres[i].x - room_halves[i].x, room_centres[i].z - room_halves[i].z,
+			room_halves[i].x * 2.0, room_halves[i].z * 2.0))
+		bottom = minf(bottom, room_centres[i].y - room_halves[i].y)
+	for i in door_centres.size():
+		var along_x := absf(door_outs[i].x) < 0.5
+		var half := Vector2(door_halves[i].x if along_x else wall_thickness * 0.5,
+			wall_thickness * 0.5 if along_x else door_halves[i].x)
+		rects.append(Rect2(door_centres[i].x - half.x, door_centres[i].z - half.y, half.x * 2.0, half.y * 2.0))
+	# Joined one at a time; rooms that touch and doorways in their walls make
+	# one outline. Anything left apart (a room on its own) is not laid.
+	var outline := PackedVector2Array()
+	var waiting := rects.duplicate()
+	var grew := true
+	while grew and not waiting.is_empty():
+		grew = false
+		for rect: Rect2 in waiting.duplicate():
+			var corners := PackedVector2Array([
+				rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)])
+			if outline.is_empty():
+				outline = corners
+			else:
+				var joined := Geometry2D.merge_polygons(outline, corners)
+				var solid: Array[PackedVector2Array] = []
+				for polygon in joined:
+					if not Geometry2D.is_polygon_clockwise(polygon):
+						solid.append(polygon)
+				if solid.size() != 1:
+					continue
+				outline = solid[0]
+			waiting.erase(rect)
+			grew = true
+	var holes := get_node_or_null("holes")
+	if holes != null:
+		for child in holes.get_children():
+			var box := _box_of(child)
+			if box.size == Vector3.ZERO:
+				continue
+			var hole := PackedVector2Array([
+				Vector2(box.position.x, box.position.z), Vector2(box.end.x, box.position.z),
+				Vector2(box.end.x, box.end.z), Vector2(box.position.x, box.end.z)])
+			var left: Array[PackedVector2Array] = []
+			for polygon in Geometry2D.clip_polygons(outline, hole):
+				if not Geometry2D.is_polygon_clockwise(polygon):
+					left.append(polygon)
+			if left.size() == 1 and Geometry2D.clip_polygons(outline, hole).size() == 1:
+				outline = left[0]
+			else:
+				push_warning("BuildingInterior: hole %s does not reach an edge of the floor; not cut" % child.name)
+	var floor_piece := CSGPolygon3D.new()
+	floor_piece.name = "floor"
+	# The outline's (x, y) are this node's (x, z); it is FLOOR_LIFT * 2 thick,
+	# from just under the ground up (the same turn the maps' other polygons use).
+	var slab := floor_thickness > 0.0
+	var under := floor_thickness if slab else FLOOR_LIFT
+	floor_piece.transform = Transform3D(Basis(Vector3.RIGHT, Vector3.BACK, Vector3.DOWN), Vector3(0.0, bottom - under, 0.0))
+	floor_piece.polygon = outline
+	floor_piece.depth = floor_thickness if slab else FLOOR_LIFT * 2.0
+	floor_piece.material = _flat_material(floor_color)
+	floor_piece.use_collision = slab
+	if not slab:
+		floor_piece.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(floor_piece)
+	return floor_piece
+
+
+# A torch light high on every second post, going round the building. Other
+# lights under lights/ (candles put there by hand) are left alone.
+const TORCH_PREFIX := "torch"
+const CANDLE_PREFIX := "candle"
+const TORCH_BELOW_TOP := 0.6
+const TORCH_OFF_POST := 0.2
+
+
+func _build_torches() -> Node3D:
+	var holder := get_node_or_null("lights") as Node3D
+	if holder == null:
+		holder = Node3D.new()
+		holder.name = "lights"
+		add_child(holder)
+	for child in holder.get_children():
+		if String(child.name).begins_with(TORCH_PREFIX):
+			holder.remove_child(child)
+			child.free()
+	var middle := Vector3.ZERO
+	var posts: Array[Node3D] = []
+	for piece in pieces:
+		if piece["post"]:
+			posts.append(piece["node"] as Node3D)
+			middle += (piece["node"] as Node3D).position
+	if posts.is_empty():
+		return holder
+	middle /= float(posts.size())
+	posts.sort_custom(func(a: Node3D, b: Node3D) -> bool:
+		return atan2(a.position.z - middle.z, a.position.x - middle.x) < atan2(b.position.z - middle.z, b.position.x - middle.x))
+	var number := 0
+	for i in range(0, posts.size(), 2):
+		var post := posts[i]
+		# Toward the room: the average of the directions that lead into one.
+		var inward := Vector3.ZERO
+		for step in 8:
+			var direction := Vector3.RIGHT.rotated(Vector3.UP, TAU * step / 8.0)
+			var probe := post.position + direction * (wall_thickness * 0.5 + OUT_PROBE)
+			if _room_at(probe.x, probe.z) >= 0:
+				inward += direction
+		if inward.length() < 0.01:
+			continue
+		var span := _height_span(Vector2(post.position.x, post.position.z))
+		var light := OmniLight3D.new()
+		light.name = "%s_%d" % [TORCH_PREFIX, number]
+		number += 1
+		light.light_color = torch_color
+		light.shadow_enabled = false
+		light.position = Vector3(post.position.x, span.y - TORCH_BELOW_TOP, post.position.z) \
+			+ inward.normalized() * (wall_thickness * 0.5 + TORCH_OFF_POST)
+		holder.add_child(light)
+	return holder
 
 
 # Which way is out of a wall: the side of it that is not a room. ZERO when
@@ -423,22 +858,125 @@ func _wall(holder: Node3D, rect: Rect2, out: Vector3, runs_along_z: bool) -> Arr
 			cuts.append(Vector3(from, to, centre.y + door_halves[i].y))
 	cuts.sort_custom(func(a: Vector3, b: Vector3) -> bool: return a.x < b.x)
 	var label := "wall_%s_%d" % ["z" if runs_along_z else "x", pieces.size()]
+	var thick := wall_thickness
+	# Solid stretches between the run's ends and the doors, each ending at a
+	# post that flanks a door where there is room for one.
+	var stretches: Array[Vector2] = []
 	var cursor := start
 	var part := 0
 	for cut in cuts:
-		if cut.x - cursor > SNAP:
-			made.append(_piece(holder, "%s_%d" % [label, part], _along(rect, cursor, cut.x, runs_along_z), span.x, span.y))
-			part += 1
+		var stretch_end := cut.x
+		if cut.x - thick - cursor > -SNAP:
+			stretch_end = cut.x - thick
+			made.append(_piece(holder, "post_door_%d" % pieces.size(), _along(rect, stretch_end, cut.x, runs_along_z), span.x, span.y, true))
+		stretches.append(Vector2(cursor, stretch_end))
 		if span.y - cut.z > SNAP:
 			# The piece over the door.
-			made.append(_piece(holder, "%s_over_%d" % [label, part], _along(rect, cut.x, cut.y, runs_along_z), cut.z, span.y))
+			made.append(_piece(holder, "%s_over_%d" % [label, part], _along(rect, cut.x, cut.y, runs_along_z), cut.z, span.y, false, true))
 			part += 1
 		cursor = cut.y
-	if end - cursor > SNAP:
-		made.append(_piece(holder, "%s_%d" % [label, part], _along(rect, cursor, end, runs_along_z), span.x, span.y))
+		if end - (cut.y + thick) > -SNAP:
+			made.append(_piece(holder, "post_door_%d" % pieces.size(), _along(rect, cut.y, cut.y + thick, runs_along_z), span.x, span.y, true))
+			cursor = cut.y + thick
+	stretches.append(Vector2(cursor, end))
+	for stretch in stretches:
+		var length := stretch.y - stretch.x
+		if length <= SNAP:
+			continue
+		# Where the posts go (each from its start to start + thick): over the
+		# posts of `post_from` where it has any along this stretch, otherwise
+		# every `post_spacing` or so, centre to centre, evened out.
+		var starts: Array[float] = []
+		for centre in _posts_below(rect, runs_along_z):
+			var begins := centre - thick * 0.5
+			if begins > stretch.x + SNAP and begins + thick < stretch.y - SNAP:
+				starts.append(begins)
+		if starts.is_empty():
+			var bays := maxi(1, roundi((length + thick) / maxf(post_spacing, thick * 2.0)))
+			var pitch := (length + thick) / float(bays)
+			for bay in bays - 1:
+				starts.append(stretch.x + pitch * (bay + 1) - thick)
+		starts.sort()
+		var from := stretch.x
+		for begins in starts:
+			if begins - from > SNAP:
+				part = _span_pieces(holder, label, part, rect, from, begins, runs_along_z, span, out, made)
+			made.append(_piece(holder, "post_mid_%d" % pieces.size(), _along(rect, begins, begins + thick, runs_along_z), span.x, span.y, true))
+			from = begins + thick
+		if stretch.y - from > SNAP:
+			part = _span_pieces(holder, label, part, rect, from, stretch.y, runs_along_z, span, out, made)
 	for index in made:
 		pieces[index]["out"] = out
 	return made
+
+
+# One stretch of wall between two posts, with its windows cut out: the wall
+# to either side of a window whole, and under and over it a piece each.
+# Returns the next part number.
+func _span_pieces(holder: Node3D, label: String, part: int, rect: Rect2, from: float, to: float,
+		runs_along_z: bool, span: Vector2, out: Vector3, made: Array[int]) -> int:
+	# [from, to, sill, top] along this stretch.
+	var holes: Array = []
+	if _has_window_marks:
+		for box in window_boxes:
+			var across := box.get_center().x if runs_along_z else box.get_center().z
+			var low := rect.position.x if runs_along_z else rect.position.y
+			var high := rect.end.x if runs_along_z else rect.end.y
+			if across < low - 0.3 or across > high + 0.3:
+				continue
+			var starts := maxf(box.position.z if runs_along_z else box.position.x, from)
+			var ends := minf(box.end.z if runs_along_z else box.end.x, to)
+			if ends - starts > 0.1:
+				holes.append([starts, ends, box.position.y, box.end.y])
+	elif auto_windows and out != Vector3.ZERO and to - from >= auto_window_min:
+		var middle := (from + to) * 0.5
+		holes.append([middle - window_size.x * 0.5, middle + window_size.x * 0.5,
+			span.x + window_sill, span.x + window_sill + window_size.y])
+	holes.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0])
+	var cursor := from
+	for hole: Array in holes:
+		var starts: float = hole[0]
+		var ends: float = hole[1]
+		var sill := clampf(float(hole[2]), span.x, span.y)
+		var top := clampf(float(hole[3]), span.x, span.y)
+		if starts - cursor > SNAP:
+			made.append(_piece(holder, "%s_%d" % [label, part], _along(rect, cursor, starts, runs_along_z), span.x, span.y))
+			part += 1
+		if sill - span.x > SNAP:
+			made.append(_piece(holder, "%s_wsill_%d" % [label, part], _along(rect, starts, ends, runs_along_z), span.x, sill))
+			part += 1
+		if span.y - top > SNAP:
+			made.append(_piece(holder, "%s_wover_%d" % [label, part], _along(rect, starts, ends, runs_along_z), top, span.y))
+			part += 1
+		cursor = ends
+	if to - cursor > SNAP:
+		made.append(_piece(holder, "%s_%d" % [label, part], _along(rect, cursor, to, runs_along_z), span.x, span.y))
+		part += 1
+	return part
+
+
+# Where the posts of `post_from` stand along a wall of this storey: their
+# middles along the wall, for those that are on the wall's line.
+func _posts_below(rect: Rect2, runs_along_z: bool) -> Array[float]:
+	var out: Array[float] = []
+	if post_from.is_empty():
+		return out
+	var other := get_node_or_null(post_from)
+	var other_walls := other.get_node_or_null("walls") if other != null else null
+	if other_walls == null:
+		return out
+	var to_here := global_transform.affine_inverse()
+	for child in other_walls.get_children():
+		var post := child as Node3D
+		if post == null or not String(post.name).to_lower().begins_with(POST_PREFIX):
+			continue
+		var at := to_here * post.global_position
+		var across := at.x if runs_along_z else at.z
+		var low := rect.position.x if runs_along_z else rect.position.y
+		var high := rect.end.x if runs_along_z else rect.end.y
+		if across > low - SNAP and across < high + SNAP:
+			out.append(at.z if runs_along_z else at.x)
+	return out
 
 
 static func _along(rect: Rect2, from: float, to: float, runs_along_z: bool) -> Rect2:
@@ -448,13 +986,26 @@ static func _along(rect: Rect2, from: float, to: float, runs_along_z: bool) -> R
 
 
 var _wall_material: StandardMaterial3D
+var _post_material: StandardMaterial3D
 
 
-func _piece(holder: Node3D, piece_name: String, rect: Rect2, bottom: float, top: float) -> int:
+static func _flat_material(color: Color) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.roughness = 1.0
+	return material
+
+
+func _piece(holder: Node3D, piece_name: String, rect: Rect2, bottom: float, top: float, is_post := false, beam := false) -> int:
 	if _wall_material == null:
-		_wall_material = StandardMaterial3D.new()
-		_wall_material.albedo_color = wall_color
-		_wall_material.roughness = 1.0
+		_wall_material = _flat_material(wall_color)
+		_post_material = _flat_material(post_color)
+	if not is_post and wall_inset > 0.0:
+		# Thinner than the posts, across whichever way it is thin.
+		if rect.size.x <= rect.size.y and rect.size.x > wall_inset * 2.0 + 0.05:
+			rect = Rect2(rect.position.x + wall_inset, rect.position.y, rect.size.x - wall_inset * 2.0, rect.size.y)
+		elif rect.size.y < rect.size.x and rect.size.y > wall_inset * 2.0 + 0.05:
+			rect = Rect2(rect.position.x, rect.position.y + wall_inset, rect.size.x, rect.size.y - wall_inset * 2.0)
 	var size := Vector3(rect.size.x, top - bottom, rect.size.y)
 	var body := StaticBody3D.new()
 	body.name = piece_name
@@ -471,78 +1022,94 @@ func _piece(holder: Node3D, piece_name: String, rect: Rect2, bottom: float, top:
 	mesh.name = "Mesh"
 	var box_mesh := BoxMesh.new()
 	box_mesh.size = size
-	box_mesh.material = _wall_material
+	box_mesh.material = _post_material if (is_post or beam) else _wall_material
 	mesh.mesh = box_mesh
 	body.add_child(mesh)
 	holder.add_child(body)
-	pieces.append({"node": body, "meshes": [mesh], "post": false, "out": Vector3.ZERO, "walls": [] as Array[int]})
+	pieces.append({"node": body, "meshes": [mesh], "post": is_post, "out": Vector3.ZERO, "walls": [] as Array[int]})
 	return pieces.size() - 1
 
 
 # ------------------------------------------------------------ the world's CSG
 
-# The CSG of the scene being played (or the scene this building was saved
-# in) gets the cut material, so that what stands between the camera and an
-# opened building can be left undrawn.
-func _dress_world() -> void:
-	if not is_inside_tree():
-		return
-	var root := get_tree().current_scene
-	if root == null or not root.is_ancestor_of(self):
-		root = owner
-	if root != null:
-		_dress(root)
-
-
-# Gives every plain CSG shape under `root` the cut material in place of its
-# own (one per source material, keeping its colour). Shapes that already
-# have it, and see-through or textured ones, are left as they are.
-static func _dress(root: Node) -> void:
-	for node in root.find_children("*", "CSGPrimitive3D", true, false):
-		var shape := node as CSGPrimitive3D
-		var source: Material = shape.get("material")
-		if source is ShaderMaterial:
-			continue
-		var standard := source as BaseMaterial3D
-		if source != null and (standard == null or standard.transparency != BaseMaterial3D.TRANSPARENCY_DISABLED
-				or standard.albedo_texture != null):
-			continue
-		if not _world_by_source.has(source):
-			var cut := ShaderMaterial.new()
-			cut.shader = CUT_SHADER
-			cut.set_shader_parameter("albedo", standard.albedo_color if standard != null else Color.WHITE)
-			_world_by_source[source] = cut
-			world_materials.append(cut)
-		shape.set("material", _world_by_source[source])
-
-
-func _make_lights() -> void:
-	for i in door_centres.size():
-		var light := OmniLight3D.new()
-		light.name = "DoorLight%d" % i
-		light.omni_range = DOOR_LIGHT_RANGE
-		light.shadow_enabled = false
-		light.position = door_centres[i]
-		light.visible = false
-		add_child(light)
-		_lights.append(light)
-
-
 # ------------------------------------------------------------ asked by the view
 
-# The top of the rooms, in the world: above it is upstairs.
-func ceiling_y() -> float:
-	var top := -INF
+# ------------------------------------------------------------ what belongs to which storey
+#
+# Everything under a storey's node is that storey's: its walls, its floor,
+# its lights, a stair that starts on it. `members` adds what lives elsewhere
+# in the scene (the ground floor's furniture). What is shown, what takes a
+# click and which storey the body is on are all decided by this -- by what a
+# thing belongs to, not by how high it is or which box it falls in.
+
+# The storey a node belongs to, or null (the world outside any building).
+static func storey_of(node: Node) -> BuildingInterior:
+	var at := node
+	while at != null:
+		if at is BuildingInterior:
+			return at as BuildingInterior
+		var claimed: Variant = _member_of.get(at.get_instance_id())
+		if claimed != null and is_instance_valid(claimed):
+			return claimed as BuildingInterior
+		at = at.get_parent()
+	return null
+
+
+# The height of this storey's floor, in the world.
+func floor_level() -> float:
+	var bottom := INF
 	for i in room_centres.size():
-		top = maxf(top, room_centres[i].y + room_halves[i].y)
-	return (global_transform * Vector3(0.0, top, 0.0)).y
+		bottom = minf(bottom, room_centres[i].y - room_halves[i].y)
+	if bottom == INF:
+		bottom = 0.0
+	return (global_transform * Vector3(0.0, bottom, 0.0)).y
 
 
-# Whether a body (its centre and radius, in the world) is in: it goes in once
-# the whole body is in a room -- past the wall the door is in -- and out once
-# the whole body is clear of the walls. In a doorway it is what it was.
-func update_inside(body_at: Vector3, radius: float) -> bool:
+# The storeys of this building (the nodes like this one beside it), lowest first.
+func storeys() -> Array[BuildingInterior]:
+	var out: Array[BuildingInterior] = []
+	for sibling in get_parent().get_children():
+		var storey := sibling as BuildingInterior
+		if storey != null:
+			out.append(storey)
+	out.sort_custom(func(a: BuildingInterior, b: BuildingInterior) -> bool: return a.floor_level() < b.floor_level())
+	return out
+
+
+func lowest_storey() -> BuildingInterior:
+	return storeys()[0]
+
+
+# Whether this storey stands on the world's ground rather than on a floor
+# of its own: the body is on it once it is wholly through the door.
+func is_ground() -> bool:
+	return floor_thickness <= 0.0
+
+
+# Whether a body (its centre, radius and half height, in the world) is in:
+# it goes in once the whole body is in a room -- past the wall the door is
+# in -- and out once the whole body is clear of the walls. In a doorway it is
+# what it was.
+#
+# This is one storey, so the body's feet have to be on it: from LEVEL_BELOW
+# under the rooms' floor to LEVEL_UNDER_TOP short of their top. On a stair
+# the feet leave this storey a step before the top, where the one above
+# (whose floor is this one's top) has already taken them.
+const LEVEL_BELOW := 0.3
+const LEVEL_UNDER_TOP := 0.1
+
+
+func update_inside(body_at: Vector3, radius: float, half_height: float) -> bool:
 	var at := global_transform.affine_inverse() * body_at
+	var feet := at.y - half_height
+	var on_level := false
+	for i in room_centres.size():
+		if feet > room_centres[i].y - room_halves[i].y - LEVEL_BELOW \
+				and feet < room_centres[i].y + room_halves[i].y - LEVEL_UNDER_TOP:
+			on_level = true
+	if not on_level:
+		inside = false
+		return false
 	var probes: Array[Vector3] = [
 		at, at + Vector3(radius, 0.0, 0.0), at - Vector3(radius, 0.0, 0.0),
 		at + Vector3(0.0, 0.0, radius), at - Vector3(0.0, 0.0, radius)]
@@ -558,13 +1125,6 @@ func update_inside(body_at: Vector3, radius: float) -> bool:
 	elif inside and not any_near:
 		inside = false
 	return inside
-
-
-# Which side of the rooms the camera is on, per axis of this node. `to_camera`
-# is the flat world direction from the body to the camera.
-func near_sign(to_camera: Vector3) -> Vector2:
-	var local := global_transform.basis.inverse() * to_camera
-	return Vector2(1.0 if local.x >= 0.0 else -1.0, 1.0 if local.z >= 0.0 else -1.0)
 
 
 # Which pieces are not drawn when the building is opened toward `to_camera`:
@@ -589,49 +1149,202 @@ func hidden_pieces(to_camera: Vector3) -> Array[bool]:
 	return out
 
 
-# The picture at `amount` (0 closed, 1 opened), seen from `to_camera`.
-func show_amount(amount: float, to_camera: Vector3) -> void:
-	var near := near_sign(to_camera)
-	for material in world_materials:
-		fill(material, amount, near)
-		fill_doors(material)
-	var opened := amount >= SWITCH_AT
-	var gone := hidden_pieces(to_camera)
+# ------------------------------------------------------------ doors, from inside
+
+# A light in each doorway and a strip of lit ground outside it: what is seen
+# of the outside from in here. Made as the game starts, from the door boxes.
+const DOOR_STRIP_LIFT := 0.02
+const DOOR_STRIP_COLOR := Color(0.85, 0.83, 0.78)
+
+
+func _make_door_marks() -> void:
+	var fade := Gradient.new()
+	fade.set_color(0, DOOR_STRIP_COLOR)
+	fade.set_color(1, Color.BLACK)
+	var texture := GradientTexture2D.new()
+	texture.gradient = fade
+	texture.fill_from = Vector2(0.5, 0.0)
+	texture.fill_to = Vector2(0.5, 1.0)
+	texture.width = 4
+	texture.height = 64
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_texture = texture
+	for i in door_centres.size():
+		var light := OmniLight3D.new()
+		light.name = "DoorLight%d" % i
+		light.omni_range = DOOR_LIGHT_RANGE
+		light.shadow_enabled = false
+		light.position = door_centres[i]
+		light.visible = false
+		add_child(light)
+		_lights.append(light)
+		# A plane one metre long from the wall's outer face, stretched to the
+		# slider's length when shown. Its v runs outward: bright to black.
+		var strip := MeshInstance3D.new()
+		strip.name = "DoorStrip%d" % i
+		var plane := PlaneMesh.new()
+		plane.size = Vector2(door_halves[i].x * 2.0, 1.0)
+		plane.center_offset = Vector3(0.0, 0.0, 0.5)
+		plane.material = material
+		strip.mesh = plane
+		strip.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var out := door_outs[i]
+		# The plane's +Z is the way out.
+		strip.transform = Transform3D(
+			Basis(Vector3(out.z, 0.0, -out.x), Vector3.UP, out),
+			door_centres[i] + out * (wall_thickness * 0.5) + Vector3(0.0, -door_halves[i].y + DOOR_STRIP_LIFT, 0.0))
+		strip.visible = false
+		add_child(strip)
+		_door_strips.append(strip)
+
+
+# ------------------------------------------------------------ asked by the view
+
+# This storey's part of the picture while the body is in the building.
+# `current`: the body is on this storey -- its camera-side walls are not
+# drawn, its lights are on, and the strips outside its doors show. A storey
+# that is drawn but is not the current one (one under it) is drawn whole and
+# dark.
+func apply_view(current: bool, to_camera: Vector3) -> void:
+	var gone: Array[bool] = hidden_pieces(to_camera) if current else ([] as Array[bool])
+	var floor_y := INF
+	for i in room_centres.size():
+		floor_y = minf(floor_y, room_centres[i].y - room_halves[i].y)
 	for i in pieces.size():
-		for mesh: MeshInstance3D in pieces[i]["meshes"]:
-			mesh.visible = not (opened and gone[i])
-	for path in upstairs:
-		var floor_above := get_node_or_null(path) as Node3D
-		if floor_above != null:
-			floor_above.visible = not opened
-	var energy: float = Tuning.values.interior_door_light * amount
+		_show_piece(pieces[i], current and gone[i], floor_y)
+	if _stair_lamps.is_empty() and not _lamps.is_empty():
+		var ends := _stair_ends()
+		for lamp in _lamps:
+			var near := false
+			for end in ends:
+				if lamp.position.distance_to(end) <= STAIR_LAMP_REACH:
+					near = true
+			_stair_lamps.append(near)
+	for i in _lamps.size():
+		var lamp := _lamps[i]
+		var candle := String(lamp.name).begins_with(CANDLE_PREFIX)
+		# On this storey every light is on. On a storey under the one the
+		# body is on, the ones by its stairs are, dimmer: what shows through
+		# the opening is the stair, lit.
+		lamp.visible = current or _stair_lamps[i]
+		var energy: float = Tuning.values.interior_candle_energy if candle else Tuning.values.interior_torch_energy
+		lamp.light_energy = energy if current else energy * BELOW_LAMP_SHARE
+		lamp.omni_range = Tuning.values.interior_candle_range if candle else Tuning.values.interior_torch_range
 	for light in _lights:
-		light.visible = energy > 0.0
-		light.light_energy = energy
+		light.visible = current and Tuning.values.interior_door_light > 0.0
+		light.light_energy = Tuning.values.interior_door_light
+	for strip in _door_strips:
+		strip.visible = current
+		strip.scale = Vector3(1.0, 1.0, maxf(Tuning.values.interior_door_glimpse, 0.01))
 
 
-# The numbers both shaders read.
-func fill(material: ShaderMaterial, amount: float, near: Vector2) -> void:
-	material.set_shader_parameter("amount", amount)
-	material.set_shader_parameter("to_local", global_transform.affine_inverse())
-	material.set_shader_parameter("room_count", room_centres.size())
-	material.set_shader_parameter("room_centre", _padded(room_centres, MAX_ROOMS))
-	material.set_shader_parameter("room_half", _padded(room_halves, MAX_ROOMS))
-	material.set_shader_parameter("near_sign", near)
-	material.set_shader_parameter("wall", wall_thickness)
+const STAIR_LAMP_REACH := 6.0
+const CUT_FACE := 0.03
+const BELOW_LAMP_SHARE := 0.6
+# Per lamp of _lamps: whether it stands by one of this storey's stairs.
+var _stair_lamps: Array[bool] = []
 
 
-func fill_doors(material: ShaderMaterial) -> void:
-	material.set_shader_parameter("door_count", door_centres.size())
-	material.set_shader_parameter("door_centre", _padded(door_centres, MAX_DOORS))
-	material.set_shader_parameter("door_out", _padded(door_outs, MAX_DOORS))
-	var halves := door_halves.duplicate()
-	halves.resize(MAX_DOORS)
-	material.set_shader_parameter("door_half", halves)
-	material.set_shader_parameter("glimpse", Tuning.values.interior_door_glimpse)
+# One piece, drawn whole or cut down. A piece that stands on the floor is
+# left `stub_height` high; one that does not (the piece over a door) goes.
+func _show_piece(piece: Dictionary, cut: bool, floor_y: float) -> void:
+	var meshes: Array = piece["meshes"]
+	var rest: Array = piece["rest"]
+	var box: AABB = piece["box"]
+	var stub := cut and stub_height > 0.0 and box.position.y <= floor_y + 0.05 and box.size.y > stub_height
+	# The cut face: a dark lid on what is left standing, so a wall that has
+	# been cut down does not read as a low wall. Made the first time.
+	var lid := piece.get("lid") as MeshInstance3D
+	if stub and lid == null:
+		lid = MeshInstance3D.new()
+		lid.name = "CutFace"
+		var face := BoxMesh.new()
+		face.size = Vector3(box.size.x + 0.01, CUT_FACE, box.size.z + 0.01)
+		face.material = _flat_material(cut_color)
+		lid.mesh = face
+		lid.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		lid.position = Vector3(0.0, -box.size.y * 0.5 + stub_height + CUT_FACE * 0.5, 0.0)
+		(piece["node"] as Node3D).add_child(lid)
+		piece["lid"] = lid
+	if lid != null:
+		lid.visible = stub
+	for i in meshes.size():
+		var mesh := meshes[i] as MeshInstance3D
+		var stands: Transform3D = rest[i]
+		if stub and i == 0:
+			var share := stub_height / box.size.y
+			mesh.transform = Transform3D(
+				stands.basis.scaled(Vector3(1.0, share, 1.0)),
+				stands.origin + Vector3(0.0, -(box.size.y - stub_height) * 0.5, 0.0))
+			mesh.visible = true
+		else:
+			mesh.transform = stands
+			mesh.visible = not cut
 
 
-static func _padded(values: PackedVector3Array, count: int) -> PackedVector3Array:
-	var out := values.duplicate()
-	out.resize(count)
-	return out
+# As it stands when nobody is looking from inside: every wall drawn, the
+# lights and the door strips off.
+func reset_view() -> void:
+	for piece in pieces:
+		_show_piece(piece, false, 0.0)
+	for lamp in _lamps:
+		lamp.visible = false
+	for light in _lights:
+		light.visible = false
+	for strip in _door_strips:
+		strip.visible = false
+	inside = false
+
+
+# update_inside without the memory: whether a body is wholly in right now.
+# For bodies other than the local one.
+func holds(body_at: Vector3, radius: float, half_height: float) -> bool:
+	var at := global_transform.affine_inverse() * body_at
+	var feet := at.y - half_height
+	var on_level := false
+	for i in room_centres.size():
+		if feet > room_centres[i].y - room_halves[i].y - LEVEL_BELOW \
+				and feet < room_centres[i].y + room_halves[i].y - LEVEL_UNDER_TOP:
+			on_level = true
+	if not on_level:
+		return false
+	for offset: Vector3 in [Vector3.ZERO, Vector3(radius, 0.0, 0.0), Vector3(-radius, 0.0, 0.0),
+			Vector3(0.0, 0.0, radius), Vector3(0.0, 0.0, -radius)]:
+		if not _in_a_room(at + offset, 0.0):
+			return false
+	return true
+
+
+# Whether a point of the world's ground is this storey's floor: in one of
+# its rooms, at their floor.
+func over_floor(point: Vector3) -> bool:
+	var at := global_transform.affine_inverse() * point
+	for i in room_centres.size():
+		var q := at - room_centres[i]
+		var h := room_halves[i]
+		if absf(q.x) <= h.x and absf(q.z) <= h.z and absf(q.y + h.y) <= LEVEL_BELOW:
+			return true
+	return false
+
+
+# Whether a point of the world's ground is on the lit strip outside one of
+# this storey's doors (the doorway itself included).
+func on_door_strip(point: Vector3) -> bool:
+	var at := global_transform.affine_inverse() * point
+	for i in door_centres.size():
+		var d := at - door_centres[i]
+		var out := door_outs[i]
+		var along := d.x * out.x + d.z * out.z
+		var across := absf(d.x * -out.z + d.z * out.x)
+		if across <= door_halves[i].x and along > -wall_thickness \
+				and along < Tuning.values.interior_door_glimpse + wall_thickness \
+				and absf(d.y + door_halves[i].y) <= LEVEL_BELOW:
+			return true
+	return false
+
+
+# Whether a collider is this storey's floor.
+func is_floor(collider: Node) -> bool:
+	var floor_piece := get_node_or_null("floor")
+	return floor_piece != null and (collider == floor_piece or floor_piece.is_ancestor_of(collider))

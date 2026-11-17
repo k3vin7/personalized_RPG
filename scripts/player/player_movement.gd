@@ -1652,6 +1652,7 @@ func _click_to_target() -> void:
 		# 건물 진입 b: the click is for a floor to walk on, and nothing else
 		# takes it. (With climbing on, a wall is something to click: below.)
 		var floor_hit := _click_floor(from, to)
+		_log_click(floor_hit)
 		if not floor_hit.is_empty():
 			order_from_surface(floor_hit.get("collider") as CollisionObject3D,
 				floor_hit["position"] as Vector3, Vector3.UP)
@@ -1675,8 +1676,9 @@ func _click_to_target() -> void:
 # sides and tops of furniture -- and stops at the first one that is:
 #
 #   - it faces up (TOP_SURFACE, the line a move order has always used);
-#   - inside an opened building, it is not above that building's ceiling, so
-#     the floor upstairs lets the click through to the one the body is on;
+#   - inside a building, it is something that is drawn (InteriorView.takes_click):
+#     the storey the body is on, the ones under it, their stairs. The storeys
+#     above and the outside, which are not drawn, let the click through;
 #   - the body can walk to it (the navigation path from the body ends on it).
 #
 # If no surface on the ray can be walked to, the first that faces up (and is
@@ -1690,13 +1692,32 @@ const CLICK_REACH_FLAT := 0.75
 const CLICK_REACH_HEIGHT := 1.0
 
 
+# One line for every click, for telling afterwards what a click that went
+# somewhere odd actually landed on: the thing, the place, where the body
+# was, which way the camera looked, and where the view had the body.
+func _log_click(hit: Dictionary) -> void:
+	var landed := "nothing"
+	var at := Vector3.INF
+	if not hit.is_empty():
+		var collider := hit.get("collider") as Node
+		landed = "%s/%s" % [collider.get_parent().name, collider.name] if collider != null else "?"
+		at = hit["position"] as Vector3
+	var view := player.interior_view
+	var place := "outside"
+	if view != null and is_instance_valid(view.storey):
+		place = String(view.storey.name)
+		if view.zone != null:
+			place += " (%s%s)" % [view.zone.name, ", landing" if view.on_landing else ""]
+	var yaw := fposmod(player.camera.yaw_deg, 360.0) if player.camera != null else 0.0
+	print("CLICK landed=%s at=(%.1f, %.1f, %.1f) body=(%.1f, %.1f, %.1f) camera_yaw=%.0f place=%s" % [
+		landed, at.x, at.y, at.z, player.global_position.x, player.global_position.y, player.global_position.z, yaw, place])
+
+
 func _click_floor(from: Vector3, to: Vector3) -> Dictionary:
 	var space := player.get_world_3d().direct_space_state
 	var direction := (to - from).normalized()
-	var ceiling := INF
+	# Inside a building, a click is taken by what is drawn (InteriorView).
 	var view := player.interior_view
-	if view != null and is_instance_valid(view.shown) and view.shown.inside:
-		ceiling = view.shown.ceiling_y()
 	var excluded := OcclusionFader.faded_rids()
 	var start := from
 	var fallback := {}
@@ -1712,7 +1733,7 @@ func _click_floor(from: Vector3, to: Vector3) -> Dictionary:
 			break
 		var point := hit["position"] as Vector3
 		var normal := hit.get("normal", Vector3.ZERO) as Vector3
-		if normal.dot(Vector3.UP) >= TOP_SURFACE and point.y <= ceiling - 0.05:
+		if normal.dot(Vector3.UP) >= TOP_SURFACE and (view == null or view.takes_click(hit.get("collider") as Node, point)):
 			if _click_reachable(point):
 				return hit
 			if fallback.is_empty():
