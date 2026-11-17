@@ -35,12 +35,12 @@ const SAME_PLACE := 0.15
 # name -> [where the feet are in the pub, the storey a screen should say, on
 # a landing, how high (for "is the other drawn": -1 cellar, 0 outside)]
 const PLACES := {
-	"cellar": [Vector3(13.0, -3.0, 11.0), "storey_b1", false, -1],
-	"ground": [Vector3(12.0, 0.5, 20.0), "storey_1", false, 1],
-	"ground_b": [Vector3(12.0, 0.5, 17.5), "storey_1", false, 1],
-	"second": [Vector3(14.0, 3.5, 20.0), "storey_2", false, 2],
-	"landing": [Vector3(4.0, 3.5, 28.0), "storey_2", true, 2],
-	"third": [Vector3(14.0, 6.5, 20.0), "storey_3", false, 3],
+	"cellar": [Vector3(13.0, -3.0, 20.0), "storey_b1", false, -1],
+	"ground": [Vector3(14.5, 0.5, 11.5), "storey_1", false, 1],
+	"ground_b": [Vector3(10.6, 0.5, 18.5), "storey_1", false, 1],
+	"second": [Vector3(14.0, 3.5, 12.0), "storey_2", false, 2],
+	"landing": [Vector3(4.0, 3.5, 24.7), "storey_2", true, 2],
+	"third": [Vector3(14.0, 6.5, 24.0), "storey_3", false, 3],
 	"outside": [Vector3(4.0, 0.5, 8.0), "", false, 0],
 }
 # [host's place, client's place]
@@ -170,13 +170,10 @@ func run(world: Node3D) -> void:
 static func _should_see(viewer: String, other: String) -> bool:
 	var mine: int = PLACES[viewer][3]
 	var theirs: int = PLACES[other][3]
+	# From outside, everybody; from inside, whoever is on the same storey.
 	if mine == 0:
 		return true
-	if theirs == 0:
-		return false
-	if mine == -1 or theirs == -1:
-		return mine == theirs
-	return theirs <= mine
+	return theirs == mine
 
 
 func _pairing(host_place: String, client_place: String) -> void:

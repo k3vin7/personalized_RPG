@@ -11,10 +11,9 @@ extends Node
 #                        that what is under its feet belongs to; on the
 #                        world's own ground, a ground storey once the body is
 #                        wholly through its door.
-#   what is drawn        of that building: the storey the body is on and the
-#                        ones under it, the stairs that start on a drawn
-#                        storey, the lit strip outside each door of the storey
-#                        the body is on. Not drawn: the storeys above, the
+#   what is drawn        of that building: the storey the body is on, the
+#                        stairs that touch it, and the lit strip outside each
+#                        of its doors. Not drawn: every other storey, the
 #                        roof, and everything that is not this building.
 #   what takes a click   what is drawn.
 #
@@ -190,30 +189,20 @@ func _building() -> Node:
 	return storey.get_parent() if is_instance_valid(storey) else null
 
 
-# Whether a storey of the building the body is in is drawn: the one the body
-# is on, and the ones under it -- but not a storey under the ground (a
-# cellar) unless the body is on it. From above, the ground hides a cellar;
-# the world's ground is not drawn in here, so without this the cellar's
-# walls would stand in plain sight under the building's edge.
+# Whether a storey of the building the body is in is drawn: only the one
+# the body is on. The storeys above are over its head; the ones below would
+# show as the building's outside under the cut-down walls, which is not what
+# is being looked at. (They were drawn for a while, to be seen down the
+# stairwell; what showed was mostly their outer walls.)
 func is_drawn(other: BuildingInterior) -> bool:
-	if other == null or not is_instance_valid(storey) or other.get_parent() != storey.get_parent():
-		return false
-	if other == storey:
-		return true
-	if other.floor_level() > storey.floor_level() + 0.01:
-		return false
-	for ground in storey.storeys():
-		if ground.is_ground() and other.floor_level() < ground.floor_level() - 0.01:
-			return false
-	return true
+	return other != null and is_instance_valid(storey) and other == storey
 
 
-# A stair is drawn when either storey it joins is: the way down to a cellar
-# shows in its opening although the cellar does not.
-#
-# From a landing, a stair that goes up from that storey and stands over the
-# stair that comes up to the landing is not drawn: it is the stair down that
-# has to be seen from there.
+# A stair is drawn when it touches the storey the body is on -- going up from
+# it or coming up to it -- so the way down shows in its opening although the
+# storey below does not. From a landing, a stair that goes up from that
+# storey and stands over the stair that comes up to the landing is not
+# drawn: it is the stair down that has to be seen from there.
 func stair_drawn(stair: BuildingStair) -> bool:
 	if stair == zone:
 		return true
