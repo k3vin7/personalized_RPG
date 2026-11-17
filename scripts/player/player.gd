@@ -536,12 +536,17 @@ func default_snap_length() -> float:
 # weight, gear and race are not in it. One copy: the movement drives with it
 # and the server's move check allows it.
 func get_mount_speed() -> float:
+	return human_walk_speed() * Tuning.server.mount_speed_mult
+
+
+# The walk of a bare level-1 human, whoever asks: the yardstick the horse and
+# the wolf state their speeds against. The one copy of this arithmetic.
+static func human_walk_speed() -> float:
 	var human := Races.data_for(Races.Kind.HUMAN)
 	var ratio := human.strength / maxf(human.body_weight, 0.01)
 	var judge := ServerAuthority.instance
 	var race_mult := judge.race_move_mult(Races.Kind.HUMAN) if judge != null else 1.0
-	return Tuning.server.base_move_speed * Tuning.ratio_mult(ratio, Tuning.server.ratio_k_speed) \
-		* race_mult * Tuning.server.mount_speed_mult
+	return Tuning.server.base_move_speed * Tuning.ratio_mult(ratio, Tuning.server.ratio_k_speed) * race_mult
 
 
 # Standing on the ground, whatever the hands are doing. GRABBING belongs here:

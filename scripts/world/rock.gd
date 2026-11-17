@@ -90,7 +90,7 @@ func _ready() -> void:
 	body_entered.connect(_on_body_entered)
 	_sync_position = global_position
 
-	var radius := radius_for(weight)
+	var radius := body_radius()
 	var collision := CollisionShape3D.new()
 	var shape := SphereShape3D.new()
 	shape.radius = radius
@@ -129,6 +129,13 @@ func _apply_gravity() -> void:
 
 static func radius_for(rock_weight: float) -> float:
 	return 0.3 + rock_weight * 0.012
+
+
+# This body's own radius: the collider, and what a put-down clears. A rock's
+# comes off its weight; a body that is a rock in every other rule and has a
+# shape of its own (a carcass) answers with that.
+func body_radius() -> float:
+	return radius_for(weight)
 
 
 # C-1c: the picture. A rock is a grey sphere; a thrown shield (Shield, which

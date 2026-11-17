@@ -1,5 +1,7 @@
 [gd_scene format=3 uid="uid://cemwtjqhyac1d"]
 
+[ext_resource type="PackedScene" path="res://scenes/wolf.tscn" id="wolf_scene"]
+
 [sub_resource type="StandardMaterial3D" id="mat_cattle"]
 albedo_color = Color(1, 0.9, 0.2, 1)
 
@@ -419,73 +421,217 @@ material = SubResource("mat_bird")
 
 [node name="sheep_1" type="CSGCylinder3D" parent="state_normal" unique_id=1725702880]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 39, 1.1, -2)
-radius = 3.0
+radius = 0.75
 height = 1.2
 material = SubResource("mat_sheep")
 
 [node name="sheep_2" type="CSGCylinder3D" parent="state_normal" unique_id=1035745865]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 44, 1.1, -26)
-radius = 3.0
+radius = 0.75
 height = 1.2
 material = SubResource("mat_sheep")
 
 [node name="sheep_3" type="CSGCylinder3D" parent="state_normal" unique_id=862330627]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 65, 1.1, 38)
-radius = 3.0
+radius = 0.75
 height = 1.2
 material = SubResource("mat_sheep")
 
 [node name="sheep_4" type="CSGCylinder3D" parent="state_normal" unique_id=1531622191]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 70, 1.1, 6)
-radius = 3.0
+radius = 0.75
 height = 1.2
 material = SubResource("mat_sheep")
 
 [node name="sheep_5" type="CSGCylinder3D" parent="state_normal" unique_id=1530682619]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 86, 1.1, -41)
-radius = 3.0
+radius = 0.75
 height = 1.2
 material = SubResource("mat_sheep")
 
 [node name="sheep_6" type="CSGCylinder3D" parent="state_normal" unique_id=1009877015]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 95, 1.1, 44)
-radius = 3.0
+radius = 0.75
 height = 1.2
 material = SubResource("mat_sheep")
 
 [node name="sheep_7" type="CSGCylinder3D" parent="state_normal" unique_id=1065371277]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 100, 1.1, -9)
-radius = 3.0
+radius = 0.75
 height = 1.2
 material = SubResource("mat_sheep")
 
 [node name="sheep_8" type="CSGCylinder3D" parent="state_normal" unique_id=1691463004]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 121, 1.1, 61)
-radius = 3.0
+radius = 0.75
 height = 1.2
 material = SubResource("mat_sheep")
 
 [node name="sheep_9" type="CSGCylinder3D" parent="state_normal" unique_id=106417374]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 134, 1.1, 35)
-radius = 3.0
+radius = 0.75
 height = 1.2
 material = SubResource("mat_sheep")
 
 [node name="sheep_10" type="CSGCylinder3D" parent="state_normal" unique_id=602962031]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 132, 1.1, 0)
-radius = 3.0
+radius = 0.75
 height = 1.2
 material = SubResource("mat_sheep")
 
 [node name="sheep_11" type="CSGCylinder3D" parent="state_normal" unique_id=1881639520]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 134, 1.1, -29)
-radius = 3.0
+radius = 0.75
 height = 1.2
 material = SubResource("mat_sheep")
 
 [node name="sheep_12" type="CSGCylinder3D" parent="state_normal" unique_id=705028267]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 123.5, 1.1, -52.5)
-radius = 3.0
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_13" type="CSGCylinder3D" parent="state_normal" unique_id=1342254907]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 1.1, -4)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_14" type="CSGCylinder3D" parent="state_normal" unique_id=1058518684]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 47, 1.1, -28)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_15" type="CSGCylinder3D" parent="state_normal" unique_id=197913371]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 68, 1.1, 36)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_16" type="CSGCylinder3D" parent="state_normal" unique_id=1746044641]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 73, 1.1, 4)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_17" type="CSGCylinder3D" parent="state_normal" unique_id=415867694]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 89, 1.1, -43)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_18" type="CSGCylinder3D" parent="state_normal" unique_id=1989682043]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 98, 1.1, 42)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_19" type="CSGCylinder3D" parent="state_normal" unique_id=1328520481]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 103, 1.1, -11)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_20" type="CSGCylinder3D" parent="state_normal" unique_id=1919384873]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 124, 1.1, 59)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_21" type="CSGCylinder3D" parent="state_normal" unique_id=1160736703]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 137, 1.1, 33)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_22" type="CSGCylinder3D" parent="state_normal" unique_id=1083446769]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 135, 1.1, -2)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_23" type="CSGCylinder3D" parent="state_normal" unique_id=1544112102]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 137, 1.1, -31)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_24" type="CSGCylinder3D" parent="state_normal" unique_id=1159649465]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 126.5, 1.1, -54.5)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_25" type="CSGCylinder3D" parent="state_normal" unique_id=540443878]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 42, 1.1, -1)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_26" type="CSGCylinder3D" parent="state_normal" unique_id=1914079903]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 47, 1.1, -25)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_27" type="CSGCylinder3D" parent="state_normal" unique_id=1788091794]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 68, 1.1, 39)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_28" type="CSGCylinder3D" parent="state_normal" unique_id=1474971288]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 73, 1.1, 7)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_29" type="CSGCylinder3D" parent="state_normal" unique_id=712373918]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 89, 1.1, -40)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_30" type="CSGCylinder3D" parent="state_normal" unique_id=511556538]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 98, 1.1, 45)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_31" type="CSGCylinder3D" parent="state_normal" unique_id=424846229]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 103, 1.1, -8)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_32" type="CSGCylinder3D" parent="state_normal" unique_id=2038293602]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 124, 1.1, 62)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_33" type="CSGCylinder3D" parent="state_normal" unique_id=1729210640]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 137, 1.1, 36)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_34" type="CSGCylinder3D" parent="state_normal" unique_id=1401159551]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 135, 1.1, 1)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_35" type="CSGCylinder3D" parent="state_normal" unique_id=1200776914]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 137, 1.1, -28)
+radius = 0.75
+height = 1.2
+material = SubResource("mat_sheep")
+
+[node name="sheep_36" type="CSGCylinder3D" parent="state_normal" unique_id=1632527838]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 126.5, 1.1, -51.5)
+radius = 0.75
 height = 1.2
 material = SubResource("mat_sheep")
 
@@ -812,7 +958,10 @@ radius = 0.4
 height = 1.8
 material = SubResource("mat_hunter")
 
+[node name="wolf_a" parent="." unique_id=1788509842 instance=ExtResource("wolf_scene")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 96, 0.9, 44)
+
 [node name="dungeon_4" type="CSGBox3D" parent="." unique_id=669886483]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24, 2.5, 22)
+transform = Transform3D(0.8660254, 0, -0.5, 0, 1, 0, 0.5, 0, 0.8660254, -22.4, 2.5, 16.4)
 size = Vector3(3, 4, 0.3)
 material = SubResource("mat_dungeon")

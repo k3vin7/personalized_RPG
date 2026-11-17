@@ -12,6 +12,8 @@ const PATHS := {
 	"kick": "res://data/skills/kick.tres",
 	# M-7: the scarecrow's one attack, a stand-in for a boss swing.
 	"dummy_slam": "res://data/skills/dummy_slam.tres",
+	# 늑대 a: the wolf's bite. Never in a player's slot.
+	"wolf_bite": "res://data/skills/wolf_bite.tres",
 	# C-1b: the sword's four. Which weapon holds them is the WeaponDef's
 	# (skill_ids), not a list here.
 	"thrust": "res://data/skills/thrust.tres",

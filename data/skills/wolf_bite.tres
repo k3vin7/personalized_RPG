@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="SkillDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/skill_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "wolf_bite"
+label = "물기"
+intent = -1
+outcome = 0
+usable_while_holding = false
+tuning_prefix = "wolf_bite"
+knock_power = 0.0
+strike_height = 0.3
+colour = Color(1.0, 0.35, 0.3, 1)
+range_shape = 2
+telegraph = true
+weapon_id = "bare"

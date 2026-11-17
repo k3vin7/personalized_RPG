@@ -117,6 +117,46 @@ func race_label() -> String:
 	return Races.label_for(race_kind) if has_race() else "허수아비"
 
 
+# The body's size as the judge reads it (the strike bands, the rectangles, the
+# spot it is released to). A scarecrow's is its capsule; a body built on this
+# one (the wolf) answers with its own.
+func body_radius() -> float:
+	return RADIUS
+
+
+func body_half_height() -> float:
+	return HALF_HEIGHT
+
+
+# The attack this body telegraphs and books with the judge.
+func attack_def() -> SkillDef:
+	return Skills.get_def("dummy_slam")
+
+
+func base_colour() -> Color:
+	return Color("c9b48a")
+
+
+# The collider and the picture. Every peer builds the same one.
+func _build_body() -> void:
+	var collision := CollisionShape3D.new()
+	var shape := CapsuleShape3D.new()
+	shape.radius = RADIUS
+	shape.height = HALF_HEIGHT * 2.0
+	collision.shape = shape
+	add_child(collision)
+
+	var mesh_instance := MeshInstance3D.new()
+	var capsule := CapsuleMesh.new()
+	capsule.radius = RADIUS
+	capsule.height = HALF_HEIGHT * 2.0
+	mesh_instance.mesh = capsule
+	_material = StandardMaterial3D.new()
+	_material.albedo_color = base_colour()
+	mesh_instance.material_override = _material
+	add_child(mesh_instance)
+
+
 func _enter_tree() -> void:
 	# The host owns it. Every peer builds the same dummy in the same place, so
 	# only its state has to travel.
@@ -138,25 +178,10 @@ func _ready() -> void:
 	# scarecrow and two scarecrows could stand in the same spot.
 	collision_mask = Layers.SOLID_DUMMY
 
-	var collision := CollisionShape3D.new()
-	var shape := CapsuleShape3D.new()
-	shape.radius = RADIUS
-	shape.height = HALF_HEIGHT * 2.0
-	collision.shape = shape
-	add_child(collision)
-
-	var mesh_instance := MeshInstance3D.new()
-	var capsule := CapsuleMesh.new()
-	capsule.radius = RADIUS
-	capsule.height = HALF_HEIGHT * 2.0
-	mesh_instance.mesh = capsule
-	_material = StandardMaterial3D.new()
-	_material.albedo_color = Color("c9b48a")
-	mesh_instance.material_override = _material
-	add_child(mesh_instance)
+	_build_body()
 
 	_label = Label3D.new()
-	_label.position = Vector3(0.0, 1.5, 0.0)
+	_label.position = Vector3(0.0, body_half_height() + 0.6, 0.0)
 	_label.font_size = 28
 	_label.outline_size = 6
 	_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -275,7 +300,7 @@ func _physics_process(delta: float) -> void:
 			if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 				_state_left = SyncRules.STATE_INTERVAL
 				Net.note_send("dummy.push_state %s" % name)
-				push_state.rpc(global_position, hp, "", hit_ids, hit_damages)
+				push_state.rpc(global_position, hp, "", hit_ids, hit_damages, rotation.y)
 			return
 	if not is_multiplayer_authority():
 		# Shown, not simulated.
@@ -305,7 +330,7 @@ func _physics_process(delta: float) -> void:
 		if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 			_state_left = SyncRules.STATE_INTERVAL
 			Net.note_send("dummy.push_state %s" % name)
-			push_state.rpc(global_position, hp, attack_phase, hit_ids, hit_damages)
+			push_state.rpc(global_position, hp, attack_phase, hit_ids, hit_damages, rotation.y)
 		return
 
 	if global_position.y < Tuning.server.kill_plane_y:
@@ -334,18 +359,7 @@ func _physics_process(delta: float) -> void:
 		velocity.x = move_toward(velocity.x, 0.0, 12.0 * delta)
 		velocity.z = move_toward(velocity.z, 0.0, 12.0 * delta)
 
-	_settle_left = maxf(0.0, _settle_left - delta)
-	if _settle_left == 0.0 and is_on_floor():
-		# Back to its mark, so the next push starts where the last one did.
-		var to_home := home - global_position
-		to_home.y = 0.0
-		if to_home.length() > 0.2:
-			velocity.x = to_home.normalized().x * RETURN_SPEED
-			velocity.z = to_home.normalized().z * RETURN_SPEED
-		elif hp < max_hp():
-			hp = max_hp()
-			_refresh()
-
+	_think(delta)
 	move_and_slide()
 	_attack_step(delta)
 	sync_position = global_position
@@ -354,7 +368,23 @@ func _physics_process(delta: float) -> void:
 	if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 		_state_left = SyncRules.STATE_INTERVAL
 		Net.note_send("dummy.push_state %s" % name)
-		push_state.rpc(global_position, hp, attack_phase, hit_ids, hit_damages)
+		push_state.rpc(global_position, hp, attack_phase, hit_ids, hit_damages, rotation.y)
+
+
+# What the body does with its own legs, on the server, each step before it
+# moves. A scarecrow walks back to its mark once it has been left alone, so
+# the next push starts where the last one did, and refills there.
+func _think(delta: float) -> void:
+	_settle_left = maxf(0.0, _settle_left - delta)
+	if _settle_left == 0.0 and is_on_floor():
+		var to_home := home - global_position
+		to_home.y = 0.0
+		if to_home.length() > 0.2:
+			velocity.x = to_home.normalized().x * RETURN_SPEED
+			velocity.z = to_home.normalized().z * RETURN_SPEED
+		elif hp < max_hp():
+			hp = max_hp()
+			_refresh()
 
 
 # M-7: the pattern, on the server. Nothing while held, dead-still or switched
@@ -435,14 +465,14 @@ func _process(delta: float) -> void:
 func _draw_telegraph() -> void:
 	if _telegraph_outline == null or _telegraph_fill == null:
 		return
-	var def := Skills.get_def("dummy_slam")
+	var def := attack_def()
 	if attack_phase != "windup" or def == null or not def.telegraph:
 		_telegraph_outline.visible = false
 		_telegraph_fill.visible = false
 		return
 	var elapsed := float(Time.get_ticks_msec()) / 1000.0 - _telegraph_started
 	_telegraph_fill_value = clampf(elapsed / maxf(def.impact_time(), 0.001), 0.0, 1.0)
-	var at := Vector3(global_position.x, global_position.y - HALF_HEIGHT + 0.04, global_position.z)
+	var at := Vector3(global_position.x, global_position.y - body_half_height() + 0.04, global_position.z)
 	var yaw := RangeShapes.yaw_for(attack_direction())
 	RangeShapes.write(_telegraph_outline.mesh as ImmediateMesh, def, 1.0)
 	_telegraph_outline.global_position = at
@@ -484,8 +514,11 @@ func attack_direction() -> Vector3:
 
 
 @rpc("authority", "call_remote", "unreliable_ordered")
-func push_state(at_position: Vector3, at_hp: float, at_phase := "", ids := PackedInt32Array(), damages := PackedFloat32Array()) -> void:
+func push_state(at_position: Vector3, at_hp: float, at_phase := "", ids := PackedInt32Array(), damages := PackedFloat32Array(), at_yaw := 0.0) -> void:
 	sync_position = at_position
+	# The heading: a telegraph is drawn along it, so it has to be the server's
+	# before the phase below starts one.
+	rotation.y = at_yaw
 	# C-1a: a hit id this replica has not drawn is a hit seen from this
 	# screen, with the amount the server dealt. The first packet's are history.
 	for index in ids.size():
@@ -539,7 +572,7 @@ func _refresh() -> void:
 		if attack_phase == "windup":
 			_label.text += "\n!"
 	if _material != null:
-		var colour := Color("c9b48a").lerp(Color("ff7b6b"), 1.0 - hp / max_hp())
+		var colour := base_colour().lerp(Color("ff7b6b"), 1.0 - hp / maxf(max_hp(), 0.01))
 		match attack_phase:
 			"windup":
 				colour = Color("ff4d3d")

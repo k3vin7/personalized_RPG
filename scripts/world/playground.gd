@@ -81,6 +81,12 @@ func _ready() -> void:
 		race_x += 2.0
 	_sign("종족 허수아비 (종족 무게·근력)", Regions.ARENA + Vector3(6.5, 2.6, 13.5), Color("ffe9b0"))
 	_sign("결투장", Regions.ARENA + Vector3(0.0, 4.0, 8.0), Color("ffd6a0"))
+	# WF: one wolf on the arena, for its own check only. Built on every peer
+	# from the same scene, like a scarecrow; only its state travels.
+	if Net.auto_only == "WF":
+		var wolf := (load("res://scenes/wolf.tscn") as PackedScene).instantiate() as Wolf
+		wolf.setup(Regions.ARENA + Vector3(-12.0, Wolf.BODY_RADIUS + 0.05, 8.0), "Wolf_0")
+		add_child(wolf)
 	_sign("결투장 →", Vector3(18.0, 2.2, 2.0), Color("ffd6a0"))
 	_sign("← 장애물 지형", Vector3(-18.0, 2.2, 14.0), Color("d9f3ff"))
 
@@ -239,6 +245,12 @@ func _run_smoke() -> void:
 		# Lives through the host-disconnect scene change to verify cleanup.
 		get_tree().root.add_child(checks)
 		checks.run(self)
+		return
+	if Net.auto_only == "WF":
+		var wf := preload("res://scripts/tests/wf_checks.gd").new()
+		wf.name = "WfChecks"
+		get_tree().root.add_child(wf)
+		wf.run(self)
 		return
 	if Net.auto_only == "ST":
 		var st := preload("res://scripts/tests/st_checks.gd").new()

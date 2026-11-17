@@ -1025,3 +1025,86 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			mount_large_scale = value
+
+@export_group("Wolf")
+# 늑대 a: one wolf. Every number is temporary (the work order's table) and
+# the server's. Metres from the wolf at which it notices a living player.
+@export var wolf_aggro_range: float = 12.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_aggro_range = value
+# Metres from where it started at which it gives up and walks back.
+@export var wolf_leash_range: float = 25.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_leash_range = value
+# Metres to the target at which it stops and winds up the bite.
+@export var wolf_bite_start_range: float = 3.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_bite_start_range = value
+# The bite (data/skills/wolf_bite.tres, tuning_prefix wolf_bite): _range is
+# how far it leaps, and with _width the path the telegraph shows and the
+# judge rules; _damage is the HP itself (bare, coefficient x 1).
+@export var wolf_bite_range: float = 3.5:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_bite_range = value
+@export var wolf_bite_width: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_bite_width = value
+@export var wolf_bite_windup: float = 0.5:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_bite_windup = value
+@export var wolf_bite_recovery: float = 0.8:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_bite_recovery = value
+@export var wolf_bite_damage: float = 8.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_bite_damage = value
+# Seconds the leap itself takes (the path's length over this is its speed).
+@export var wolf_lunge_time: float = 0.2:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_lunge_time = value
+# Its run, times the walk of a bare level-1 human; its stroll while idle.
+@export var wolf_run_speed_mult: float = 1.2:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_run_speed_mult = value
+@export var wolf_walk_speed_mult: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_walk_speed_mult = value
+# Idle: how far from its mark it strolls, and how long it stands between.
+@export var wolf_wander_radius: float = 3.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_wander_radius = value
+@export var wolf_wander_pause: float = 2.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_wander_pause = value
+# The body: what a push divides by and the lift limit weighs; the strength
+# that buys its knockback tolerance (x tolerance_per_strength); its HP.
+@export var wolf_weight: float = 40.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_weight = value
+@export var wolf_strength: float = 45.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_strength = value
+@export var wolf_max_hp: float = 35.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_max_hp = value
+# Seconds a carcass lies before it is gone.
+@export var wolf_corpse_time: float = 30.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_corpse_time = value

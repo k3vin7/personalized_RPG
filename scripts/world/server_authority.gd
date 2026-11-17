@@ -246,7 +246,7 @@ func strike_band(body: Node3D) -> float:
 	if body is Player:
 		return (body as Player).half_height() + STRIKE_REACH_BEYOND
 	if body is Dummy:
-		return Dummy.HALF_HEIGHT + STRIKE_REACH_BEYOND
+		return (body as Dummy).body_half_height() + STRIKE_REACH_BEYOND
 	return Player.BODY_HALF_HEIGHT + STRIKE_REACH_BEYOND
 
 
@@ -259,7 +259,7 @@ func body_radius(body: Node3D) -> float:
 			return rider.mount.capsule_dims().x
 		return rider.radius()
 	if body is Dummy:
-		return Dummy.RADIUS
+		return (body as Dummy).body_radius()
 	return Player.BODY_RADIUS
 
 
@@ -1256,7 +1256,7 @@ func _rule_drop(actor: Player) -> Variant:
 # Four spots around the holder are tried and the first free one taken; if none
 # is free the rock falls from the hand as before.
 func _put_down_rock(holder: Player, rock: Rock) -> void:
-	var radius := Rock.radius_for(rock.weight)
+	var radius := rock.body_radius()
 	var reach := holder.radius() + radius + 0.1
 	var ground_y := holder.global_position.y - holder.half_height() + radius
 	var forward := -holder.global_transform.basis.z
@@ -2926,6 +2926,30 @@ func pending_strike(actor: Node3D) -> Dictionary:
 	return _pending_strikes.get(actor, {})
 
 
+# A booked strike its own caster can no longer make (thrown off its feet,
+# killed). The caster says so; the booking is the judge's to drop.
+func cancel_strike(actor: Node3D, why: String) -> void:
+	if not _pending_strikes.has(actor):
+		return
+	var def: SkillDef = (_pending_strikes[actor] as Dictionary)["def"]
+	_pending_strikes.erase(actor)
+	strikes_cancelled += 1
+	print("PLAYGROUND_STRIKE_CANCELLED by=%s skill=%s why=%s" % [actor.name, def.id, why])
+
+
+# A held body that is no longer a body to hold (it died in the hand): the
+# table lets go of it, the one way a hold ends.
+func drop_hold_of(target: Node3D, reason: String) -> void:
+	var holder_peer := holder_of(target)
+	if holder_peer == 0:
+		for peer: int in _holds:
+			if get_node_or_null((_holds[peer] as Dictionary)["target"] as NodePath) == target:
+				holder_peer = peer
+				break
+	if holder_peer != 0:
+		_end_hold(holder_peer, reason)
+
+
 # Every step: strikes whose caster was stunned, knocked down, grabbed or killed
 # in the windup are cancelled; the rest land when their time comes.
 func _run_pending_strikes() -> void:
@@ -3326,7 +3350,7 @@ func body_half_height(body: Node3D) -> float:
 	if body is Player:
 		return (body as Player).half_height()
 	if body is Dummy:
-		return Dummy.HALF_HEIGHT
+		return (body as Dummy).body_half_height()
 	return Player.BODY_HALF_HEIGHT
 
 
@@ -3573,9 +3597,9 @@ func _release_dummy(holder: Player, dummy: Dummy, away_hint: Vector3, thrown: bo
 	if away.length_squared() < 0.0001:
 		away = Vector3.FORWARD
 	away = away.normalized()
-	var apart := (holder.radius() + Dummy.RADIUS) * 1.1
+	var apart := (holder.radius() + dummy.body_radius()) * 1.1
 	var y := holder.hand_position().y if thrown \
-		else holder.global_position.y - holder.half_height() + Dummy.HALF_HEIGHT
+		else holder.global_position.y - holder.half_height() + dummy.body_half_height()
 	var at := Vector3(holder.global_position.x + away.x * apart, y,
 		holder.global_position.z + away.z * apart)
 	dummy.release_to(at)
