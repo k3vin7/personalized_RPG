@@ -250,6 +250,11 @@ func take_damage(amount: float, hit_id: int) -> void:
 	if not is_multiplayer_authority() or amount <= 0.0:
 		return
 	hp = maxf(0.0, hp - amount)
+	# Damage is being touched: the refill on the mark waits RETURN_DELAY from
+	# here. The push that comes with a blow can land a step later (a shove's
+	# does), and until this line a scarecrow standing on its mark refilled in
+	# that step -- the blow cost it nothing.
+	_settle_left = RETURN_DELAY
 	hit_ids.append(hit_id)
 	hit_damages.append(amount)
 	while hit_ids.size() > HIT_RING:

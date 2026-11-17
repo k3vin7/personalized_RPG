@@ -502,6 +502,21 @@ func client_grab_and_leap(rock_path: NodePath) -> void:
 		_local.floor_snap_length = 0.0
 		_local.change_state(Player.State.AIRBORNE))
 	stage_done.rpc_id(1, "leapt")
+	# Kept in the air for longer than the server's two windows together
+	# (HOLD_GRACE, then HOLD_LOST_GRACE): a 2.5 m drop is over in half a
+	# second at this gravity, inside the first window, and the server then
+	# never sees a holder with the ground gone -- the hold stood for good.
+	var hang := ServerAuthority.HOLD_GRACE + ServerAuthority.HOLD_LOST_GRACE + 0.6
+	var at := _local.global_position
+	var hung := 0.0
+	while hung < hang and _local.grab.is_holding():
+		Net.queue_physics(func() -> void:
+			_local.global_position = at
+			_local.velocity = Vector3.ZERO
+			if _local.state != Player.State.AIRBORNE:
+				_local.change_state(Player.State.AIRBORNE))
+		await get_tree().physics_frame
+		hung += get_physics_process_delta_time()
 
 
 @rpc("authority", "call_remote", "reliable")

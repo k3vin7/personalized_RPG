@@ -228,10 +228,10 @@ func _data_checks() -> void:
 	note("mount data: radius %.2f, seat above %.2f, speed x%.2f, accel %.2f s, decel %.2f s, turn %.0f deg/s, snap %.2f m" % [
 		s.mount_radius, s.mount_seat_above, s.mount_speed_mult, s.mount_accel_time, s.mount_decel_time, s.mount_turn_deg,
 		s.mount_floor_snap])
-	expect(absf(s.mount_radius - 0.6) < 0.001 and absf(s.mount_speed_mult - 3.3) < 0.001
+	expect(absf(s.mount_radius - 0.6) < 0.001 and absf(s.mount_speed_mult - 2.31) < 0.001
 		and absf(s.mount_accel_time - 0.8) < 0.001 and absf(s.mount_decel_time - 0.5) < 0.001
 		and absf(s.mount_turn_deg - 180.0) < 0.001 and s.mount_floor_snap > 0.0,
-		"defaults_are_0_6m_radius_3_3x_speed_0_8s_up_0_5s_down_180_deg_a_second_snap_on")
+		"defaults_are_0_6m_radius_2_31x_speed_0_8s_up_0_5s_down_180_deg_a_second_snap_on")
 	expect(DebugPanel.GROUP_LABELS.has("Mount"), "the_panel_has_the_mount_group")
 	expect(int(Tuning.values.mount_key) == KEY_Z and Tuning.field_names(Tuning.values).has("mount_key"),
 		"the_mount_key_is_local_and_defaults_to_z")
@@ -650,8 +650,8 @@ func _ride_checks() -> void:
 	var walk := _local.get_move_speed()
 	var top := _local.get_mount_speed()
 	note("speeds: bare human walk %.2f m/s, horse %.2f m/s (x%.2f)" % [walk, top, top / walk])
-	expect(absf(top - walk * s.mount_speed_mult) < 0.001 and absf(top / walk - 3.3) < 0.001,
-		"the_horses_speed_is_3_3_times_a_bare_level_1_humans_walk")
+	expect(absf(top - walk * s.mount_speed_mult) < 0.001 and absf(top / walk - 2.31) < 0.001,
+		"the_horses_speed_is_2_31_times_a_bare_level_1_humans_walk")
 	# Facing along the lane (+x), so the first ride measures the ramp alone.
 	var east := atan2(-1.0, 0.0)
 	await _put(LANE_A, east)

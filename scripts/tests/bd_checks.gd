@@ -195,9 +195,12 @@ func _damage_and_stun_checks() -> void:
 	# slide check measures.
 	var hp_before := client.hp
 	await tick_request(func() -> void:
-		_judge.send_force(client, ForceSystem.make_event(
-			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.1, 0.0), 12.0, 60.0, 1, false,
-			Tuning.server.shove_damage, Tuning.server.shove_stun_time)))
+		# C-1a: HP is apply_hit's alone (a force carrying damage of its own
+		# is sent on with none), so the blow goes through that door.
+		_judge.apply_hit(_local, client, null, {
+			"kind": ForceSystem.Kind.SHOVE, "direction": Vector3(1.0, 0.1, 0.0), "power": 12.0,
+			"source_strength": 60.0, "raw_damage": Tuning.server.shove_damage,
+			"stun_time": Tuning.server.shove_stun_time}))
 	# Read inside the stun. shove_stun_time is 0.4 s, so half a second later
 	# the body is correctly standing up again and the check measured nothing.
 	await get_tree().create_timer(0.2).timeout
@@ -238,8 +241,9 @@ func _death_checks() -> void:
 
 	# Lethal damage: one death, ruled once, with the flag replicated out.
 	await tick_request(func() -> void:
-		_judge.send_force(client, ForceSystem.make_event(
-			ForceSystem.Kind.SHOVE, Vector3(1.0, 0.1, 0.0), 2.0, 0.0, 1, false, 1000.0, 1.0)))
+		_judge.apply_hit(_local, client, null, {
+			"kind": ForceSystem.Kind.SHOVE, "direction": Vector3(1.0, 0.1, 0.0), "power": 2.0,
+			"source_strength": 0.0, "raw_damage": 1000.0, "stun_time": 1.0}))
 	await get_tree().create_timer(0.6).timeout
 	expect(client.sync_dead and client.hp == 0.0, "server_ruled_the_death")
 	expect(client.state == Player.State.DEAD, "owner_entered_dead_when_told")

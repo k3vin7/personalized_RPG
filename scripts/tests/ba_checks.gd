@@ -130,8 +130,10 @@ func _local_checks() -> void:
 		var judge := ServerAuthority.instance
 		await tick_request(func() -> void:
 			judge.server_set_hp(_local, 1.0)
-			judge.send_force(_local, ForceSystem.make_event(
-				ForceSystem.Kind.DEBUG, Vector3.RIGHT, 1.0, 0.0, 1, false, 2.0, 1.0))
+			# C-1a: HP is apply_hit's alone, so the lethal blow goes through it.
+			judge.apply_hit(_local, _local, null, {
+				"kind": ForceSystem.Kind.DEBUG, "direction": Vector3.RIGHT, "power": 1.0,
+				"source_strength": 0.0, "raw_damage": 2.0, "stun_time": 0.0})
 			_local.change_state(Player.State.STUNNED)
 			expect(_local.state == Player.State.DEAD and _local.hp == 0.0, "lethal_force_stays_dead")
 			judge.send_force(_local, ForceSystem.make_event(
@@ -175,6 +177,7 @@ func _local_checks() -> void:
 		expect(_local.climb.attach(terrain.face, contact, Vector3.BACK), "retained_ledge_climb_attach")
 		_local.climb.set_wall_target(Vector3(contact.x, TimeBoundary.TOP_Y + 0.6, contact.z)))
 	await get_tree().create_timer(5.0).timeout
+	print("BA_NOTE peer=%d mantle: at %s (top %.2f), state %s, dead %s, hp %.0f, climb_enabled %s" % [_peer_id, _local.global_position, TimeBoundary.TOP_Y, Player.State.keys()[_local.state], _local.sync_dead, _local.hp, Tuning.server.climb_enabled])
 	expect(_local.global_position.y > TimeBoundary.TOP_Y + 0.7 and _local.state == Player.State.IDLE, "retained_ledge_mantle")
 	await tick_request(_local.respawn)
 

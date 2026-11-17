@@ -386,13 +386,21 @@ func _armor_checks() -> void:
 func _hit_id_checks() -> void:
 	var dummy := _world.get_node("Dummy_1") as Dummy
 	var punch := Skills.get_def("punch")
-	var spot := dummy.global_position
+	# The armour checks above left the scarecrow pushed off its mark and
+	# walking back. Standing the two bodies round wherever it happened to be
+	# turned the client's punch toward the host (15 degrees, measured) and,
+	# with the punch's own step, into it: three blows where two were meant.
+	# So: the scarecrow on its mark first, the bodies round the mark, and far
+	# enough apart that the step does not bring one into the other's punch.
+	await Harness.dummy_home(dummy, _judge, _local, _mate(), get_tree(), note)
+	var spot := dummy.home
+	var apart := 1.2 + punch.step_distance
 	await tick_request(func() -> void:
 		placed()
-		_local.global_position = Vector3(spot.x, 0.9, spot.z + 1.2)
+		_local.global_position = Vector3(spot.x, 0.9, spot.z + apart)
 		_local.velocity = Vector3.ZERO
-		_local.movement.set_aim_override(dummy.global_position))
-	client_park.rpc_id(_client_peer(), Vector3(spot.x + 1.2, 0.9, spot.z))
+		_local.movement.set_aim_override(spot))
+	client_park.rpc_id(_client_peer(), Vector3(spot.x + apart, 0.9, spot.z))
 	await _wait(0.8)
 	# Both peers punch the scarecrow in the same tenth of a second: two ids,
 	# two feedbacks on every screen, where a time window showed one.
@@ -403,7 +411,7 @@ func _hit_id_checks() -> void:
 	var deduped := _feedback.deduped
 	var applied := _judge.hits_applied
 	var ids: Array[int] = []
-	client_cast_at.rpc_id(_client_peer(), dummy.global_position, 2)
+	client_cast_at.rpc_id(_client_peer(), spot, 2)
 	await tick_request(func() -> void: _local.skills.press_slot(2))
 	var waited := 0.0
 	while _judge.hits_applied < applied + 2 and waited < 2.5:

@@ -174,11 +174,12 @@ func run(world: Node3D) -> void:
 # ------------------------------------------------- 1: the table, as loaded
 
 func _table_checks() -> void:
-	# The '기술 표' rows, read back through the sliders.
+	# The '기술 표' rows, read back through the sliders. (Reach: the table's
+	# 2.2 / 1.8 / 1.8 x 1.3 since 2026-11-18.)
 	var rows := {
-		"thrust": [0.15, 0.30, 0.0, 2.2, 1.0, 3.0, 8.0],
-		"side_cut": [0.20, 0.35, 0.0, 1.8, 1.2, 4.0, 10.0],
-		"overhead_cut": [0.25, 0.40, 0.0, 1.8, 1.4, 3.0, 10.0],
+		"thrust": [0.15, 0.30, 0.0, 2.86, 1.0, 3.0, 8.0],
+		"side_cut": [0.20, 0.35, 0.0, 2.34, 1.2, 4.0, 10.0],
+		"overhead_cut": [0.25, 0.40, 0.0, 2.34, 1.4, 3.0, 10.0],
 		"parry": [0.0, 0.4, 1.0, 1.2, 0.0, 0.0, 6.0],
 	}
 	var all_ok := true
@@ -249,10 +250,13 @@ func _slot_checks() -> void:
 func _range_checks() -> void:
 	var dummy := _dummy()
 	var sword := Weapons.attack_power_for("sword")
-	for row: Array in [["thrust", 0, 2.4, 3.3], ["side_cut", 1, 1.5, 2.6], ["overhead_cut", 2, 1.5, 2.6]]:
+	for row: Array in [["thrust", 0, 2.4], ["side_cut", 1, 1.5], ["overhead_cut", 2, 1.5]]:
 		var id: String = row[0]
 		var slot: int = row[1]
 		var def := Skills.get_def(id)
+		# Out of reach is read off the skill, not written down: past its
+		# reach even after the whole cast step, with the target's own radius.
+		row.append(def.value("reach") + def.step_distance + dummy.body_radius() + 0.1)
 		await _stand_before(dummy, float(row[2]))
 		var hp_before := dummy.hp
 		var strike := await _cast_and_wait(slot)
@@ -499,8 +503,10 @@ func _parry_checks() -> void:
 	var inside := await _slam_and_parry(0.12)
 	note("parry %.3f s before the slam: %s" % [float(inside["pressed_before_impact"]), inside])
 	expect(int(inside["parries"]) == 1 and float(inside["hp_lost"]) < 0.01, "a_parry_inside_the_window_turns_the_slam_and_costs_no_hp")
-	# The motion: the sword stands upright (pitch +90 is the blade pointing up).
-	expect(absf(float(inside["sword_pitch_deg"]) - 90.0) < 5.0, "the_parry_stands_the_sword_upright")
+	# (The sword's pitch and the swing's arc used to be read off the swing
+	# pivot here and in three places below. The floating hands carry the
+	# sword now and the pivot does not turn; HA measures the blade against
+	# the ruling instead, so those five checks are gone.)
 	expect(absf(float(inside["stun"]) - slam.value("recovery")) < 0.12 and absf(float(inside["last"].get("stun", 0.0)) - slam.value("recovery")) < 0.001,
 		"and_holds_the_attacker_for_its_own_recovery_0_5")
 	expect(float(inside["recovery"]) >= 0.0 and float(inside["recovery"]) < parry.value("recovery") - 0.1,
@@ -626,7 +632,7 @@ func _motion_checks() -> void:
 	await _stand_before(dummy, 2.5)
 	var own := await _overhead_motion(dummy.home)
 	note("overhead cut on this screen: %s" % [own])
-	expect(bool(own["cast"]) and _swing_is_wide(own), "the_blade_comes_from_above_the_head_down_past_horizontal_1_3_long_then_its_own_length")
+	expect(bool(own["cast"]), "the_overhead_cut_is_cast_on_this_screen")
 	# The other screen: the client casts at the host from 3 m (past the reach),
 	# this screen reads the replica while the client reads its own.
 	var mate := _mate()
@@ -642,8 +648,7 @@ func _motion_checks() -> void:
 	var replica := await _swing_seen(mate, 3.0)
 	var theirs: Dictionary = _reports.get("motion", {}) if await _wait_report("motion") else {}
 	note("overhead cut by the client: its screen %s | replica here %s" % [theirs, replica])
-	expect(bool(theirs.get("cast", false)) and _swing_is_wide(theirs), "the_clients_own_screen_swings_the_same")
-	expect(_swing_is_wide(replica), "and_this_screen_shows_the_clients_swing_the_same")
+	expect(bool(theirs.get("cast", false)), "the_client_casts_the_overhead_cut_on_its_own_screen")
 	_reports.erase("weapon")
 	client_take_weapon.rpc_id(_client_peer(), WeaponKinds.Kind.NONE)
 	await _wait_report("weapon")
@@ -821,7 +826,6 @@ func _two_peer_checks() -> void:
 		or (_judge.parries == parries and absf((hp_before - mate.hp) - thrust.value("damage") * 10.0) < 0.01),
 		"the_clients_parry_turns_the_hosts_thrust_or_misses_by_the_lag_and_nothing_else")
 	note("the client's parry on this screen: sword pitch max %.1f deg" % mate_pitch)
-	expect(absf(mate_pitch - 90.0) < 5.0, "and_this_screen_shows_the_clients_sword_upright")
 	await _wait(1.0)
 	client_take_weapon.rpc_id(_client_peer(), WeaponKinds.Kind.NONE)
 	await tick_request(func() -> void:
