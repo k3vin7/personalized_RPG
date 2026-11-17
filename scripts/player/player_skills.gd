@@ -541,7 +541,10 @@ func on_parry_result(success: bool) -> void:
 	if success:
 		parries_won += 1
 		if _cast_def != null and _cast_def.id == "parry" and player.state == Player.State.RECOVERING:
+			var parry := _cast_def
 			_finish()
+			# Shown after the cast has ended, on the stamp every screen replays.
+			player.show_skill_phase(parry, "parried")
 	else:
 		parries_lost += 1
 

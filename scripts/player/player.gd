@@ -185,6 +185,10 @@ var _trail_samples: Array[Dictionary] = []
 var _swing_def: SkillDef
 var _swing_t := 0.0
 var _swing_active := false
+# 임시 캐릭터 a: the floating hands, when no model is drawn. A sword skill's
+# swing is the main hand's (and the trail the blade's) while this is set.
+var hands: PlayerHands
+var _hands_swing := false
 var swings_started := 0
 # C-0: hitstop, in render frames: the swing and the trail hold still.
 var _hitstop_frames_left := 0
@@ -200,6 +204,12 @@ var _shown_hp := -1
 const TRAIL_MAX_SAMPLES := 24
 const TRAIL_FADE := 0.18
 const LIMB_BAR_THICKNESS := 0.14
+# The facing arrow on the ground: how far in front of the body's surface its
+# base sits, its size, and how far off the floor it is drawn.
+const FACING_OUT := 0.1
+const FACING_LENGTH := 0.3
+const FACING_HALF_WIDTH := 0.15
+const FACING_LIFT := 0.03
 # M-4: the race the capsule is currently sized for, and the pieces resized.
 var _body_race := -1
 var _body_shape: CapsuleShape3D
@@ -594,7 +604,7 @@ func _apply_body_size() -> void:
 	_body_mesh.radius = r
 	_body_mesh.height = h * 2.0
 	if _facing != null:
-		_facing.position = Vector3(0.0, 0.2 * body_scale(), -(r + 0.18))
+		_facing.position = Vector3(0.0, -h + FACING_LIFT, -(r + FACING_OUT))
 	if visual != null:
 		visual.set_body_scale(body_scale())
 	if _shadow != null:
@@ -957,6 +967,12 @@ func _apply_offhand(kind: int) -> void:
 	_block_shown = false
 	if kind == WeaponKinds.Kind.NONE:
 		return
+	if hands != null:
+		# No model: the stand-in, in the floating off hand.
+		_offhand_node = WeaponKinds.build_mesh(kind)
+		_offhand_node.name = "OffHandProp"
+		hands.off.add_child(_offhand_node)
+		return
 	_offhand_node = CharacterVisual.build_weapon_mesh(kind)
 	_offhand_node.name = "OffHand"
 	if visual == null or not visual.attach_offhand(_offhand_node):
@@ -969,6 +985,8 @@ func show_block(raised: bool) -> void:
 	_block_shown = raised
 	if visual != null:
 		visual.set_block(raised)
+	if hands != null:
+		hands.set_block(raised)
 	if not is_instance_valid(_offhand_node):
 		return
 	_offhand_node.scale = Vector3(1.15, 1.15, 1.15) if raised else Vector3.ONE
@@ -984,6 +1002,13 @@ func _apply_weapon(kind: int) -> void:
 		_weapon_node.queue_free()
 	_weapon_node = null
 	if kind == WeaponKinds.Kind.NONE:
+		return
+	if hands != null:
+		# No model: the stand-in, in the floating main hand. Its -Z is the
+		# blade and the hand's -Z is where the hand points it.
+		_weapon_node = WeaponKinds.build_mesh(kind)
+		_weapon_node.name = "HeldWeapon"
+		hands.main.add_child(_weapon_node)
 		return
 	_weapon_node = CharacterVisual.build_weapon_mesh(kind)
 	_weapon_node.name = "HeldWeapon"
@@ -1204,18 +1229,27 @@ func _build_body() -> void:
 	body.material_override = _material
 	_visual.add_child(body)
 
+	# Which way the body faces: a small flat triangle on the ground in front
+	# of it, pointing along the heading. On the body itself rather than the
+	# Visual container, so it stays flat on the ground when the picture lies
+	# down or sits on a horse.
 	var facing := MeshInstance3D.new()
-	var cone := CylinderMesh.new()
-	cone.top_radius = 0.0
-	cone.bottom_radius = 0.16
-	cone.height = 0.5
-	facing.mesh = cone
-	facing.rotation_degrees.x = 90.0
-	facing.position = Vector3(0.0, 0.2, -0.58)
+	facing.name = "FacingArrow"
+	var arrow := ImmediateMesh.new()
+	arrow.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	arrow.surface_add_vertex(Vector3(-FACING_HALF_WIDTH, 0.0, 0.0))
+	arrow.surface_add_vertex(Vector3(FACING_HALF_WIDTH, 0.0, 0.0))
+	arrow.surface_add_vertex(Vector3(0.0, 0.0, -FACING_LENGTH))
+	arrow.surface_end()
+	facing.mesh = arrow
+	facing.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	facing.position = Vector3(0.0, -BODY_HALF_HEIGHT + FACING_LIFT, -(BODY_RADIUS + FACING_OUT))
 	var facing_material := StandardMaterial3D.new()
-	facing_material.albedo_color = Color.WHITE
+	facing_material.albedo_color = Color.RED
+	facing_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	facing_material.cull_mode = BaseMaterial3D.CULL_DISABLED
 	facing.material_override = facing_material
-	_visual.add_child(facing)
+	add_child(facing)
 	_facing = facing
 
 	# A blob on the ground under the body. top_level, so the parent transform
@@ -1278,6 +1312,13 @@ func _build_body() -> void:
 	if visual.model_loaded():
 		body.visible = false
 		facing.visible = false
+	else:
+		# 임시 캐릭터 a: no model -- the capsule, the mark on its front, and
+		# two floating hands in the body's own colour.
+		hands = PlayerHands.new()
+		hands.name = "Hands"
+		_visual.add_child(hands)
+		hands.setup(self, _material)
 
 	_label = Label3D.new()
 	_label.position = Vector3(0.0, 1.45, 0.0)
@@ -1396,13 +1437,23 @@ func show_skill_phase(def: SkillDef, phase: String) -> void:
 		_skill_lean_deg = 0.0
 		if visual != null:
 			visual.show_phase(null, "")
+		if hands != null:
+			hands.release()
 		_apply_predicted_pose()
+		return
+	if phase == "parried":
+		# The parry turned a blow: the flick. A picture after the cast has
+		# ended, carried on the same stamp as every other phase.
+		if hands != null:
+			hands.flick(def)
 		return
 	if visual != null:
 		visual.show_phase(def, phase)
 	match phase:
 		"windup":
 			_skill_lean_deg = def.windup_lean_deg
+			if hands != null:
+				hands.begin_windup(def)
 		"recovery":
 			_skill_lean_deg = def.recovery_lean_deg
 		"strike":
@@ -1416,6 +1467,11 @@ func show_skill_phase(def: SkillDef, phase: String) -> void:
 func _start_swing(def: SkillDef) -> void:
 	if _swing_pivot == null or def == null:
 		return
+	if hands != null and hands.is_guard(def):
+		# The parry has no swing: the blade is stood across the body.
+		hands.begin_guard(def)
+		return
+	_hands_swing = hands != null and hands.drives(def)
 	_swing_def = def
 	_swing_t = 0.0
 	_swing_active = true
@@ -1424,7 +1480,9 @@ func _start_swing(def: SkillDef) -> void:
 	_swing_pivot.position = Vector3(0.0, def.strike_height * body_scale(), 0.0)
 	# A bare skill shows a limb; a weapon skill turns the weapon in the hand.
 	var bare := def.hands == SkillDef.Hands.BARE or _weapon_node == null
-	if not bare:
+	if _hands_swing:
+		hands.begin_strike(def)
+	elif not bare:
 		_weapon_node.scale = Vector3(1.0, 1.0, def.weapon_length_mult)
 	if _limb_bar != null:
 		_limb_bar.visible = bare
@@ -1437,6 +1495,9 @@ func _start_swing(def: SkillDef) -> void:
 
 
 func _end_swing() -> void:
+	if _hands_swing and hands != null:
+		hands.end_strike()
+	_hands_swing = false
 	_swing_active = false
 	_swing_def = null
 	if is_instance_valid(_weapon_node):
@@ -1454,6 +1515,10 @@ func _pose_swing(p: float) -> void:
 	if _swing_def == null or _swing_pivot == null:
 		return
 	var def := _swing_def
+	if _hands_swing:
+		# The main hand carries the blade along the judge's line.
+		hands.set_progress(p)
+		return
 	if def.is_thrust_motion():
 		# A thrust: out along -Z (the body's forward), and part of the way back.
 		var push := def.strike_extent * 0.6 * sin(SkillDef.swing_eased(p) * PI)
@@ -1470,6 +1535,9 @@ func _pose_swing(p: float) -> void:
 
 # The bar's two ends in the world, for the trail.
 func _bar_ends() -> Array[Vector3]:
+	if _hands_swing and hands != null:
+		# The afterimage is of the blade itself, hilt to tip.
+		return hands.blade_ends()
 	var extent := _swing_def.strike_extent if _swing_def != null else 0.8
 	if _swing_def != null and _swing_def.hands != SkillDef.Hands.BARE and is_instance_valid(_weapon_node):
 		extent *= _swing_def.weapon_length_mult

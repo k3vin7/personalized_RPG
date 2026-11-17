@@ -33,12 +33,17 @@ const COLORS := {
 
 
 # Primitive stand-ins, shaped enough to tell apart at quarter view distance.
+# Hilt to tip of the stand-in sword, along the node's -Z. The floating hand
+# (PlayerHands) puts the tip on the edge of a skill's range with this.
+const SWORD_LENGTH := 1.1
+
+
 static func build_mesh(kind: int) -> Node3D:
 	var root := Node3D.new()
 	var color := Color(COLORS.get(kind, "ffffff"))
 	match kind:
 		Kind.SWORD:
-			root.add_child(_part(Vector3(0.07, 0.07, 1.1), Vector3(0.0, 0.0, -0.55), color))
+			root.add_child(_part(Vector3(0.07, 0.07, SWORD_LENGTH), Vector3(0.0, 0.0, -SWORD_LENGTH * 0.5), color))
 			root.add_child(_part(Vector3(0.26, 0.06, 0.06), Vector3(0.0, 0.0, -0.02), Color("3b3027")))
 		Kind.BOW:
 			var arc := _part(Vector3(0.06, 1.3, 0.06), Vector3(0.0, 0.0, -0.1), color)

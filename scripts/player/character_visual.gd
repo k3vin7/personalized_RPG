@@ -43,6 +43,21 @@ const OFFHAND_BONE := "handslot.l"
 # "clips": the clip for each picture, "" when the pack has none -- then the
 # picture before it stays on screen (nothing is substituted).
 const PROFILES := {
+	# 임시 캐릭터 a (2026-11-17): no model. The body is Player's capsule and
+	# the floating hands (PlayerHands); nothing is loaded and every call into
+	# this node does nothing. `--model=tripo` (or kaykit) draws a model again.
+	"none": {
+		"model": "",
+		"clip_files": [],
+		"height": 1.0,
+		"yaw": 0.0,
+		"bones": 0,
+		"walk_speed": 1.0,
+		"run_speed": 1.0,
+		"dash_speed": 1.0,
+		"clips": {},
+		"looping": [],
+	},
 	"kaykit": {
 		"model": PACK + "Characters/gltf/Knight.glb",
 		"clip_files": [
@@ -115,7 +130,7 @@ const PROFILES := {
 		"looping": ["idle", "walk", "run", "dash"],
 	},
 }
-const DEFAULT_PROFILE := "tripo"
+const DEFAULT_PROFILE := "none"
 
 # The KayKit sword is 1.78 units hilt to tip; drawn at 1.2 m (a 1.0 m blade
 # and a 0.2 m grip, the proportions the order names).
@@ -288,6 +303,8 @@ static func _build_library() -> AnimationLibrary:
 
 
 func _load_model() -> void:
+	if String(profile()["model"]) == "":
+		return
 	var packed := _generate(String(profile()["model"]))
 	if packed == null:
 		return
