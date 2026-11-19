@@ -26,8 +26,12 @@ const CELL_SIZE := 0.25
 # the (-X, +Z) diagonal: zone_5's floor_N sits at (-75, 54), floor_E at
 # (-75, -60), floor_S at (50, -60), floor_W at (50, 79). 135 puts north up.
 @export var camera_yaw_degrees := 135.0
-# The body as its collision capsule rather than the character model.
-@export var capsule_body := true
+# The body as its collision capsule rather than the character model. Off
+# since 2026-11-19: the game draws the Tripo model by default now, and with
+# this on a map run straight from the editor still showed the capsule (the
+# F1 panel said "Tripo" and the screen did not). Tick it on the map's root
+# node for a blockout walk, where the thing to read is the body's size.
+@export var capsule_body := false
 
 var world_map: BlockoutMap
 # Debug builds only (MapTeleport.create_for): F3 on the open map.

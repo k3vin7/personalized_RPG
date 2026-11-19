@@ -60,6 +60,18 @@ var _air_cast_left := 0.0
 var _air_cast_def: SkillDef
 # C-1d: how many intents went out claiming a dash combo.
 var combos_claimed := 0
+# 2026-11-18: the combo chain: the slot's skill it belongs to, the step a
+# press casts next, and until when. Read by the checks: steps cast.
+var _chain_slot_id := ""
+var _chain_next := ""
+var _chain_until_msec := 0
+var combo_steps_cast := 0
+# The slot pressed again while its cast was still going: the next step is
+# owed, and follows the moment this one's swing is through.
+var _buffered_slot := -1
+# The step the server has said is open (a combo_needs_hit cast that landed).
+var _combo_open := ""
+var presses_buffered := 0
 # M-7: whether the cast in progress already sent its intent (at the start of
 # the windup) so _fire() does not send it again.
 var _sent_at_start := false
@@ -239,6 +251,13 @@ func press_slot(index: int) -> bool:
 		if player.movement != null:
 			player.movement.dismount_for_skill()
 		return false
+	# 2026-11-18: the same slot again while its cast is still going asks for
+	# the next step of its combo. Remembered, not cast: it follows this one.
+	if is_busy() and index == _cast_slot and _cast_def != null and _cast_def.combo_next != "":
+		if _buffered_slot != index:
+			presses_buffered += 1
+		_buffered_slot = index
+		return true
 	var def := slot_def(index)
 	if def == null or slot_locked(index) or slot_on_cooldown(index) or is_busy() \
 			or player.state == Player.State.DOWNED:
@@ -330,6 +349,8 @@ func cast_slot(index: int) -> bool:
 			or (not player.is_grounded_state() and not _airborne_cast_allowed(def)):
 		presses_ignored += 1
 		return false
+	# 2026-11-18: inside the combo window the slot casts its next step.
+	def = _chain_step(def)
 	if _blocking:
 		end_block()
 	# C-1c: from the air the intent goes out and the body stays in the air;
@@ -372,6 +393,8 @@ func cast_slot(index: int) -> bool:
 		player.movement.cancel_armed()
 	_cast_def = def
 	_cast_slot = index
+	_buffered_slot = -1
+	_combo_open = ""
 	casts_started += 1
 	# Shown on the frame of the press, taken back if the server says no.
 	player.begin_predicted(def.server_intent())
@@ -394,7 +417,15 @@ func cast_slot(index: int) -> bool:
 	# the intent, so the speed the server reads at the intent (the thrust's
 	# C-1b bonus) is the speed the body was pressed at, not the stop.
 	if player.movement != null:
-		player.movement.begin_cast_step(heading, def.step_distance, def.value("windup") + def.swing_time())
+		var cast_time := def.value("windup") + def.swing_time()
+		player.movement.begin_cast_step(heading, def.step_distance, cast_time, def.step_from, def.step_to)
+		if def.recovery_step > 0.0:
+			# On through the recovery: from where the cast's own step ends
+			# to the end of the recovery, starting a moment after the blow
+			# (the picture holds it for 0.05 s before the body goes on).
+			var after := maxf(def.value("windup") + def.value("recovery") - cast_time * def.step_to, 0.05)
+			player.movement.queue_cast_step(heading, def.recovery_step, after,
+				clampf((cast_time * (1.0 - def.step_to) + 0.08) / after, 0.0, 0.9), 1.0)
 	var windup := def.value("windup")
 	if windup > 0.0:
 		_phase_left = windup
@@ -441,8 +472,79 @@ func _fire() -> void:
 		_finish()
 
 
-func _finish() -> void:
+# ------------------------------------------------------------ the combo steps
+
+# The step a press of this slot casts now: the next one while the window the
+# last step opened is still open, the slot's own otherwise. The owner's own
+# clock; the server keeps the same chain on its own and refuses a step out
+# of turn.
+func _chain_step(slot_skill: SkillDef) -> SkillDef:
+	if _chain_next == "":
+		return slot_skill
+	if _chain_slot_id != slot_skill.id or Time.get_ticks_msec() > _chain_until_msec:
+		_chain_next = ""
+		return slot_skill
+	var step := Skills.for_holder(_chain_next, player.weapon, player.offhand)
+	if step == null:
+		_chain_next = ""
+		return slot_skill
+	combo_steps_cast += 1
+	return step
+
+
+# A cast has ended: the window for its next step opens, or the chain is over.
+# With combo_window 0 (the default) nothing opens: the next step has to be
+# asked for while this one is still going (_chain_on).
+func _note_chain(def: SkillDef) -> void:
+	if def == null or def.combo_next == "" or Tuning.server.combo_window <= 0.0 \
+			or (def.combo_needs_hit and _combo_open != def.combo_next):
+		_chain_next = ""
+		return
+	_chain_slot_id = def.combo_of if def.combo_of != "" else def.id
+	_chain_next = def.combo_next
+	_chain_until_msec = Time.get_ticks_msec() + int(Tuning.server.combo_window * 1000.0)
+
+
+# The slot was pressed again during this cast and its swing is through: the
+# next step starts now, out of the pose this one ended in. No recovery, and
+# the picture is not sent back to standing in between.
+func _chain_on() -> void:
+	var index := _cast_slot
 	var def := _cast_def
+	_buffered_slot = -1
+	_chain_slot_id = def.combo_of if def.combo_of != "" else def.id
+	_chain_next = def.combo_next
+	_chain_until_msec = Time.get_ticks_msec() + 100
+	_cast_def = null
+	_cast_slot = -1
+	if player.movement != null:
+		player.movement.cancel_cast_step()
+	player.change_state(Player.State.IDLE)
+	if not cast_slot(index):
+		# Refused here (no stamina, the hands changed): it ends as any cast.
+		_chain_next = ""
+		player.show_skill_phase(null, "")
+
+
+func _owes_next_step() -> bool:
+	if _cast_def == null or _buffered_slot != _cast_slot or _cast_def.combo_next == "":
+		return false
+	# A step that needs a hit waits for the server's word that it landed. If
+	# the word has not come by the end of the recovery the cast just ends.
+	return not _cast_def.combo_needs_hit or _combo_open == _cast_def.combo_next
+
+
+# Server -> owner: this cast's blow landed on a body, so its next step is open.
+func on_combo_open(next_id: String) -> void:
+	_combo_open = next_id
+
+
+func _finish() -> void:
+	if _owes_next_step():
+		_chain_on()
+		return
+	var def := _cast_def
+	_note_chain(def)
 	_cast_def = null
 	_cast_slot = -1
 	if player.movement != null:
@@ -557,6 +659,8 @@ func on_interrupted() -> void:
 	_cast_def = null
 	_cast_slot = -1
 	_armed_slot = -1
+	_chain_next = ""
+	_buffered_slot = -1
 	_phase_left = 0.0
 	if player.movement != null:
 		player.movement.cancel_cast_step()
@@ -592,5 +696,8 @@ func _physics_process(delta: float) -> void:
 			_fire()
 	elif player.state == Player.State.RECOVERING:
 		_phase_left -= delta
-		if _phase_left <= 0.0:
+		# A step that is owed follows once this swing is through.
+		if _owes_next_step() and _cast_def.value("recovery") - _phase_left >= _cast_def.swing_time():
+			_chain_on()
+		elif _phase_left <= 0.0:
 			_finish()

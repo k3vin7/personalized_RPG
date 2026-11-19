@@ -83,12 +83,13 @@ func _data_checks() -> void:
 	note("camera: zoom %.2f, distance %.1f m at %.0f deg; near %.2f x at %.0f deg; wheel step %.2f, smoothing %.1f" % [
 		v.camera_zoom, v.camera_distance, v.camera_pitch_deg, v.camera_near_mult, v.camera_near_pitch_deg,
 		v.camera_zoom_step, v.camera_zoom_smoothing])
-	# 2026-11-17: far is 50 m of ground across (38.64 m away), near is 0.4 of
-	# that, and the game starts nine wheel steps in from the far end.
+	# 2026-11-17: far is 50 m of ground across (38.64 m away). 2026-11-18: the
+	# nearest is 0.2 of that at 28.33 deg (it was 0.4 at 35), and the game
+	# starts at zoom 0.325, which is the same view as before (below).
 	expect(absf(v.camera_distance - 38.64) < 0.001 and absf(v.camera_pitch_deg - 55.0) < 0.001
-		and absf(v.camera_near_mult - 0.4) < 0.001 and absf(v.camera_near_pitch_deg - 35.0) < 0.001
-		and absf(v.camera_zoom - 0.1) < 0.001,
-		"the_defaults_are_38_64m_55deg_far_and_0_4_of_the_distance_at_35deg_near_starting_at_zoom_0_1")
+		and absf(v.camera_near_mult - 0.2) < 0.001 and absf(v.camera_near_pitch_deg - 28.3333) < 0.001
+		and absf(v.camera_zoom - 0.325) < 0.001,
+		"the_defaults_are_38_64m_55deg_far_and_0_2_of_the_distance_at_28deg_near_starting_at_zoom_0_325")
 	expect(absf(QuarterCamera.distance_for(v.camera_zoom) - 17.774) < 0.001
 		and absf(QuarterCamera.pitch_deg_for(v.camera_zoom) - 37.0) < 0.001,
 		"the_starting_view_is_17_77m_away_at_37deg")

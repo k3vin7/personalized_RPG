@@ -618,7 +618,21 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			thrust_speed_bonus = value
-@export var side_cut_windup: float = 0.2:
+# 2026-11-18: the thrust's second step (the push kick): its own windup and
+# recovery; every other number is the kick's.
+@export var thrust_2_windup: float = 0.45:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_2_windup = value
+@export var thrust_2_recovery: float = 0.4:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_2_recovery = value
+# 2026-11-18: 0.2 -> 0.5, the first cut of the three-step side cut (the clip's
+# blade lands 0.5 s in).
+# 2026-11-19: 0.5 -> 0.27, the level cut (the user asked for a quicker one):
+# the draw-back of its clip is 0.37 s long and plays in this, 1.4x.
+@export var side_cut_windup: float = 0.27:
 	set(value):
 		if Tuning.may_write(self):
 			side_cut_windup = value
@@ -661,7 +675,45 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			side_cut_stamina = value
-@export var overhead_cut_windup: float = 0.25:
+# 2026-11-18: the side cut's second step (SkillDef.combo_next). A step has
+# its own windup and recovery here; every other number is the skill it falls
+# back on (the side cut).
+# 2026-11-19: the third step is gone (the user's call: two level cuts, and
+# the overhead cut is its own skill). The second step is the backhand that
+# starts where the first ends, so its windup is short: 0.25 -> 0.10.
+@export var side_cut_2_windup: float = 0.10:
+	set(value):
+		if Tuning.may_write(self):
+			side_cut_2_windup = value
+@export var side_cut_2_recovery: float = 0.35:
+	set(value):
+		if Tuning.may_write(self):
+			side_cut_2_recovery = value
+# 2026-11-18 (the user's rule): the next step is asked for while the step
+# before it is still going -- any time from its press to the end of its
+# recovery -- and then follows the moment its blade is through, with no
+# recovery and no return to standing in between. combo_window is how long
+# AFTER a step has ended a press still counts: 0, so a press that comes late
+# starts over at the first step. combo_grace is what the server adds to the
+# late side on its own clock (the press's trip over the wire) and
+# combo_early_slack to the early side (a step may arrive this much before the
+# server's own clock says the blade is through).
+@export var combo_window: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			combo_window = value
+@export var combo_grace: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			combo_grace = value
+@export var combo_early_slack: float = 0.06:
+	set(value):
+		if Tuning.may_write(self):
+			combo_early_slack = value
+# 2026-11-19: 0.25 -> 0.18, the light overhead cut (the user: a one-handed
+# sword should cut lightly): the sword is drawn back beside the shoulder in
+# this, not lifted over the head.
+@export var overhead_cut_windup: float = 0.18:
 	set(value):
 		if Tuning.may_write(self):
 			overhead_cut_windup = value
@@ -712,6 +764,43 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			overhead_cut_stamina = value
+# 2026-11-19: the dash cut, in the sword's third slot. The windup is the
+# crouch with the hand at the hip; the body then covers the skill's
+# step_distance (3 m) in its swing (0.12 s). The ruling is one rectangle at the
+# end of the windup, from where the body crouched: the 3 m it is about to
+# cross and a blade's length past them.
+@export var dash_cut_windup: float = 0.35:
+	set(value):
+		if Tuning.may_write(self):
+			dash_cut_windup = value
+@export var dash_cut_recovery: float = 0.45:
+	set(value):
+		if Tuning.may_write(self):
+			dash_cut_recovery = value
+@export var dash_cut_cooldown: float = 1.5:
+	set(value):
+		if Tuning.may_write(self):
+			dash_cut_cooldown = value
+@export var dash_cut_range: float = 4.0:
+	set(value):
+		if Tuning.may_write(self):
+			dash_cut_range = value
+@export var dash_cut_width: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			dash_cut_width = value
+@export var dash_cut_damage: float = 1.4:
+	set(value):
+		if Tuning.may_write(self):
+			dash_cut_damage = value
+@export var dash_cut_power: float = 3.0:
+	set(value):
+		if Tuning.may_write(self):
+			dash_cut_power = value
+@export var dash_cut_stamina: float = 12.0:
+	set(value):
+		if Tuning.may_write(self):
+			dash_cut_stamina = value
 # The parry: no windup, the recovery is what a failed one costs, the window
 # is how long after the press an attack landing on this body is turned. The
 # attacker is stunned until its own recovery would have ended. Agility is
@@ -916,6 +1005,15 @@ extends Resource
 # (WeaponDef.tuning_prefix names these; data/weapons/*.tres holds the same
 # defaults). All temporary. A weapon's weight rides the body while it is in a
 # hand (CharacterStats.weapon_weight); the shield's is shield_weight above.
+# 2026-11-19: what a body has in its main hand when it arrives, as a
+# WeaponKinds.Kind number (0 nothing, 1 the sword). The server writes it at
+# the spawn, where the race may hold it; a body is no longer bare-handed
+# until it finds a rack. An automated run starts bare whatever this says
+# (Player._ready): the checks were written from empty hands.
+@export var start_weapon: int = 1:
+	set(value):
+		if Tuning.may_write(self):
+			start_weapon = value
 @export var sword_weight: float = 2.0:
 	set(value):
 		if Tuning.may_write(self):

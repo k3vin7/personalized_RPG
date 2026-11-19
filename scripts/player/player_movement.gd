@@ -88,6 +88,10 @@ var mount_limits := Vector3.ZERO
 # swing. Velocity and time left; nothing here is the server's.
 var _step_velocity := Vector3.ZERO
 var _step_left := 0.0
+# How long the cast's step still waits before it starts.
+var _step_wait := 0.0
+# The step that follows the one going (queue_cast_step), or {}.
+var _step_next := {}
 var cast_steps := 0
 # 5-chapter smart key. With it off, a key arms the action and shows where it
 # would go; the left button casts. Jump and dash share this, and a basic attack
@@ -1200,8 +1204,27 @@ func jump_launch_velocity() -> Vector3:
 # used to carry 1.2 m into it. Then, for `seconds`, the body walks
 # `distance` along `direction` -- the step into the cut. A push that is
 # still carrying the body is left alone (it is not the walk).
-func begin_cast_step(direction: Vector3, distance: float, seconds: float) -> void:
+# `from` and `to` (0..1 of `seconds`) are the part of the cast the step is
+# taken in (SkillDef.step_from / step_to): the body stands until `from`,
+# covers the whole distance by `to`, and stands again. A clip whose feet stay
+# planted through its windup, or that covers its ground early, is matched by
+# the body under it instead of sliding.
+func begin_cast_step(direction: Vector3, distance: float, seconds: float, from := 0.0, to := 1.0) -> void:
+	_step_next = {}
+	_start_step(direction, distance, seconds, from, to)
+
+
+# A second step, taken when the one going has been taken (a skill's
+# recovery_step: on through the recovery, after the step of the cast itself).
+func queue_cast_step(direction: Vector3, distance: float, seconds: float, from := 0.0, to := 1.0) -> void:
+	_step_next = {}
+	if distance > 0.0 and seconds > 0.0:
+		_step_next = {"direction": direction, "distance": distance, "seconds": seconds, "from": from, "to": to}
+
+
+func _start_step(direction: Vector3, distance: float, seconds: float, from: float, to: float) -> void:
 	_step_left = 0.0
+	_step_wait = 0.0
 	_step_velocity = Vector3.ZERO
 	if _pushed_left <= 0.0:
 		player.velocity.x = 0.0
@@ -1209,27 +1232,43 @@ func begin_cast_step(direction: Vector3, distance: float, seconds: float) -> voi
 	var flat := Vector3(direction.x, 0.0, direction.z)
 	if distance <= 0.0 or seconds <= 0.0 or flat.length_squared() < 0.0001:
 		return
-	_step_velocity = flat.normalized() * (distance / seconds)
-	_step_left = seconds
+	var start := clampf(from, 0.0, 0.95)
+	var moving := seconds * maxf(clampf(to, 0.0, 1.0) - start, 0.05)
+	_step_velocity = flat.normalized() * (distance / moving)
+	_step_wait = seconds * start
+	_step_left = moving
 	cast_steps += 1
 
 
 func cancel_cast_step() -> void:
+	_step_next = {}
 	_step_left = 0.0
+	_step_wait = 0.0
 	_step_velocity = Vector3.ZERO
 
 
 func cast_step_left() -> float:
-	return _step_left
+	return _step_wait + _step_left
 
 
 func _cast_step(delta: float) -> void:
 	if _pushed_left > 0.0 or not (player.is_on_floor() or _was_on_step):
 		# Carrying a push, or off the ground: the stun's physics, as before.
 		_step_left = 0.0
+		_step_wait = 0.0
 		_stunned_step(delta)
 		return
-	if _step_left > 0.0:
+	if _step_wait <= 0.0 and _step_left <= 0.0 and not _step_next.is_empty():
+		# The cast's own step is taken: the one waiting behind it starts.
+		var next := _step_next
+		_step_next = {}
+		_start_step(next["direction"], float(next["distance"]), float(next["seconds"]), float(next["from"]), float(next["to"]))
+	if _step_wait > 0.0:
+		# Not yet: the feet are still planted.
+		_step_wait = maxf(0.0, _step_wait - delta)
+		player.velocity.x = 0.0
+		player.velocity.z = 0.0
+	elif _step_left > 0.0:
 		_step_left = maxf(0.0, _step_left - delta)
 		player.velocity.x = _step_velocity.x
 		player.velocity.z = _step_velocity.z

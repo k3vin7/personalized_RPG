@@ -2137,6 +2137,11 @@ func move_allowance(player: Player) -> Vector2:
 		horizontal = maxf(horizontal, player.get_mount_speed())
 	if now - float(_dash_seen.get(peer, -100.0)) <= _dash_window(player):
 		horizontal = maxf(horizontal, player.dash_speed())
+	# A skill's own step (the dash cut's 3 m in its swing): the speed the
+	# skill's data says, while the cast the server itself ruled is going.
+	var step: Dictionary = _step_seen.get(peer, {})
+	if now <= float(step.get("until", -100.0)):
+		horizontal = maxf(horizontal, float(step["speed"]))
 	# Vertical has two honest sources: our own jump, and gravity acting over
 	# the height the server watched this body reach.
 	var watch: Dictionary = _fall_watch.get(peer, {})
@@ -2804,8 +2809,15 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 		return null
 	var peer := actor.get_multiplayer_authority()
 	var now := Time.get_ticks_msec()
-	if now < int(_skill_lock.get(peer, 0)):
-		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=recovery" % [actor.name, def.id])
+	# 2026-11-18: the combo step that is next in this peer's chain follows the
+	# step before it from the moment that one's swing is through ("from"):
+	# the recovery is what a chained step skips.
+	var chain: Dictionary = _combo_chain.get(peer, {})
+	var chained := def.combo_of != "" and String(chain.get("next", "")) == def.id \
+		and now <= int(chain.get("until", 0)) and now >= int(chain.get("from", 0))
+	if now < int(_skill_lock.get(peer, 0)) and not chained:
+		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=recovery early_ms=%d" % [
+			actor.name, def.id, int(_skill_lock.get(peer, 0)) - now])
 		return null
 	var cooldowns: Dictionary = _skill_cooldown.get(peer, {})
 	if now < int(cooldowns.get(def.id, 0)):
@@ -2818,6 +2830,15 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=state_%s" % [
 			actor.name, def.id, Player.State.keys()[actor.state]])
 		return null
+	# 2026-11-18: a combo step is cast only in its turn: the server's own
+	# record of this peer's last cast names it as the next one, and the
+	# window (plus combo_grace, the press's trip over the wire) is still open.
+	if def.combo_of != "":
+		if not chained:
+			combo_steps_refused += 1
+			print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=combo_out_of_turn next=%s late_ms=%d" % [
+				actor.name, def.id, String(chain.get("next", "")), now - int(chain.get("until", now))])
+			return null
 	# C-1c: a cast brings the shield down.
 	_blocks.erase(peer)
 	# C-1b: a weapon's skill needs that weapon in the hand, by the server's
@@ -2843,6 +2864,26 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 	cooldowns[def.id] = now + impact_ms + int(def.value("cooldown") * 1000.0)
 	_skill_cooldown[peer] = cooldowns
 	skills_ruled += 1
+	_note_step(peer, def)
+	# The chain: what this cast may be followed by, and until when. Any cast
+	# that is not a step forward ends the chain it was in.
+	_combo_chain.erase(peer)
+	_combo_wait_hit.erase(peer)
+	if def.combo_next != "":
+		var opens := {
+			"next": def.combo_next,
+			# From the end of this step's swing (less combo_early_slack: the
+			# press's trip varies) to the end of its recovery plus the window.
+			"from": now + impact_ms + int((def.swing_time() - Tuning.server.combo_early_slack) * 1000.0),
+			"until": _skill_lock[peer] + int((Tuning.server.combo_window + Tuning.server.combo_grace) * 1000.0),
+		}
+		if def.combo_needs_hit:
+			# Held back until this blow lands on a body (_open_combo_on_hit).
+			_combo_wait_hit[peer] = opens
+		else:
+			_combo_chain[peer] = opens
+	if def.combo_of != "":
+		combo_steps_ruled += 1
 	match def.id:
 		"shove":
 			return _rule_shove(actor, direction)
@@ -2867,6 +2908,38 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 			actor.name, def.id, seen, Tuning.server.base_move_speed, mult])
 	schedule_strike(actor, def, direction, mult)
 	return true
+
+
+# 2026-11-19: peer -> {"until": seconds, "speed": m/s}: how fast the skill
+# just ruled moves its caster, by the skill's own data (step_distance over the
+# part of the cast it is taken in), and until when positions showing it can
+# still be arriving. Nothing the peer says goes into it. Read by
+# move_allowance; a walk-paced step sits under the walk's allowance anyway.
+var _step_seen := {}
+var steps_noted := 0
+
+
+func _note_step(peer: int, def: SkillDef) -> void:
+	_step_seen.erase(peer)
+	if def.step_distance <= 0.0:
+		return
+	var cast_time := def.value("windup") + def.swing_time()
+	var moving := cast_time * maxf(clampf(def.step_to, 0.0, 1.0) - clampf(def.step_from, 0.0, 0.95), 0.05)
+	steps_noted += 1
+	_step_seen[peer] = {
+		"speed": def.step_distance / maxf(moving, 0.001),
+		"until": float(Time.get_ticks_msec()) / 1000.0 + cast_time + MOVE_SAMPLE * 2.0 + DASH_WINDOW_SLACK,
+	}
+
+
+# 2026-11-18: peer -> {"next": skill id, "until": msec}: the combo step this
+# peer may cast next. Read by the checks: how many steps were ruled, refused.
+var _combo_chain := {}
+# The same record for a skill whose next step needs a hit, until it lands one.
+var _combo_wait_hit := {}
+var combo_opened_by_hit := 0
+var combo_steps_ruled := 0
+var combo_steps_refused := 0
 
 
 # ------------------------------------------------------------ C-1d: the combo
@@ -3076,6 +3149,13 @@ func _run_pending_strikes() -> void:
 	for actor: Variant in _pending_strikes.keys():
 		if not is_instance_valid(actor):
 			_pending_strikes.erase(actor)
+			continue
+		# The list was taken before the loop, and a strike ruled earlier in it
+		# can take another body's booking away: a wolf hit in its own windup
+		# cancels its bite (Wolf -> cancel_strike). 2026-11-18: a thrust and
+		# the kick after it on a wolf mid-bite read the booking that had just
+		# gone and stopped the game.
+		if not _pending_strikes.has(actor):
 			continue
 		var record: Dictionary = _pending_strikes[actor]
 		var def: SkillDef = record["def"]
@@ -3310,7 +3390,39 @@ func _land_strike(actor: Node3D, def: SkillDef, body: Node3D, forward: Vector3, 
 	tally["hits"] = int(tally["hits"]) + 1
 	if float(hit.get("down_apply", 0.0)) > 0.0:
 		tally["downed"] = int(tally["downed"]) + 1
+	# 2026-11-18: a skill whose next step needs a hit has landed one.
+	if def.combo_needs_hit and caster != null and not body is Rock:
+		_open_combo_on_hit(caster, def)
 	return true
+
+
+# The chain a combo_needs_hit skill held back is opened, and its owner told:
+# the owner's machine waits for this word before it casts the next step.
+func _open_combo_on_hit(caster: Player, def: SkillDef) -> void:
+	var peer := caster.get_multiplayer_authority()
+	var waiting: Dictionary = _combo_wait_hit.get(peer, {})
+	if String(waiting.get("next", "")) != def.combo_next:
+		return
+	_combo_wait_hit.erase(peer)
+	_combo_chain[peer] = waiting
+	combo_opened_by_hit += 1
+	print("PLAYGROUND_COMBO_OPEN by=%s skill=%s next=%s" % [caster.name, def.id, def.combo_next])
+	if caster.is_local():
+		if caster.skills != null:
+			caster.skills.on_combo_open(def.combo_next)
+	else:
+		combo_open.rpc_id(peer, def.combo_next)
+
+
+# Server -> the caster: its blow landed, the next step may follow. The server
+# rules the step itself when it arrives; this only tells the owner to send it.
+@rpc("any_peer", "call_remote", "reliable")
+func combo_open(next_id: String) -> void:
+	if not result_is_server_sent("combo_open", multiplayer.get_remote_sender_id()):
+		return
+	var actor := actor_for(multiplayer.get_unique_id())
+	if actor != null and actor.is_local() and actor.skills != null:
+		actor.skills.on_combo_open(next_id)
 
 
 func _finish_strike(actor: Node3D, def: SkillDef, mult: float, tally: Dictionary) -> void:
@@ -3376,6 +3488,9 @@ func _run_sweeps() -> void:
 	for actor: Variant in _active_sweeps.keys():
 		if not is_instance_valid(actor):
 			_active_sweeps.erase(actor)
+			continue
+		# As in _run_pending_strikes: gone since the list was taken.
+		if not _active_sweeps.has(actor):
 			continue
 		var record: Dictionary = _active_sweeps[actor]
 		var def: SkillDef = record["def"]
@@ -3589,6 +3704,10 @@ func _physics_process(delta: float) -> void:
 
 func _enforce_holds(delta: float) -> void:
 	for holder_peer: int in _holds.keys():
+		# Ending one hold can end another (the body let go of was itself
+		# holding): gone since the list was taken.
+		if not _holds.has(holder_peer):
+			continue
 		var record: Dictionary = _holds[holder_peer]
 		record["grace"] = maxf(0.0, float(record["grace"]) - delta)
 		if float(record["window"]) > 0.0:
@@ -3652,6 +3771,8 @@ func _place_held_people(delta: float) -> void:
 	if push:
 		_held_push_left = SyncRules.STATE_INTERVAL
 	for holder_peer: int in _holds.keys():
+		if not _holds.has(holder_peer):
+			continue
 		var record: Dictionary = _holds[holder_peer]
 		var person := get_node_or_null(record["target"] as NodePath) as Player
 		var holder := actor_for(holder_peer)

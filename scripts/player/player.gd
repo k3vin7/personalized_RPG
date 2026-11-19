@@ -204,7 +204,18 @@ var _drawn_hit_ids: Array[int] = []
 var _hits_primed := false
 var _shown_hp := -1
 const TRAIL_MAX_SAMPLES := 24
-const TRAIL_FADE := 0.18
+# 2026-11-19: 0.18 -> 0.30, with the ribbon bright at the tip and faint at
+# the hilt (the user asked for a swing that reads even when it hits nothing).
+const TRAIL_FADE := 0.30
+const TRAIL_TIP_ALPHA := 0.95
+const TRAIL_HILT_ALPHA := 0.15
+# The ribbon runs this much past the blade's tip.
+const TRAIL_OVERREACH := 1.12
+# The fan's inner edge, as a share of its outer one: a crescent, not a wedge.
+const TRAIL_INNER := 0.35
+# A blade that turned through less than this drew no arc (a thrust).
+const TRAIL_MIN_TURN_DEG := 12.0
+var _trail_colour := Color("ffd166")
 const LIMB_BAR_THICKNESS := 0.14
 # The facing arrow on the ground: how far in front of the body's surface its
 # base sits, its size, and how far off the floor it is drawn.
@@ -311,6 +322,12 @@ func vitals_authority() -> int:
 	return 1 if VITALS_OWNED_BY_SERVER else get_multiplayer_authority()
 
 
+# An automated run (the two-peer harness): it keeps the defaults its checks
+# were written against -- no model, empty hands -- unless it asks otherwise.
+static func is_check_run() -> bool:
+	return OS.get_cmdline_user_args().has("--auto-smoke")
+
+
 func vitals_are_mine() -> bool:
 	return vitals_authority() == multiplayer.get_unique_id() or not multiplayer.has_multiplayer_peer()
 
@@ -333,6 +350,17 @@ func _ready() -> void:
 	_build_body()
 	sync_position = global_position
 	spawn_point = global_position
+	# 2026-11-19: what the body arrives holding is the server's word
+	# (Tuning.server.start_weapon), written here on the side that owns the
+	# vitals and replicated like any change of weapon. An automated run
+	# starts bare: its checks were written from empty hands.
+	if vitals_are_mine() and not is_check_run():
+		var start_kind := int(Tuning.server.start_weapon)
+		if start_kind != WeaponKinds.Kind.NONE and WeaponKinds.LABELS.has(start_kind) \
+				and Weapons.usable_by(stats.race, start_kind):
+			sync_weapon = start_kind
+			print("PLAYGROUND_START_WEAPON peer=%s kind=%s model=%s" % [
+				name, WeaponKinds.LABELS.get(start_kind, "?"), CharacterVisual.profile_name()])
 
 	if is_local():
 		movement = PlayerMovement.new()
@@ -1007,11 +1035,14 @@ func show_block(raised: bool) -> void:
 
 # The picture of the weapon. Only ever called with the server's value.
 func _apply_weapon(kind: int) -> void:
+	var before := weapon
 	weapon = kind
 	if is_instance_valid(_weapon_node):
 		_weapon_node.queue_free()
 	_weapon_node = null
 	if kind == WeaponKinds.Kind.NONE:
+		if before != WeaponKinds.Kind.NONE and visual != null:
+			visual.play_sheathe()
 		return
 	if hands != null:
 		# No model: the stand-in, in the floating main hand. Its -Z is the
@@ -1028,6 +1059,8 @@ func _apply_weapon(kind: int) -> void:
 	if visual == null or not visual.attach_weapon(_weapon_node):
 		_weapon_node.position = Vector3(0.34, 0.1, -0.1)
 		_swing_pivot.add_child(_weapon_node)
+	elif before == WeaponKinds.Kind.NONE:
+		visual.play_draw(_weapon_node)
 
 
 # Square on to the wall, facing into it, with no easing: the body is placed on
@@ -1312,23 +1345,19 @@ func _build_body() -> void:
 	_trail.material_override = trail_material
 	_trail.visible = false
 	add_child(_trail)
+	# The dash cut's streak: the same kind of mesh, the same material.
+	_streak = MeshInstance3D.new()
+	_streak.name = "DashStreak"
+	_streak.top_level = true
+	_streak.mesh = ImmediateMesh.new()
+	_streak.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_streak.material_override = trail_material
+	_streak.visible = false
+	add_child(_streak)
 
 	# C-1f-2: the model, under the same container the lean and the lying
 	# turn. With a model the capsule and the cone are not drawn.
-	visual = CharacterVisual.new()
-	visual.name = "CharacterVisual"
-	_visual.add_child(visual)
-	visual.setup(self)
-	if visual.model_loaded():
-		body.visible = false
-		facing.visible = false
-	else:
-		# 임시 캐릭터 a: no model -- the capsule, the mark on its front, and
-		# two floating hands in the body's own colour.
-		hands = PlayerHands.new()
-		hands.name = "Hands"
-		_visual.add_child(hands)
-		hands.setup(self, _material)
+	_build_character_visual()
 
 	_label = Label3D.new()
 	_label.position = Vector3(0.0, 1.45, 0.0)
@@ -1338,6 +1367,49 @@ func _build_body() -> void:
 	_label.no_depth_test = true
 	add_child(_label)
 	_apply_state_colour()
+
+
+# The model of the current profile, or with none the capsule, the mark on its
+# front and two floating hands in the body's own colour (임시 캐릭터 a).
+func _build_character_visual() -> void:
+	visual = CharacterVisual.new()
+	visual.name = "CharacterVisual"
+	_visual.add_child(visual)
+	visual.setup(self)
+	var model := visual.model_loaded()
+	print("PLAYGROUND_MODEL peer=%s profile=%s loaded=%s" % [name, CharacterVisual.profile_name(), model])
+	_body_mesh_node.visible = not model
+	_facing.visible = not model
+	if not model:
+		hands = PlayerHands.new()
+		hands.name = "Hands"
+		_visual.add_child(hands)
+		hands.setup(self, _material)
+
+
+# The model profile changed (the F1 panel): this body's picture is built
+# again and what it holds is hung on the new one. Drawn only.
+func rebuild_visual() -> void:
+	if _visual == null:
+		return
+	var blocking := _block_shown
+	for node in [_weapon_node, _offhand_node]:
+		if is_instance_valid(node):
+			node.free()
+	_weapon_node = null
+	_offhand_node = null
+	if is_instance_valid(visual):
+		visual.free()
+	visual = null
+	if is_instance_valid(hands):
+		hands.free()
+	hands = null
+	_hands_swing = false
+	_build_character_visual()
+	visual.set_body_scale(body_scale())
+	_apply_weapon(weapon)
+	_apply_offhand(offhand)
+	show_block(blocking)
 
 
 # Draws the plain capsule and its facing cone in place of the model, or the
@@ -1469,6 +1541,8 @@ func show_skill_phase(def: SkillDef, phase: String) -> void:
 		"strike":
 			_skill_lean_deg = def.windup_lean_deg * 0.5
 			_start_swing(def)
+			if def.vanish_streak:
+				_start_streak(def)
 	_apply_predicted_pose()
 
 
@@ -1495,13 +1569,78 @@ func _start_swing(def: SkillDef) -> void:
 	elif not bare:
 		_weapon_node.scale = Vector3(1.0, 1.0, def.weapon_length_mult)
 	if _limb_bar != null:
-		_limb_bar.visible = bare
+		# The bar stands in for a limb; a model has its own.
+		_limb_bar.visible = bare and not (visual != null and visual.model_loaded())
 		if bare:
 			var box := _limb_bar.mesh as BoxMesh
 			box.size = Vector3(LIMB_BAR_THICKNESS, LIMB_BAR_THICKNESS, def.strike_extent)
 			_limb_bar.position = Vector3(0.0, 0.0, -(radius() + def.strike_extent * 0.5))
 			(_limb_bar.material_override as StandardMaterial3D).albedo_color = def.colour
 	_pose_swing(0.0)
+	_swing_feel(def)
+
+
+# ---------------------------------------------- 2026-11-19: the swing's feel
+# What a swing does whether or not it lands (the user: "no weight to it when
+# it cuts the air"): a rush of air and, on this screen's own body, a short
+# push of the camera the way the blow goes. (Dust off the foot was tried and
+# taken out the same day: the user would have it done properly or not at
+# all.) Drawn
+# and heard only; on every screen, since the strike phase reaches them all.
+
+static var _whoosh: AudioStreamWAV
+var _swing_sound: AudioStreamPlayer3D
+var swings_felt := 0
+
+
+func _swing_feel(def: SkillDef) -> void:
+	if not Tuning.values.swing_feel_enabled or not is_inside_tree():
+		return
+	swings_felt += 1
+	if Tuning.values.swing_sound_db > -60.0:
+		if _swing_sound == null:
+			_swing_sound = AudioStreamPlayer3D.new()
+			_swing_sound.name = "SwingSound"
+			_swing_sound.stream = _whoosh_stream()
+			_swing_sound.max_distance = 40.0
+			add_child(_swing_sound)
+		_swing_sound.volume_db = Tuning.values.swing_sound_db
+		# A heavier swing sounds lower; no two sound quite alike.
+		_swing_sound.pitch_scale = (0.85 if def.feedback_big else 1.1) * randf_range(0.94, 1.06)
+		_swing_sound.play()
+	if is_local() and camera != null and Tuning.values.swing_kick_m > 0.0:
+		camera.kick(-global_transform.basis.z, Tuning.values.swing_kick_m, Tuning.values.swing_kick_time)
+
+
+# A short rush of air, made here rather than loaded: noise let through a
+# band that opens and closes, loud in the middle. 0.22 s, 22.05 kHz, 16 bit.
+static func _whoosh_stream() -> AudioStreamWAV:
+	if _whoosh != null:
+		return _whoosh
+	var rate := 22050
+	var count := int(rate * 0.22)
+	var data := PackedByteArray()
+	data.resize(count * 2)
+	var noise := RandomNumberGenerator.new()
+	noise.seed = 20261119
+	var low := 0.0
+	var lower := 0.0
+	for index in count:
+		var t := float(index) / float(count)
+		var swell := pow(sin(PI * t), 1.6)
+		# The band's upper edge rises to the middle and falls away again.
+		var open := lerpf(0.06, 0.42, swell)
+		var sample := noise.randf_range(-1.0, 1.0)
+		low += open * (sample - low)
+		lower += open * 0.25 * (sample - lower)
+		var value := clampf((low - lower) * swell * 2.6, -1.0, 1.0)
+		data.encode_s16(index * 2, int(value * 32000.0))
+	_whoosh = AudioStreamWAV.new()
+	_whoosh.format = AudioStreamWAV.FORMAT_16_BITS
+	_whoosh.mix_rate = rate
+	_whoosh.stereo = false
+	_whoosh.data = data
+	return _whoosh
 
 
 func _end_swing() -> void:
@@ -1548,6 +1687,16 @@ func _bar_ends() -> Array[Vector3]:
 	if _hands_swing and hands != null:
 		# The afterimage is of the blade itself, hilt to tip.
 		return hands.blade_ends()
+	if visual != null and visual.model_loaded() and is_instance_valid(_weapon_node) \
+			and _swing_def != null and _swing_def.hands != SkillDef.Hands.BARE:
+		# With a model the clip carries the weapon: the trail is of the blade
+		# where the hand has it (its -Z is the blade), not of the pivot's bar,
+		# so the ribbon is drawn where the sword is seen to pass.
+		var reach := CharacterVisual.BLADE_LENGTH * Weapons.size_ratio_of(weapon) * TRAIL_OVERREACH
+		var blade: Array[Vector3] = [
+			_weapon_node.global_position,
+			_weapon_node.to_global(Vector3(0.0, 0.0, -reach))]
+		return blade
 	var extent := _swing_def.strike_extent if _swing_def != null else 0.8
 	if _swing_def != null and _swing_def.hands != SkillDef.Hands.BARE and is_instance_valid(_weapon_node):
 		extent *= _swing_def.weapon_length_mult
@@ -1558,7 +1707,86 @@ func _bar_ends() -> Array[Vector3]:
 	return ends
 
 
+# ------------------------------------------- 2026-11-19: the dash cut's streak
+# A skill with vanish_streak is not drawn through its swing (CharacterVisual
+# hides the model); what is drawn is one straight streak along the line the
+# body takes, from where the swing began to a blade's length past where the
+# body has got to, bright while it crosses and fading after. Drawn on every
+# screen, off the body's place on that screen. A picture only.
+
+const STREAK_FADE := 0.35
+const STREAK_HALF_WIDTH := 0.07
+const STREAK_GLOW_HALF_WIDTH := 0.32
+const STREAK_PAST_BODY := 0.9
+var _streak: MeshInstance3D
+var _streak_from := Vector3.ZERO
+var _streak_along := Vector3.FORWARD
+var _streak_length := 0.0
+var _streak_age := -1.0
+var _streak_swing := 0.0
+var _streak_colour := Color.WHITE
+var streaks_drawn := 0
+
+
+func _start_streak(def: SkillDef) -> void:
+	if _streak == null:
+		return
+	var along := -global_transform.basis.z
+	along.y = 0.0
+	if along.length_squared() < 0.0001:
+		return
+	_streak_along = along.normalized()
+	_streak_from = global_position + Vector3(0.0, def.strike_height * body_scale(), 0.0)
+	_streak_length = 0.0
+	_streak_age = 0.0
+	_streak_swing = def.swing_time()
+	_streak_colour = def.colour
+	streaks_drawn += 1
+
+
+func streak_length() -> float:
+	return _streak_length
+
+
+func _draw_streak(delta: float) -> void:
+	if _streak == null or _streak_age < 0.0:
+		return
+	_streak_age += delta
+	var mesh := _streak.mesh as ImmediateMesh
+	mesh.clear_surfaces()
+	var life := clampf(1.0 - (_streak_age - _streak_swing) / STREAK_FADE, 0.0, 1.0)
+	# The far end follows the body for as long as the streak lives: on another
+	# screen the body's place arrives late and in steps.
+	_streak_length = maxf(_streak_length, (global_position - _streak_from).dot(_streak_along))
+	if life <= 0.0 or _streak_length < 0.05:
+		_streak.visible = false
+		if life <= 0.0:
+			_streak_age = -1.0
+		return
+	var tail := _streak_from
+	var head := _streak_from + _streak_along * (_streak_length + STREAK_PAST_BODY)
+	var widest := tail.lerp(head, 0.72)
+	var across := _streak_along.cross(Vector3.UP).normalized()
+	var core := Color(1.0, 1.0, 1.0)
+	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	# A wide faint one under a thin bright one, each a long point-to-point
+	# sliver; laid flat and stood on edge, so it shows from any camera pitch.
+	for layer: Array in [[STREAK_GLOW_HALF_WIDTH, 0.28, _streak_colour], [STREAK_HALF_WIDTH, 1.0, core]]:
+		for side: Vector3 in [across, Vector3.UP]:
+			var half := side * float(layer[0]) * (1.0 if side == across else 0.6)
+			var tint := layer[2] as Color
+			var strength := float(layer[1]) * life
+			for corner: Array in [
+					[tail, 0.0], [widest + half, strength], [widest - half, strength],
+					[widest + half, strength], [head, strength * 0.7], [widest - half, strength]]:
+				mesh.surface_set_color(Color(tint.r, tint.g, tint.b, float(corner[1])))
+				mesh.surface_add_vertex(corner[0] as Vector3)
+	mesh.surface_end()
+	_streak.visible = true
+
+
 func _process(delta: float) -> void:
+	_draw_streak(delta)
 	if _flash_left > 0.0:
 		_flash_left = maxf(0.0, _flash_left - delta)
 		if _flash_left == 0.0:
@@ -1595,29 +1823,95 @@ func _draw_trail() -> void:
 		if not _swing_active and not _trail_samples.is_empty():
 			_trail_samples.clear()
 		return
-	var now := _swing_t
-	var colour := _swing_def.colour if _swing_def != null else Color("ffd166")
-	# Gathered first: a surface with no vertices is an error, not an empty one.
-	var quads: Array = []
-	for index in range(_trail_samples.size() - 1):
-		var a: Dictionary = _trail_samples[index]
-		var b: Dictionary = _trail_samples[index + 1]
-		var age := now - float(b["at"])
-		var alpha := clampf(1.0 - age / TRAIL_FADE, 0.0, 1.0) * 0.7
-		if alpha <= 0.0:
-			continue
-		quads.append([Color(colour.r, colour.g, colour.b, alpha), a["base"], a["tip"], b["tip"], b["base"]])
-	var any := not quads.is_empty()
+	# 2026-11-19 (the user: "a mess, all wriggles -- just join where the blade
+	# starts to where it ends, in one face"): one flat fan, not a ribbon
+	# stitched from every frame's blade. The blade's samples only say where
+	# the swing went: the middle of the hilts is the fan's centre, the plane
+	# is the one the tips swept (the sum of the little triangles they made
+	# with the centre gives its normal), and the fan runs in that plane from
+	# the first tip's bearing through the angle the tips turned, its outer
+	# edge easing from the first tip's distance to the last's.
+	var last: Dictionary = _trail_samples[_trail_samples.size() - 1]
+	var fade := 1.0 if _swing_active else clampf(1.0 - (_swing_t - float(last["at"])) / TRAIL_FADE, 0.0, 1.0)
+	var fan := _trail_fan() if fade > 0.0 else {}
+	var any := not fan.is_empty()
 	if any:
+		var colour := _swing_def.colour if _swing_def != null else _trail_colour
+		_trail_colour = colour
+		var centre: Vector3 = fan["centre"]
+		var across: Vector3 = fan["across"]
+		var along: Vector3 = fan["along"]
+		var turned: float = fan["turned"]
+		var segments := clampi(int(absf(turned) / deg_to_rad(5.0)), 4, 60)
+		var bright := Color(lerpf(colour.r, 1.0, 0.45), lerpf(colour.g, 1.0, 0.45), lerpf(colour.b, 1.0, 0.45), 1.0)
 		mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
-		for quad: Array in quads:
-			mesh.surface_set_color(quad[0] as Color)
-			for vertex in [quad[1], quad[2], quad[3], quad[1], quad[3], quad[4]]:
-				mesh.surface_add_vertex(vertex as Vector3)
+		var inner_before := Vector3.ZERO
+		var outer_before := Vector3.ZERO
+		var shade_before := 0.0
+		for step in segments + 1:
+			var part := float(step) / float(segments)
+			var bearing := (across * cos(turned * part) + along * sin(turned * part))
+			var reach := lerpf(float(fan["reach_from"]), float(fan["reach_to"]), part)
+			var outer := centre + bearing * reach
+			var inner := centre + bearing * reach * TRAIL_INNER
+			# Faint where the swing began, full where the blade is now.
+			var shade := fade * lerpf(0.12, 1.0, part)
+			if step > 0:
+				for corner: Array in [
+						[inner_before, TRAIL_HILT_ALPHA * shade_before, colour], [outer_before, TRAIL_TIP_ALPHA * shade_before, bright],
+						[outer, TRAIL_TIP_ALPHA * shade, bright], [inner_before, TRAIL_HILT_ALPHA * shade_before, colour],
+						[outer, TRAIL_TIP_ALPHA * shade, bright], [inner, TRAIL_HILT_ALPHA * shade, colour]]:
+					var tint := corner[2] as Color
+					mesh.surface_set_color(Color(tint.r, tint.g, tint.b, float(corner[1])))
+					mesh.surface_add_vertex(corner[0] as Vector3)
+			inner_before = inner
+			outer_before = outer
+			shade_before = shade
 		mesh.surface_end()
 	_trail.visible = any
-	if not any and not _swing_active:
+	if fade <= 0.0 and not _swing_active:
 		_trail_samples.clear()
+
+
+# The fan the blade's samples describe, or {} when there is none to draw: too
+# few samples, or a blade that went along its own length and turned through
+# next to nothing (a thrust has no arc).
+func _trail_fan() -> Dictionary:
+	var count := _trail_samples.size()
+	if count < 3:
+		return {}
+	var centre := Vector3.ZERO
+	for sample in _trail_samples:
+		centre += sample["base"] as Vector3
+	centre /= float(count)
+	var normal := Vector3.ZERO
+	for index in range(count - 1):
+		normal += ((_trail_samples[index]["tip"] as Vector3) - centre).cross((_trail_samples[index + 1]["tip"] as Vector3) - centre)
+	if normal.length() < 0.0005:
+		return {}
+	normal = normal.normalized()
+	var first := (_trail_samples[0]["tip"] as Vector3) - centre
+	first -= normal * first.dot(normal)
+	if first.length() < 0.05:
+		return {}
+	var across := first.normalized()
+	var along := normal.cross(across)
+	# The angle the tips turned through in the plane, added up sample to
+	# sample so that a swing of more than half a turn is counted whole.
+	var turned := 0.0
+	var before := 0.0
+	var reach_to := first.length()
+	for index in range(1, count):
+		var arm := (_trail_samples[index]["tip"] as Vector3) - centre
+		arm -= normal * arm.dot(normal)
+		var bearing := atan2(arm.dot(along), arm.dot(across))
+		turned += wrapf(bearing - before, -PI, PI)
+		before = bearing
+		reach_to = arm.length()
+	if absf(turned) < deg_to_rad(TRAIL_MIN_TURN_DEG):
+		return {}
+	return {"centre": centre, "across": across, "along": along, "turned": turned,
+		"reach_from": first.length(), "reach_to": reach_to}
 
 
 # C-0: hold the swing still for this many render frames. The hit feedback set

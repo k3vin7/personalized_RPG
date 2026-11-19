@@ -25,6 +25,12 @@ const STAT_RANGES := {
 	# comparing bare against equipped needs.
 	"gear_weight": Vector2(0.0, 80.0),
 }
+# The model profiles (CharacterVisual.PROFILES) a button is shown for.
+const MODEL_LABELS := {
+	"none": "없음 (떠 있는 손)",
+	"tripo": "Tripo 사람",
+	"kaykit": "KayKit 기사",
+}
 const ARC_STEPS := 90
 const PANEL_WIDTH := 600.0
 
@@ -50,6 +56,8 @@ const GROUP_LABELS := {
 const LOCAL_LIMITS := {
 	"camera_zoom": Vector2(0.0, 1.0),
 	"camera_near_mult": Vector2(0.1, 1.0),
+	"camera_stop_near_m": Vector2(4.0, 20.0),
+	"camera_stop_far_m": Vector2(18.0, 40.0),
 	"camera_pitch_deg": Vector2(10.0, 89.0),
 	"camera_near_pitch_deg": Vector2(20.0, 89.0),
 	"camera_zoom_step": Vector2(0.02, 0.5),
@@ -58,6 +66,11 @@ const LOCAL_LIMITS := {
 	"visual_run_speed": Vector2(0.0, 20.0),
 	"visual_walk_back_speed": Vector2(0.0, 20.0),
 	"visual_stride_max": Vector2(1.0, 8.0),
+	"visual_thrust_lean_deg": Vector2(0.0, 60.0),
+	"visual_chop_straighten": Vector2(0.0, 1.0),
+	"swing_sound_db": Vector2(-60.0, 6.0),
+	"swing_kick_m": Vector2(0.0, 0.4),
+	"swing_kick_time": Vector2(0.05, 0.5),
 }
 # A Korean name beside the field names that come up in the work order and the
 # feel questions. The field name stays: it is what the documents call it.
@@ -74,6 +87,8 @@ const FIELD_LABELS := {
 	"camera_distance": "카메라 거리 (줌 1)",
 	"camera_pitch_deg": "카메라 각 (줌 1, 지면 기준)",
 	"camera_near_mult": "최대 확대 거리 배수",
+	"camera_stop_near_m": "휠 클릭 확대 단계: 캐릭터까지 거리 (m)",
+	"camera_stop_far_m": "휠 클릭 축소 단계: 캐릭터까지 거리 (m)",
 	"camera_near_pitch_deg": "각 하한 (줌 0, 지면 기준)",
 	"camera_zoom_step": "휠 한 칸 줌 폭 (지금 안 씀)",
 	"camera_zoom_smoothing": "줌 따라가는 속도",
@@ -90,6 +105,8 @@ const FIELD_LABELS := {
 	"visual_run_speed": "달리기 그림 시작 속도 (m/s, 아래는 걷기)",
 	"visual_walk_back_speed": "걷기 그림 복귀 속도 (m/s)",
 	"visual_stride_max": "보행 클립 최대 배속",
+	"visual_thrust_lean_deg": "찌르기 때 허리 숙이는 각도 (도)",
+	"visual_chop_straighten": "종베기 때 허리 세우기 (0 = 동작 그대로, 1 = 꼿꼿이)",
 	"mount_summon_time": "말 소환 시간 (초)",
 	"mount_linger_time": "내린 뒤 말이 남는 시간 (초)",
 	"mount_length": "말 길이 (m)",
@@ -156,6 +173,11 @@ const FIELD_LABELS := {
 	"thrust_speed_bonus": "찌르기 속도 보정 계수",
 	"side_cut_angle": "횡베기 부채꼴 각도 (바닥 표시, C-1g-c까지)",
 	"side_cut_arc_deg": "횡베기 호 (판정·연출·궤적, 좌우 합)",
+	"dash_cut_windup": "일섬 준비 (숙이는 시간, 초)",
+	"dash_cut_recovery": "일섬 회복 (초)",
+	"dash_cut_cooldown": "일섬 재사용 대기 (초)",
+	"dash_cut_range": "일섬 판정 길이 (돌진 거리 + 칼 길이)",
+	"dash_cut_width": "일섬 판정 폭",
 	"overhead_cut_width": "종베기 칼날 폭",
 	"overhead_cut_arc_deg": "종베기 수직 호 (머리 위에서 앞으로)",
 	"swing_arc_margin_deg": "판정 호 - 애니 호 허용 여유",
@@ -178,6 +200,14 @@ const FIELD_LABELS := {
 	"great_shield_weight": "큰 방패 무게 (kg)",
 	"shield_slam_height_bonus": "찍기 m당 피해 보정",
 	"dash_combo_window": "돌진 조합 창",
+	"start_weapon": "시작할 때 든 무기 (0 없음 · 1 검)",
+	"side_cut_2_windup": "횡베기 2타 준비 (초)",
+	"side_cut_2_recovery": "횡베기 2타 회복 (초)",
+	"combo_window": "연속기: 앞 타가 끝난 뒤에도 이어지는 시간 (초, 0 = 끝나기 전에 눌러야 함)",
+	"combo_early_slack": "연속기: 서버가 일찍 온 다음 타를 받아주는 시간 (초)",
+	"thrust_2_windup": "찌르기 2타(밀어차기) 준비 (초)",
+	"thrust_2_recovery": "찌르기 2타(밀어차기) 회복 (초)",
+	"combo_grace": "연속기: 서버가 더 봐주는 시간 (지연 몫, 초)",
 	"dash_combo_mult_max": "돌진 조합 최대 배율(간격 0)",
 	"combo_jitter_allow": "조합 수신 간격 허용 오차(치트 검사)",
 	"shove_power": "밀치기 힘",
@@ -211,6 +241,10 @@ const FIELD_LABELS := {
 	"hitstop_frames": "히트스탑 (프레임)",
 	"hit_flash_time": "피격 플래시 (초)",
 	"hit_particle_count": "타격 파티클 개수",
+	"swing_feel_enabled": "휘두름 연출 켜기 (소리 · 카메라 밀기)",
+	"swing_sound_db": "휘두르는 소리 크기 (dB, -60 이하 = 끔)",
+	"swing_kick_m": "휘두를 때 카메라 밀리는 거리 (m)",
+	"swing_kick_time": "카메라가 돌아오는 시간 (초)",
 	"hit_sound_enabled": "사운드 훅 켜기",
 	"camera_shake_amp": "카메라 흔들림 세기 (m)",
 	"camera_shake_time": "카메라 흔들림 시간 (초)",
@@ -239,6 +273,11 @@ var _arc_enabled := false
 # The race and weapon buttons, by kind; the one this body has is lit.
 var _race_buttons := {}
 var _weapon_buttons := {}
+var _model_buttons := {}
+# Preloaded, not a class_name: nothing else needs the name, and a new global
+# class is not seen by a run until the editor has rescanned.
+const CAST_TRACE := preload("res://scripts/debug/cast_trace.gd")
+var _cast_trace: Node
 var _race_status: Label
 # The ability rows, by field: they follow the server's value (a race change
 # rewrites it) whenever the slider is not the thing being dragged.
@@ -400,6 +439,39 @@ func _build_ui() -> void:
 	arc_toggle.button_pressed = _arc_enabled
 	arc_toggle.toggled.connect(func(on: bool) -> void: _arc_enabled = on)
 	show.add_child(arc_toggle)
+	# The model every body is drawn with on this screen. Drawn only: the
+	# body, its size and every ruling are the same under any of them.
+	show.add_child(_hint("캐릭터 모델: 이 화면에 보이는 모든 캐릭터의 그림만 바뀐다 (판정·크기는 그대로)."))
+	var model_row := HBoxContainer.new()
+	_model_buttons.clear()
+	for profile_name in MODEL_LABELS.keys():
+		var button := Button.new()
+		button.name = "Model_%s" % profile_name
+		button.text = MODEL_LABELS[profile_name]
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.pressed.connect(func() -> void: _use_model(profile_name))
+		model_row.add_child(button)
+		_model_buttons[profile_name] = button
+	show.add_child(model_row)
+	_refresh_model_buttons()
+	# The recorder: what this screen drew of this body for the next 8 s, frame
+	# by frame, saved to a file. For a complaint the eye has and a check
+	# cannot reproduce.
+	var trace_button := Button.new()
+	trace_button.name = "CastTrace"
+	trace_button.text = "동작 기록 시작 (누른 뒤 8초 동안 내 캐릭터를 프레임마다 기록)"
+	var trace_status := _hint("기록을 누르고 F1을 닫은 뒤, 이상해 보이는 동작을 하면 된다.")
+	trace_button.pressed.connect(func() -> void:
+		if _cast_trace == null:
+			_cast_trace = CAST_TRACE.new()
+			_cast_trace.name = "CastTrace"
+			add_child(_cast_trace)
+			_cast_trace.connect("finished", func(path: String) -> void:
+				trace_status.text = "기록 끝. 저장: %s" % path)
+		_cast_trace.call("start", player)
+		trace_status.text = "기록 중 (8초)...")
+	show.add_child(trace_button)
+	show.add_child(trace_status)
 	if OS.is_debug_build():
 		var boundary_toggle := CheckButton.new()
 		boundary_toggle.name = "DebugBoundaries"
@@ -551,6 +623,22 @@ func _build_ui() -> void:
 				func(new_value: float) -> void:
 					for copy in Skills.every_copy(id):
 						copy.set(field, new_value)))
+
+
+# Swaps the model profile and rebuilds the picture of every body in the
+# scene. The first use of a profile reads its files, which takes a moment.
+func _use_model(profile_name: String) -> void:
+	if profile_name == CharacterVisual.profile_name():
+		return
+	CharacterVisual.use_profile(profile_name)
+	for node in get_tree().root.find_children("*", "Player", true, false):
+		(node as Player).rebuild_visual()
+	_refresh_model_buttons()
+
+
+func _refresh_model_buttons() -> void:
+	for profile_name in _model_buttons:
+		(_model_buttons[profile_name] as Button).disabled = profile_name == CharacterVisual.profile_name()
 
 
 # A fold: a button with the title, and a box under it that the button shows

@@ -17,8 +17,20 @@ const PATHS := {
 	# C-1b: the sword's four. Which weapon holds them is the WeaponDef's
 	# (skill_ids), not a list here.
 	"thrust": "res://data/skills/thrust.tres",
+	# 2026-11-18: the thrust's second step, the push kick that frees the
+	# blade. Bare numbers (the kick's): it is the foot that lands.
+	"thrust_2": "res://data/skills/thrust_2.tres",
 	"side_cut": "res://data/skills/side_cut.tres",
+	# 2026-11-18: the side cut's second step. Never in a slot: the side cut
+	# pressed again while it is going casts it. (A third step was taken out
+	# on 2026-11-19.)
+	"side_cut_2": "res://data/skills/side_cut_2.tres",
+	# Out of the sword's slots since 2026-11-19 (the dash cut took its place);
+	# the file and its numbers stay for the checks that cast it by name.
 	"overhead_cut": "res://data/skills/overhead_cut.tres",
+	# 2026-11-19: low, the sword hand at the left hip, then gone along a
+	# straight line and through whatever stood on it.
+	"dash_cut": "res://data/skills/dash_cut.tres",
 	"parry": "res://data/skills/parry.tres",
 	# C-1c: the shield's four.
 	"shield_raise": "res://data/skills/shield_raise.tres",

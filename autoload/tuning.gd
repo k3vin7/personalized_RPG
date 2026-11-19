@@ -88,8 +88,24 @@ static func field_names(resource: Resource) -> PackedStringArray:
 	return out
 
 
+# Asked by every SkillDef.value(): several times a frame by a swing's picture
+# and several times a physics tick by the server's sweep. The names are the
+# script's exported fields, which do not change while the game runs, so they
+# are gathered once per script (2026-11-18: gathered on every call, 231
+# fields, this was 0.54 ms a call and a side cut slowed the whole screen).
+var _field_sets := {}
+
+
 func is_server_field(field: String) -> bool:
-	return field in field_names(server)
+	if server == null:
+		return false
+	var script: Variant = server.get_script()
+	if not _field_sets.has(script):
+		var names := {}
+		for name_text in field_names(server):
+			names[name_text] = true
+		_field_sets[script] = names
+	return (_field_sets[script] as Dictionary).has(field)
 
 
 func server_default(field: String) -> Variant:

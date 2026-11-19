@@ -69,11 +69,20 @@ extends Resource
 # 2026-11-17 (later): the game starts nine wheel steps in from the far end,
 # zoom 0.1 -- 17.77 m away at 37 deg, about 23 m of ground across. The far
 # end (zoom 1) is where it was.
-@export var camera_zoom: float = 0.1
+# 2026-11-18: the middle button's three stops, on the user's word that the
+# near one hardly came closer (16.6 m against the default 17.8) and the far
+# one went too far (38.6 m). The nearest the view can go is now 0.2 of the
+# distance (7.7 m; it was 0.4, 15.5 m), and the near and far stops are their
+# own numbers, in metres from the body: 10.5 and 27. The view the game starts
+# at is the same one -- 17.77 m away at 37 degrees -- which on the new scale
+# is zoom 0.325 with the near tilt at 28.33 degrees.
+@export var camera_zoom: float = 0.325
 @export var camera_distance: float = 38.64
 @export var camera_pitch_deg: float = 55.0
-@export var camera_near_mult: float = 0.4
-@export var camera_near_pitch_deg: float = 35.0
+@export var camera_near_mult: float = 0.2
+@export var camera_near_pitch_deg: float = 28.3333
+@export var camera_stop_near_m: float = 10.5
+@export var camera_stop_far_m: float = 27.0
 @export var camera_zoom_step: float = 0.1
 @export var camera_zoom_smoothing: float = 10.0
 # 2026-11-17: looking around. F2 lets go of the body and the arrow keys slide
@@ -111,9 +120,30 @@ extends Resource
 # body ran. visual_stride_max caps how fast a gait clip may be played to
 # match the body's pace (the walk clip's own pace is about 1 m/s, so at 6 m/s
 # it plays at this cap and the feet slide).
-@export var visual_run_speed: float = 9.0
-@export var visual_walk_back_speed: float = 7.0
+# 2026-11-18: the run is the default gait again (the user's call): 2.5 / 1.2,
+# so the 6 m/s base pace runs and the walk shows only on a slow body.
+@export var visual_run_speed: float = 2.5
+@export var visual_walk_back_speed: float = 1.2
 @export var visual_stride_max: float = 2.0
+# 2026-11-18: how far the model bends forward at the waist through a thrust
+# (and the kick that follows it), degrees. The clip itself stands upright
+# with the hand at chest height; bent, the blade goes in at the middle of a
+# body and a little further out. Drawn only.
+@export var visual_thrust_lean_deg: float = 25.0
+# 2026-11-18: how much of the overhead cut clip's own forward bend is taken
+# back out, 0 (the clip as it is: chest 98 degrees forward at the end) to 1
+# (the chest kept upright throughout). Drawn only.
+@export var visual_chop_straighten: float = 0.6
+
+@export_group("Swing feel")
+# 2026-11-19: what a swing does whether or not it lands. All drawn or heard
+# on this screen only. swing_sound_db under -60 is silence; the kick is how
+# far the view is pushed the way the blow goes and how long it takes to come
+# back.
+@export var swing_feel_enabled: bool = true
+@export var swing_sound_db: float = -6.0
+@export var swing_kick_m: float = 0.08
+@export var swing_kick_time: float = 0.14
 
 @export_group("Terrain")
 # T-1b: a client's terrain collision is a patch around its own body

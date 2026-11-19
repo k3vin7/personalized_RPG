@@ -1,0 +1,22 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+ERROR: Can't create shader cache folder, no shader caching will happen: user://
+   at: RasterizerGLES3 (drivers/gles3/rasterizer_gles3.cpp:345)
+OpenGL API 3.3.0 NVIDIA 610.88 - Compatibility - Using Device: NVIDIA - NVIDIA GeForce GTX 1660 SUPER
+
+REVIEW draw t=0.00 visible=false
+REVIEW draw t=0.26 visible=false
+REVIEW draw t=0.50 visible=true
+REVIEW draw t=0.74 visible=true
+REVIEW idle clip=ss_idle length=2.533s active_from=0% seam=0.000m min_tip_floor=2.010m furthest_forward_at=63% final_tip=(0.118268, 1.120023, -0.38395)
+REVIEW walk clip=ss_walk length=1.100s active_from=0% seam=0.000m min_tip_floor=2.072m furthest_forward_at=58% final_tip=(0.133683, 1.284292, -0.600548)
+REVIEW run clip=ss_run length=0.800s active_from=0% seam=0.000m min_tip_floor=2.101m furthest_forward_at=13% final_tip=(0.246091, 1.222575, -0.672065)
+REVIEW jump clip=ss_jump length=0.967s active_from=0% seam=0.001m min_tip_floor=1.615m furthest_forward_at=54% final_tip=(0.125782, 1.119643, -0.382553)
+REVIEW overhead_cut clip=chop_single length=1.083s active_from=56% seam=1.885m min_tip_floor=1.220m furthest_forward_at=83% final_tip=(0.465485, 0.319792, -1.310912)
+REVIEW side_cut clip=ss_cut_1 length=0.830s active_from=74% seam=2.335m min_tip_floor=0.293m furthest_forward_at=88% final_tip=(-1.363598, -0.607424, -0.906149)
+REVIEW side_cut_2 clip=ss_cut_2 length=0.520s active_from=61% seam=2.723m min_tip_floor=0.292m furthest_forward_at=88% final_tip=(0.843363, 0.491711, -1.847698)
+REVIEW side_cut_3 clip=ss_cut_3 length=1.170s active_from=82% seam=1.029m min_tip_floor=0.486m furthest_forward_at=100% final_tip=(0.345055, -0.3842, -2.582136)
+REVIEW thrust clip=ss_thrust length=0.520s active_from=56% seam=1.499m min_tip_floor=0.436m furthest_forward_at=100% final_tip=(-0.087088, 0.781953, -1.820777)
+REVIEW thrust_2 clip=ss_thrust_kick length=0.520s active_from=71% seam=2.254m min_tip_floor=0.760m furthest_forward_at=25% final_tip=(-0.605418, -0.139812, -0.841968)
+REVIEW parry clip=ss_parry length=0.620s active_from=0% seam=1.165m min_tip_floor=1.816m furthest_forward_at=100% final_tip=(-0.358969, 1.520948, 0.054639)
+REVIEW sheathe at 0.03s hand sword valid=false, torso clip=ss_sheathe
+REVIEW_DONE

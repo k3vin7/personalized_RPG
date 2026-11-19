@@ -147,7 +147,24 @@ var wielded: WeaponDef = null
 # the value and this file only names the skill. Fields the table lacks fall
 # back to the ones above.
 @export var tuning_prefix: String = ""
-
+# 2026-11-18: a second table to read where the first has no such field: a
+# combo step names its own windup and recovery and takes the rest from the
+# skill it is a step of.
+@export var tuning_fallback_prefix: String = ""
+# 2026-11-18: a combo. combo_next is the skill a press of this slot casts
+# when the press comes while this one is still going (or within
+# Tuning.server.combo_window of its end): it follows the moment this one's
+# swing is through, with no recovery between. combo_of
+# is the slot's skill, on a step (empty on the slot's own). The owner picks
+# the step from its own presses; the server keeps its own record of the
+# chain and refuses a step out of turn.
+@export var combo_next: String = ""
+@export var combo_of: String = ""
+# The next step opens only if this one's blow landed on a body (the thrust:
+# there is nothing to kick off and no blade to pull out of a miss). The
+# server opens the chain at the hit and tells the owner; a parried blow and a
+# rock do not count.
+@export var combo_needs_hit: bool = false
 @export_group("Display")
 # The procedural show: how far the capsule leans into the windup and back out
 # of the recovery, and the bar that is the strike -- how far it reaches and
@@ -157,6 +174,10 @@ var wielded: WeaponDef = null
 @export var strike_extent: float = 0.8
 @export var strike_height: float = 0.3
 @export var colour: Color = Color("ffd166")
+# 2026-11-19 (the dash cut): through the swing the body is not drawn, and a
+# straight streak is, from where the swing began to where the body has got
+# to. A picture only: the body is where it always was, and is hit there.
+@export var vanish_streak: bool = false
 
 @export_group("Range display")
 # C-0. What the key shows before the left button casts. reach and width above
@@ -212,6 +233,17 @@ var wielded: WeaponDef = null
 # the windup and the swing. 0 stands still. The body's own move, under
 # the move check like any other; the ruling reads the body where it is.
 @export var step_distance: float = 0.0
+# 2026-11-18: when in the cast (0..1 of windup + swing) the step is taken:
+# the body stands until step_from and has covered step_distance by step_to.
+# 0 and 1 spread it evenly over the whole cast, as before. Set to where the
+# clip's own feet move, so they do not slide under a body moving on its own.
+@export var step_from: float = 0.0
+@export var step_to: float = 1.0
+# 2026-11-19: metres more the body goes forward through the recovery, after
+# the swing (the overhead cut: its blow ends with the other foot forward, and
+# the way back into the stance is one more step on). The body's own move like
+# step_distance, under the same move check. 0: it stands through its recovery.
+@export var recovery_step: float = 0.0
 
 @export_group("Feedback")
 # C-0: a hit by this skill shakes the camera as well as the rest of the hit
@@ -261,14 +293,17 @@ func catch_force_value() -> float:
 # resource's own value otherwise.
 func value(field: String) -> float:
 	var number := float(get(field))
-	if tuning_prefix != "":
-		var key := "%s_%s" % [tuning_prefix, TUNING_SUFFIX.get(field, field)]
+	for prefix in [tuning_prefix, tuning_fallback_prefix]:
+		if prefix == "":
+			continue
+		var key := "%s_%s" % [prefix, TUNING_SUFFIX.get(field, field)]
 		if Tuning.is_server_field(key):
 			number = float(Tuning.server.get(key))
+			break
 	if wielded != null:
-		number *= wielded.mult_for(id, field)
+		# A weapon's multipliers are named for the slot's skill.
+		number *= wielded.mult_for(combo_of if combo_of != "" else id, field)
 	return number
-
 
 # The attack power behind the '피해' coefficient: the weapon in the hand when
 # this is a weapon's copy, the skill's own weapon otherwise.

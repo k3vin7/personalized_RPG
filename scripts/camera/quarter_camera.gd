@@ -44,6 +44,9 @@ var _shake_left := 0.0
 var _shake_time := 0.0
 var _shake_amp := 0.0
 var shakes_started := 0
+var _kick := Vector3.ZERO
+var _kick_rate := 20.0
+var kicks_started := 0
 # For the checks: wheel notches taken.
 var wheel_steps := 0
 
@@ -133,8 +136,22 @@ func _apply_view(zoom: float) -> void:
 # between the default and the nearest), the default the game starts at, far
 # (the farthest the view goes).
 func zoom_stops() -> Array[float]:
-	var stops: Array[float] = [_zoom_default * 0.5, _zoom_default, 1.0]
+	# 2026-11-18: the near and far stops are distances of their own
+	# (Tuning.values.camera_stop_near_m / _far_m), not half the default and
+	# the far end: those were 16.6 m and 38.6 m about a default of 17.8.
+	var stops: Array[float] = [
+		zoom_for_distance(Tuning.values.camera_stop_near_m),
+		_zoom_default,
+		zoom_for_distance(Tuning.values.camera_stop_far_m)]
 	return stops
+
+
+# The zoom level at which the view is this many metres from the body.
+static func zoom_for_distance(metres: float) -> float:
+	var span: float = 1.0 - Tuning.values.camera_near_mult
+	if span <= 0.0001 or Tuning.values.camera_distance <= 0.0001:
+		return 0.0
+	return clampf((metres / Tuning.values.camera_distance - Tuning.values.camera_near_mult) / span, 0.0, 1.0)
 
 
 # The next stop after the one the zoom is nearest to: near -> default -> far
@@ -240,7 +257,8 @@ func _process(delta: float) -> void:
 		# corner after it, so the body stays where it is on the screen.
 		_smoothed = wanted
 	_smoothed = _smoothed.lerp(wanted, 1.0 - exp(-follow_smoothing * delta))
-	global_position = _smoothed + _shake_offset(delta)
+	_kick = _kick.lerp(Vector3.ZERO, 1.0 - exp(-_kick_rate * delta))
+	global_position = _smoothed + _shake_offset(delta) + _kick
 
 
 # Horizontal, normalised. Used by wall face classification.
@@ -266,6 +284,20 @@ func shake(amplitude: float, seconds: float) -> void:
 
 func is_shaking() -> bool:
 	return _shake_left > 0.0
+
+
+# 2026-11-19: a push, not a shake. The view is set this far along the ground
+# in `direction` at once and eases back over about `seconds`: a swing's own
+# weight, felt whether or not it lands. Like the shake it is kept apart from
+# the follow, and the view's angle never changes.
+func kick(direction: Vector3, metres: float, seconds: float) -> void:
+	var flat := Vector3(direction.x, 0.0, direction.z)
+	if metres <= 0.0 or seconds <= 0.0 or flat.length_squared() < 0.0001:
+		return
+	_kick = flat.normalized() * metres
+	# The offset has decayed to a few per cent by `seconds`.
+	_kick_rate = 3.5 / seconds
+	kicks_started += 1
 
 
 func _shake_offset(delta: float) -> Vector3:

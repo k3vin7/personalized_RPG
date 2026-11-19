@@ -1,0 +1,33 @@
+[gd_resource type="Resource" script_class="SkillDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/skill_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "side_cut_2"
+label = "횡베기 2타"
+hands = 1
+intent = -1
+outcome = 0
+usable_while_holding = false
+tuning_prefix = "side_cut_2"
+tuning_fallback_prefix = "side_cut"
+weapon_id = "sword"
+skip_airborne = true
+windup_lean_deg = 0.0
+recovery_lean_deg = 0.0
+strike_extent = 1.1
+strike_height = 0.15
+colour = Color(0.8745, 0.9020, 0.9373, 1)
+range_shape = 3
+shape_angle_deg = 120.0
+arc_plane = 0
+arc_duration = 0.18
+trail = true
+feedback_big = true
+step_distance = 0.2
+step_to = 0.6
+arc_reversed = true
+arc_centred = true
+judge_by_sweep = true
+combo_of = "side_cut"
