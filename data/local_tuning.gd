@@ -125,6 +125,16 @@ extends Resource
 @export var visual_run_speed: float = 2.5
 @export var visual_walk_back_speed: float = 1.2
 @export var visual_stride_max: float = 2.0
+# 2026-11-24 (the user): the dash's picture. A dodge clip (front, right, left,
+# back of the way the body faces) played in place at this speed while the
+# body itself moves faster, and an afterimage of the body's pose left behind
+# every dash_trail_interval, fading over dash_trail_life. Drawn only.
+@export var visual_dodge_speed: float = 1.5
+@export var dash_trail_enabled: bool = true
+@export var dash_trail_interval: float = 0.04
+@export var dash_trail_life: float = 0.2
+@export var dash_trail_count: int = 8
+@export var dash_trail_colour: Color = Color(0.55, 0.8, 1.0, 0.45)
 # 2026-11-18: how far the model bends forward at the waist through a thrust
 # (and the kick that follows it), degrees. The clip itself stands upright
 # with the hand at chest height; bent, the blade goes in at the middle of a
@@ -188,6 +198,10 @@ extends Resource
 @export var hitstop_frames: int = 3
 # Seconds the body that was hit shows white.
 @export var hit_flash_time: float = 0.12
+# 2026-11-23: the flinch's picture: how much the body squashes (share of
+# its height) and how far a wolf's body jerks back (m) at the peak.
+@export var flinch_squash: float = 0.15
+@export var flinch_recoil: float = 0.12
 # Specks out of the point of contact.
 @export var hit_particle_count: int = 12
 # The sound hook: a stream dropped into HitFeedback's player plays here.

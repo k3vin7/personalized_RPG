@@ -89,6 +89,8 @@ var _head_stand_left := 0.0
 var _head_body: Node3D
 # How long the body is still carrying a push rather than its own move order.
 var _pushed_left := 0.0
+# Whether a push's window was open at the start of this physics step.
+var _push_running := false
 # Riding: the horse's speed along its own heading, and the physics frame it
 # was last driven on (a gap means the speed is stale and is read back off
 # the body). For the checks: the fastest turn asked of it, degrees a second.
@@ -410,7 +412,7 @@ func press_dash() -> void:
 		mounted_presses_dropped += 1
 		dismount_for_skill()
 		return
-	if player.is_incapacitated():
+	if player.is_incapacitated() and not _dash_may_cancel():
 		return
 	if Tuning.values.smart_key_enabled:
 		request_dash()
@@ -530,6 +532,7 @@ func set_target(world_point: Vector3) -> void:
 	# orders again.
 	_clear_intent()
 	_pushed_left = 0.0
+	_push_running = false
 	_target = world_point
 	_has_target = true
 	_agent.target_position = world_point
@@ -620,6 +623,13 @@ func _physics_process(delta: float) -> void:
 	# hold) ends the lip's hold on the body at once.
 	_was_on_step = _on_step
 	_on_step = false
+	# 2026-11-24: the slide window runs out whatever the body is doing. It was
+	# only counted down on the walking path, so a push taken in a cast (or
+	# lying down) was still "live" at the next press, and a rising cut cast
+	# there dropped its path on its first step (the body stayed down while the
+	# clip leapt).
+	_push_running = _pushed_left > 0.0
+	_pushed_left = maxf(0.0, _pushed_left - delta)
 	if player.state == Player.State.DEAD:
 		# Nothing moves while dead; the body waits where it fell.
 		return
@@ -702,12 +712,11 @@ func _ground_step(delta: float) -> void:
 		_launch_jump()
 		return
 
-	var pushed := _pushed_left > 0.0
-	if _pushed_left > 0.0:
+	var pushed := _push_running
+	if pushed:
 		# Still carrying a push. The move order does not get to overwrite it;
 		# it rubs off against the ground instead, and a fresh click cancels it
 		# because set_target() clears the window.
-		_pushed_left -= delta
 		var rub: float = Tuning.server.force_slide_friction * delta
 		player.velocity.x = move_toward(player.velocity.x, 0.0, rub)
 		player.velocity.z = move_toward(player.velocity.z, 0.0, rub)
@@ -893,6 +902,7 @@ func _step_down() -> bool:
 func order_straight(world_point: Vector3) -> void:
 	_clear_intent()
 	_pushed_left = 0.0
+	_push_running = false
 	_target = world_point
 	_has_target = true
 	_path = PackedVector3Array([player.global_position, world_point])
@@ -1354,14 +1364,15 @@ func cast_step_left() -> float:
 
 
 func _cast_step(delta: float) -> void:
+	var push_running := _push_running
 	if _motion_def != null:
-		if _pushed_left > 0.0:
+		if push_running:
 			# A push has the body: the path is given up for good.
 			_motion_def = null
 		else:
 			_follow_motion(delta)
 			return
-	if _pushed_left > 0.0 or not (player.is_on_floor() or _was_on_step):
+	if push_running or not (player.is_on_floor() or _was_on_step):
 		# Carrying a push, or off the ground: the stun's physics, as before.
 		_step_left = 0.0
 		_step_wait = 0.0
@@ -1611,12 +1622,23 @@ func seconds_since_dash() -> float:
 	return float(Time.get_ticks_msec() - last_dash_msec) / 1000.0
 
 
+# On the ground: the floor, or a lip the ground step is holding the body on.
+func on_ground() -> bool:
+	return player.is_on_floor() or _was_on_step
+
+
+# 2026-11-24: a recovery the dash may cut short (PlayerSkills.dash_cancel_ready).
+func _dash_may_cancel() -> bool:
+	return player.skills != null and player.skills.dash_cancel_ready()
+
+
 func request_dash() -> bool:
 	_disarm()
 	if player.is_mounted():
 		mounted_presses_dropped += 1
 		return false
-	if player.is_incapacitated() or not player.is_grounded_state() or _dash_cooldown_left > 0.0:
+	var cancels := player.is_incapacitated() and _dash_may_cancel()
+	if (player.is_incapacitated() and not cancels) or not player.is_grounded_state() or _dash_cooldown_left > 0.0:
 		return false
 	var plan := dash_plan()
 	if float(plan["distance"]) <= 0.0:
@@ -1626,10 +1648,12 @@ func request_dash() -> bool:
 		return false
 	# C-1b': the cost comes off on the server when the dash notice arrives
 	# (_rule_dash); this reads the replica to refuse an empty one.
+	if cancels and not player.skills.cancel_for_dash():
+		return false
 	_dash_direction = cursor_direction()
-	# The body faces where it dashes, at once: a dash is too short for the
-	# eased turn, and nothing else turns the body while it is in DASH.
-	player.snap_facing(_dash_direction)
+	# 2026-11-24 (the user): the body keeps the way it faces; the picture
+	# picks the dodge (front, right, left, back) from where the dash goes
+	# against it (CharacterVisual). Nothing turns the body while in DASH.
 	_dash_total = float(plan["distance"])
 	_dash_left = _dash_total
 	_dash_cooldown_left = Tuning.server.dash_cooldown
@@ -1663,6 +1687,11 @@ func cancel_dash() -> void:
 		_end_dash()
 
 
+# The way the dash under way goes (flat), ZERO when none is.
+func dash_direction() -> Vector3:
+	return _dash_direction if is_dashing() else Vector3.ZERO
+
+
 func is_dashing() -> bool:
 	return player.state == Player.State.DASH
 
@@ -1674,7 +1703,9 @@ func _dash_step(delta: float) -> void:
 		return
 	# One speed, whatever the distance: a short dash is a brief one, not a slow
 	# one, and the time it takes is the distance divided by this.
-	var speed := player.dash_speed()
+	# 2026-11-24: braking over the last dash_brake_share of the way, down to
+	# dash_end_speed of it (never faster than the full speed).
+	var speed := player.dash_speed() * dash_speed_share()
 	# Tracked as remaining distance so the last step covers exactly what is
 	# left rather than a frame's worth more or less.
 	var step := minf(speed * delta, _dash_left)
@@ -1704,6 +1735,16 @@ func _dash_step(delta: float) -> void:
 			player.velocity.y = -0.5
 		else:
 			_end_dash()
+
+
+# The share of the full dash speed at this point of the dash.
+func dash_speed_share() -> float:
+	var brake := clampf(Tuning.server.dash_brake_share, 0.0, 1.0)
+	if brake <= 0.0 or _dash_total <= 0.0:
+		return 1.0
+	var gone := 1.0 - _dash_left / _dash_total
+	var into := clampf((gone - (1.0 - brake)) / brake, 0.0, 1.0)
+	return lerpf(1.0, clampf(Tuning.server.dash_end_speed, 0.05, 1.0), into)
 
 
 func _end_dash() -> void:

@@ -98,6 +98,15 @@ enum ArcPlane {
 # Null on the file's own def.
 var wielded: WeaponDef = null
 @export var knock_power: float = 0.0
+# 2026-11-23 (the user): whether the blow pushes a body (a person, a scarecrow,
+# a monster) at all. Off, it pushes nothing and the body flinches instead
+# (Dummy.flinch); knock_power stays in the data for the day it is turned on.
+# A rock is pushed either way. The monsters' own blows have it on.
+@export var knocks_back: bool = false
+# 2026-11-24 (the user): the dash may cut this skill's recovery short from
+# this many seconds after its blade has passed (0: at once); -1 never. The
+# slider <tuning_prefix>_dash_cancel_after overrides it where there is one.
+@export var dash_cancel_after: float = 0.0
 # C-1a: the '스태미나' column. A fixed cost per cast; 0 stamina refuses the
 # cast at the intent (C-1b/C-1d spend it, this stage carries it).
 @export var stamina_cost: float = 0.0

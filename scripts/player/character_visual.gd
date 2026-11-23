@@ -114,6 +114,13 @@ const PROFILES := {
 			"m_walk": {"source": "RootPlace.Walk_F", "travel": "ramp"},
 			"m_run": {"source": "RootPlace.Run_F", "travel": "ramp"},
 			"m_sprint": {"source": "RootPlace.Sprint", "travel": "ramp"},
+			# 2026-11-24 (the user): the dash is a dodge, front/right/left/back
+			# of the way the body faces, played in place (the body goes faster
+			# and farther than the clip does, and leaves afterimages).
+			"m_dodge_f": {"source": "RootPlace.Dodge_F", "travel": "pin"},
+			"m_dodge_r": {"source": "RootPlace.Dodge_R", "travel": "pin"},
+			"m_dodge_l": {"source": "RootPlace.Dodge_L", "travel": "pin"},
+			"m_dodge_b": {"source": "RootPlace.Dodge_B", "travel": "pin"},
 			"m_jump": {"source": "RootPlace.Jump_In", "travel": "pin"},
 			"m_fall": {"source": "InPlace.Jump_Loop"},
 			"m_hit": {"source": "RootPlace.Hit_01_F", "travel": "pin"},
@@ -265,6 +272,10 @@ const PROFILES := {
 			"walk": "m_walk",
 			"run": "m_run",
 			"dash": "m_sprint",
+			"dash_f": "m_dodge_f",
+			"dash_r": "m_dodge_r",
+			"dash_l": "m_dodge_l",
+			"dash_b": "m_dodge_b",
 			"jump": "m_jump",
 			"fall": "m_fall",
 			"slash_h": "m_slash_h",
@@ -3376,6 +3387,7 @@ func _process(delta: float) -> void:
 		return
 	_measure(delta)
 	_hide_for_dash(delta)
+	_trail(delta)
 	if _attack_clip != "":
 		return
 	# The hit clip runs its course unless the body has gone down, died, been
@@ -3526,6 +3538,111 @@ func _hide_for_dash(delta: float) -> void:
 		_model.visible = not hidden
 
 
+# 2026-11-24 (the user): the dash's afterimages. While the body is in DASH,
+# every dash_trail_interval the pose on screen is left behind as a see-through
+# copy that fades out over dash_trail_life. Drawn only, on every screen, off
+# the state every screen has. A pool of dash_trail_count copies, reused
+# oldest first.
+# 2026-11-24 (the user: the screen judders on a dash): a copy is the model's
+# skeleton duplicated once (its meshes and the sword on its bone, nothing
+# that runs: no modifiers, lights or scripts), and leaving one copies the 74
+# bone poses into it -- the skinning stays on the GPU. Baking the posed mesh
+# on the CPU (bake_mesh_from_current_skeleton_pose, 34k vertices, 25 times a
+# second) was the judder.
+var _trail_wait := 0.0
+var _trail_ghosts: Array[Dictionary] = []
+var trail_ghosts_left := 0
+
+
+func _trail(delta: float) -> void:
+	var life := maxf(float(Tuning.values.dash_trail_life), 0.01)
+	for ghost in _trail_ghosts:
+		var left := float(ghost["left"])
+		if left <= 0.0:
+			continue
+		left -= delta
+		ghost["left"] = left
+		if left <= 0.0:
+			(ghost["root"] as Node3D).visible = false
+			continue
+		var colour: Color = Tuning.values.dash_trail_colour
+		colour.a *= left / life
+		(ghost["material"] as StandardMaterial3D).albedo_color = colour
+	if not Tuning.values.dash_trail_enabled or player.state != Player.State.DASH or _model == null 			or not _model.visible or _skeleton == null:
+		_trail_wait = 0.0
+		return
+	_trail_wait -= delta
+	if _trail_wait > 0.0:
+		return
+	_trail_wait = maxf(float(Tuning.values.dash_trail_interval), 0.01)
+	_leave_ghost(life)
+
+
+func _leave_ghost(life: float) -> void:
+	var ghost: Dictionary = {}
+	var oldest := INF
+	for each in _trail_ghosts:
+		if float(each["left"]) <= 0.0:
+			ghost = each
+			break
+		if float(each["left"]) < oldest:
+			oldest = float(each["left"])
+			ghost = each
+	if (ghost.is_empty() or float(ghost["left"]) > 0.0) and _trail_ghosts.size() < maxi(int(Tuning.values.dash_trail_count), 1):
+		ghost = _make_ghost()
+	if ghost.is_empty():
+		return
+	var copy := ghost["skeleton"] as Skeleton3D
+	if copy.get_bone_count() != _skeleton.get_bone_count():
+		return
+	(ghost["root"] as Node3D).global_transform = _skeleton.global_transform
+	for bone in _skeleton.get_bone_count():
+		copy.set_bone_pose(bone, _skeleton.get_bone_pose(bone))
+	for pair: Array in ghost["meshes"]:
+		var source := pair[1] as MeshInstance3D
+		(pair[0] as MeshInstance3D).visible = is_instance_valid(source) and source.is_visible_in_tree()
+	ghost["left"] = life
+	(ghost["material"] as StandardMaterial3D).albedo_color = Tuning.values.dash_trail_colour
+	(ghost["root"] as Node3D).visible = true
+	trail_ghosts_left += 1
+
+
+func _make_ghost() -> Dictionary:
+	var root := Node3D.new()
+	root.name = "DashGhost%d" % _trail_ghosts.size()
+	root.top_level = true
+	root.visible = false
+	add_child(root)
+	var copy := _skeleton.duplicate(0) as Skeleton3D
+	_strip_for_ghost(copy)
+	copy.transform = Transform3D.IDENTITY
+	root.add_child(copy)
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var meshes := []
+	for node in copy.find_children("*", "MeshInstance3D", true, false):
+		var mesh := node as MeshInstance3D
+		mesh.material_override = material
+		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		meshes.append([mesh, _skeleton.get_node_or_null(copy.get_path_to(mesh))])
+	var ghost := {"root": root, "skeleton": copy, "material": material, "meshes": meshes, "left": 0.0}
+	_trail_ghosts.append(ghost)
+	return ghost
+
+
+# Only what is drawn stays in a copy: meshes, the nodes that hold them on a
+# bone, and plain parents. Duplicated without scripts (flags 0).
+static func _strip_for_ghost(node: Node) -> void:
+	for child in node.get_children():
+		var keep := child is MeshInstance3D or child is BoneAttachment3D 			or (child.get_class() == "Node3D")
+		if keep and child.get_script() == null:
+			_strip_for_ghost(child)
+		else:
+			node.remove_child(child)
+			child.free()
+
+
 static func _overrides_hit(state: int) -> bool:
 	return state == Player.State.DOWNED or state == Player.State.DEAD \
 		or state == Player.State.STUNNED or state == Player.State.GRABBED
@@ -3540,8 +3657,32 @@ func _measure(delta: float) -> void:
 		# Smoothed hard: a replica's eased position arrives in steps.
 		_h_speed = lerpf(_h_speed, h, 0.1)
 		_v_speed = lerpf(_v_speed, v, 0.3)
+	# 2026-11-24: which way this dash goes against the way the body faces,
+	# taken from its first step on this screen (a replica's too) and kept.
+	if player.state != Player.State.DASH:
+		_dash_side = ""
+	elif _dash_side == "" and _have_last:
+		var flat := Vector3(at.x - _last_position.x, 0.0, at.z - _last_position.z)
+		if flat.length() > 0.004:
+			_dash_side = dash_side_of(flat, -player.global_transform.basis.z)
 	_last_position = at
 	_have_last = true
+
+
+var _dash_side := ""
+
+
+# "f", "r", "l" or "b": the quarter (90 degrees each) of `facing` the move is in.
+static func dash_side_of(move: Vector3, facing: Vector3) -> String:
+	var ahead := Vector2(facing.x, facing.z).normalized()
+	var way := Vector2(move.x, move.z).normalized()
+	var forward := ahead.dot(way)
+	var right := ahead.x * way.y - ahead.y * way.x
+	if absf(forward) >= absf(right):
+		return "f" if forward >= 0.0 else "b"
+	# In the XZ plane seen from above (+Z toward the viewer), a positive
+	# cross of facing x move is a turn to the right.
+	return "r" if right > 0.0 else "l"
 
 
 func _pick_state_clip(force: bool) -> void:
@@ -3567,6 +3708,8 @@ func _pick_state_clip(force: bool) -> void:
 			_anim.speed_scale = clampf(_h_speed / _pace("run"), 0.7, stride_max)
 		"dash":
 			_anim.speed_scale = float(profile()["dash_speed"])
+		"dash_f", "dash_r", "dash_l", "dash_b":
+			_anim.speed_scale = maxf(float(Tuning.values.visual_dodge_speed), 0.05)
 
 
 # The pace the gait clip on screen was made at.
@@ -3598,6 +3741,14 @@ func _state_key() -> String:
 		Player.State.STUNNED:
 			return "stunned"
 		Player.State.DASH:
+			# The dodge for its side, where the profile has one. The owner
+			# knows the way at the press; a replica learns it from the first
+			# step it sees, and shows the front dodge until then.
+			if _dash_side == "" and player.is_local() and player.movement != null 					and player.movement.dash_direction() != Vector3.ZERO:
+				_dash_side = dash_side_of(player.movement.dash_direction(), -player.global_transform.basis.z)
+			var side := _dash_side if _dash_side != "" else "f"
+			if clip_now("dash_" + side) != "":
+				return "dash_" + side
 			return "dash"
 		Player.State.AIRBORNE:
 			return "jump" if _v_speed > 0.5 else "fall"

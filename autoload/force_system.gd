@@ -179,9 +179,13 @@ func judge_knockback(
 	# was hit, 100% holds its ground against more.
 	var tolerance := tolerance_for(target_strength, race_mult) * maxf(tolerance_mult, 0.0)
 	var judged := lift_angle_deg(event) < Tuning.server.knock_lift_angle_deg
+	# 2026-11-24: a push of nothing (a skill that does not knock back, a bite)
+	# throws nobody -- not even a body in the air, which used to be "launched"
+	# by it: the hop up, and a rising cut's path given up mid-leap.
+	var pushes := change.length_squared() > 0.0001
 	return {
 		"h_speed": h_speed,
 		"tolerance": tolerance,
 		"judged": judged,
-		"launched": (not judged) or (not grounded) or h_speed > tolerance,
+		"launched": pushes and ((not judged) or (not grounded) or h_speed > tolerance),
 	}

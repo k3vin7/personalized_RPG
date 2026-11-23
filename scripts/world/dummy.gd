@@ -91,6 +91,16 @@ const TELEGRAPH_FILL_COLOUR := Color(1.0, 0.25, 0.2, 0.65)
 # C-0: the hit flash.
 var _flash_left := 0.0
 var flashes_applied := 0
+# 2026-11-23 (the user): the flinch. Server: the legs held for
+# Tuning.server.flinch_time and, when the blow itself moved nothing, the
+# body stepping back flinch_slide along it (its own velocity). flinches is
+# pushed with the state so every screen draws each one (the picture's clock).
+var flinches := 0
+var _flinch_left := 0.0
+var _flinch_velocity := Vector3.ZERO
+var _flinch_drawn := 0
+var _flinch_draw_left := 0.0
+var _picture: Node3D
 
 
 func setup(at_position: Vector3, dummy_name: String, of_race := NO_RACE) -> void:
@@ -162,6 +172,7 @@ func _build_body() -> void:
 	_material.albedo_color = base_colour()
 	mesh_instance.material_override = _material
 	add_child(mesh_instance)
+	_picture = mesh_instance
 
 
 func _enter_tree() -> void:
@@ -252,6 +263,11 @@ func apply_force_event(event: Dictionary) -> void:
 			velocity.y = Tuning.server.launch_min_up_speed
 	else:
 		velocity += change
+	# 2026-11-23: a blow that did not throw it (or that moved nothing at all)
+	# is a flinch, whatever it weighs. A held slide keeps its own push.
+	var moved := Vector2(change.x, change.z).length() > 0.05 or change.y > 0.05
+	if bool(event.get("hit_applied", false)) and (not launched or not moved) and can_flinch():
+		_start_flinch(event.get("direction", Vector3.ZERO) as Vector3, moved)
 	# C-1a: the HP was taken by apply_hit before this event was sent.
 	_settle_left = RETURN_DELAY
 	_refresh()
@@ -263,6 +279,50 @@ func apply_force_event(event: Dictionary) -> void:
 		HitFeedback.instance.on_hit(self, event.get("hit_point", global_position), float(event.get("damage", 0.0)), big, false, false, skill, int(event.get("id", 0)))
 	print("PLAYGROUND_DUMMY_HIT name=%s hp=%.0f push=%.2f launched=%s tolerance=%.2f" % [
 		name, hp, velocity.length(), launched, float(event.get("knock_tolerance", 0.0))])
+
+
+# Whether a blow may make it flinch now (a wolf's leap cannot be broken).
+func can_flinch() -> bool:
+	return holder_peer == 0 and _pin_left <= 0.0
+
+
+func _start_flinch(direction: Vector3, moved: bool) -> void:
+	var seconds := maxf(Tuning.server.flinch_time, 0.0)
+	if seconds <= 0.0:
+		return
+	_flinch_left = seconds
+	var flat := Vector3(direction.x, 0.0, direction.z)
+	_flinch_velocity = Vector3.ZERO
+	if not moved and not anchored() and flat.length_squared() > 0.0001:
+		_flinch_velocity = flat.normalized() * (maxf(Tuning.server.flinch_slide, 0.0) / seconds)
+	flinches += 1
+	_flinch_drawn = flinches
+	_flinch_draw_left = seconds
+	print("PLAYGROUND_FLINCH name=%s seconds=%.2f slide=%.2f" % [name, seconds, _flinch_velocity.length() * seconds])
+
+
+# Server, each step of a flinch, in place of the legs.
+func _flinch_step(delta: float) -> void:
+	_flinch_left = maxf(0.0, _flinch_left - delta)
+	_settle_left = RETURN_DELAY
+	if is_on_floor() and _flinch_velocity != Vector3.ZERO:
+		velocity.x = _flinch_velocity.x
+		velocity.z = _flinch_velocity.z
+		if _flinch_left == 0.0:
+			velocity.x = 0.0
+			velocity.z = 0.0
+
+
+func flinching() -> bool:
+	return _flinch_left > 0.0
+
+
+# The picture, every peer: 0 -> 1 -> 0 over the flinch.
+func _draw_flinch(amount: float) -> void:
+	if _picture == null:
+		return
+	var squash := Tuning.values.flinch_squash * amount
+	_picture.scale = Vector3(1.0 + squash * 0.5, 1.0 - squash, 1.0 + squash * 0.5)
 
 
 # C-1a: the server's one way of taking HP off a scarecrow (apply_hit).
@@ -332,7 +392,7 @@ func _physics_process(delta: float) -> void:
 			if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 				_state_left = SyncRules.STATE_INTERVAL
 				Net.note_send("dummy.push_state %s" % name)
-				push_state.rpc(global_position, hp, "", hit_ids, hit_damages, rotation.y)
+				push_state.rpc(global_position, hp, "", hit_ids, hit_damages, rotation.y, flinches)
 			return
 	if not is_multiplayer_authority():
 		# Shown, not simulated.
@@ -362,7 +422,7 @@ func _physics_process(delta: float) -> void:
 		if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 			_state_left = SyncRules.STATE_INTERVAL
 			Net.note_send("dummy.push_state %s" % name)
-			push_state.rpc(global_position, hp, attack_phase, hit_ids, hit_damages, rotation.y)
+			push_state.rpc(global_position, hp, attack_phase, hit_ids, hit_damages, rotation.y, flinches)
 		return
 
 	if global_position.y < Tuning.server.kill_plane_y:
@@ -391,7 +451,10 @@ func _physics_process(delta: float) -> void:
 		velocity.x = move_toward(velocity.x, 0.0, 12.0 * delta)
 		velocity.z = move_toward(velocity.z, 0.0, 12.0 * delta)
 
-	_think(delta)
+	if _flinch_left > 0.0:
+		_flinch_step(delta)
+	else:
+		_think(delta)
 	move_and_slide()
 	_attack_step(delta)
 	sync_position = global_position
@@ -400,7 +463,7 @@ func _physics_process(delta: float) -> void:
 	if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 		_state_left = SyncRules.STATE_INTERVAL
 		Net.note_send("dummy.push_state %s" % name)
-		push_state.rpc(global_position, hp, attack_phase, hit_ids, hit_damages, rotation.y)
+		push_state.rpc(global_position, hp, attack_phase, hit_ids, hit_damages, rotation.y, flinches)
 
 
 # What the body does with its own legs, on the server, each step before it
@@ -491,6 +554,10 @@ func _process(delta: float) -> void:
 		_flash_left = maxf(0.0, _flash_left - delta)
 		if _flash_left == 0.0:
 			_refresh()
+	if _flinch_draw_left > 0.0:
+		_flinch_draw_left = maxf(0.0, _flinch_draw_left - delta)
+		var whole := maxf(Tuning.server.flinch_time, 0.001)
+		_draw_flinch(sin(PI * clampf(1.0 - _flinch_draw_left / whole, 0.0, 1.0)))
 	_draw_telegraph()
 
 
@@ -556,8 +623,14 @@ func attack_direction() -> Vector3:
 
 
 @rpc("authority", "call_remote", "unreliable_ordered")
-func push_state(at_position: Vector3, at_hp: float, at_phase := "", ids := PackedInt32Array(), damages := PackedFloat32Array(), at_yaw := 0.0) -> void:
+func push_state(at_position: Vector3, at_hp: float, at_phase := "", ids := PackedInt32Array(), damages := PackedFloat32Array(), at_yaw := 0.0, at_flinches := 0) -> void:
 	sync_position = at_position
+	# 2026-11-23: a flinch the server started since the last packet (the
+	# first packet's are history).
+	if at_flinches != _flinch_drawn:
+		if _has_state:
+			_flinch_draw_left = maxf(Tuning.server.flinch_time, 0.0)
+		_flinch_drawn = at_flinches
 	# The heading: a telegraph is drawn along it, so it has to be the server's
 	# before the phase below starts one.
 	rotation.y = at_yaw

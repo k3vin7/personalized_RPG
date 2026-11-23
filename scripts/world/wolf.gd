@@ -217,6 +217,7 @@ func _build_body() -> void:
 	nose.material_override = _material
 	add_child(nose)
 	_nose_mesh = nose
+	_nose_at = nose.position
 
 
 # The shake-off's windup on every screen (the phase is pushed with the rest
@@ -226,6 +227,7 @@ const SHAKE_SWAY := 0.12
 const SHAKE_RATE := 38.0
 var _body_mesh: MeshInstance3D
 var _nose_mesh: MeshInstance3D
+var _nose_at := Vector3.ZERO
 
 
 func _process(delta: float) -> void:
@@ -242,6 +244,26 @@ func _refresh() -> void:
 	super()
 	if _label != null:
 		_label.text = "늑대 %.0fkg\n%s" % [weight(), _label.text]
+
+
+# 2026-11-23: the flinch's picture: the body squashes down and jerks back
+# (its tail end, +Z) and comes back. The capsule lies on its side, so its
+# own Z is the world's up.
+func _draw_flinch(amount: float) -> void:
+	if _body_mesh == null:
+		return
+	var squash := Tuning.values.flinch_squash * amount
+	_body_mesh.scale = Vector3(1.0 + squash * 0.5, 1.0, 1.0 - squash)
+	var back := Tuning.values.flinch_recoil * amount
+	_body_mesh.position.z = back
+	if _nose_mesh != null:
+		_nose_mesh.position.z = _nose_at.z + back
+		_nose_mesh.position.y = _nose_at.y - squash * radius()
+
+
+# The leap cannot be broken by a blow (see the top), nor a body that is going.
+func can_flinch() -> bool:
+	return super() and not _dead and _dying == 0 and attack_phase != "lunge"
 
 
 # ------------------------------------------------------------ the brain
@@ -656,7 +678,7 @@ func _dead_step(delta: float) -> void:
 	_state_left -= delta
 	if _state_left <= 0.0 and multiplayer.has_multiplayer_peer():
 		_state_left = ServerAuthority.VIEW_HEARTBEAT
-		push_state.rpc(global_position, 0.0, "dead", hit_ids, hit_damages, rotation.y)
+		push_state.rpc(global_position, 0.0, "dead", hit_ids, hit_damages, rotation.y, flinches)
 	_respawn_left -= delta
 	if _respawn_left <= 0.0:
 		_respawn()

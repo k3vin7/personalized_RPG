@@ -138,6 +138,18 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			dash_cooldown = value
+# 2026-11-24 (the user): the dash goes out at its full speed and brakes at the
+# end: over the last dash_brake_share of its distance the speed falls to
+# dash_end_speed of the full one. Never faster than the full speed, so the
+# server's dash allowance is unchanged; the dash takes a little longer.
+@export var dash_brake_share: float = 0.35:
+	set(value):
+		if Tuning.may_write(self):
+			dash_brake_share = value
+@export var dash_end_speed: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			dash_end_speed = value
 
 @export_group("Climb")
 @export var climb_speed: float = 2.0:
@@ -1532,6 +1544,19 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			wolf_interrupt_pause = value
+# 2026-11-23 (the user): the flinch. Every blow that does not throw the body
+# (a knockback skill's held slide included) stops its legs for flinch_time and,
+# when the blow itself moved nothing, the body steps back flinch_slide metres
+# along the blow on its own legs -- the same for every weight (a hit
+# reaction's root motion, not a push: the force door is not touched).
+@export var flinch_time: float = 0.25:
+	set(value):
+		if Tuning.may_write(self):
+			flinch_time = value
+@export var flinch_slide: float = 0.2:
+	set(value):
+		if Tuning.may_write(self):
+			flinch_slide = value
 @export var wolf_bite_damage: float = 8.0:
 	set(value):
 		if Tuning.may_write(self):

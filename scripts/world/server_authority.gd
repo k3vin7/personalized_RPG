@@ -1756,6 +1756,11 @@ func apply_hit(attacker: Node3D, target: Node3D, def: SkillDef, ctx: Dictionary)
 		# A rock has no HP to lose.
 		dealt = 0.0
 	var power := float(ctx.get("power", def.value("knock_power") if def != null else 0.0))
+	# 2026-11-23 (the user): a skill that does not knock back pushes no body;
+	# the body flinches (Dummy._start_flinch). Rocks keep the push, and so
+	# does a party member's (a shove launching a team mate is a step, not a blow).
+	if def != null and not def.knocks_back and not ally and (target is Player or target is Dummy):
+		power = 0.0
 	if perfect:
 		# 2026-11-22: super stance -- the blow pushes nothing -- and the
 		# attacker is held still for one time whatever its blow was.

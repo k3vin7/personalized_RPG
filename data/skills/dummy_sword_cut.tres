@@ -5,6 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = "dummy_sword_cut"
+knocks_back = true
 label = "허수아비 베기"
 intent = -1
 outcome = 0

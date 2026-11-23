@@ -47,6 +47,8 @@ var _armed_slot := -1
 var _cooldown_until := {}
 # Read by the checks.
 var casts_started := 0
+# 2026-11-24: recoveries cut short by a dash.
+var dash_cancels := 0
 var casts_sent := 0
 var presses_ignored := 0
 # M-7: the wall clock when the last intent went out and when the last windup
@@ -929,6 +931,40 @@ func on_interrupted() -> void:
 		player.movement.cancel_cast_step()
 	player.show_skill_phase(null, "")
 	player.clear_predicted()
+
+
+# 2026-11-24 (the user): the dash cuts a recovery short -- once the blade has
+# passed, plus the skill's dash_cancel_after (-1: never) -- with the body
+# on the ground. The blow has landed or missed by then; nothing booked is
+# left to cancel.
+func dash_cancel_ready() -> bool:
+	if _cast_def == null or player.state != Player.State.RECOVERING:
+		return false
+	var after := _cast_def.value("dash_cancel_after")
+	if after < 0.0:
+		return false
+	if player.movement != null and not player.movement.on_ground():
+		return false
+	var since_blow := _cast_def.value("recovery") - _phase_left
+	return since_blow >= _cast_def.swing_time() + after
+
+
+# The cast ends here for the dash that follows (PlayerMovement.request_dash).
+func cancel_for_dash() -> bool:
+	if not dash_cancel_ready():
+		return false
+	dash_cancels += 1
+	print("PLAYGROUND_DASH_CANCEL skill=%s left=%.2f" % [_cast_def.id, _phase_left])
+	_cast_def = null
+	_cast_slot = -1
+	_chain_next = ""
+	_buffered_slot = -1
+	_phase_left = 0.0
+	if player.movement != null:
+		player.movement.cancel_cast_step()
+	player.show_skill_phase(null, "")
+	player.change_state(Player.State.IDLE)
+	return true
 
 
 func _physics_process(delta: float) -> void:

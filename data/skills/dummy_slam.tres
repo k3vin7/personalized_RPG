@@ -5,6 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = "dummy_slam"
+knocks_back = true
 label = "강타"
 intent = -1
 outcome = 1
