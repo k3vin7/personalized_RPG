@@ -145,6 +145,32 @@ extends Resource
 @export var swing_kick_m: float = 0.08
 @export var swing_kick_time: float = 0.14
 
+@export_group("Guard feel")
+# 2026-11-22: a perfect guard's picture starts this far into its clip (the
+# ruling comes at the touch, so the clip's first frames would be late), and
+# holds still this long first (the touch felt).
+@export var guard_anim_lead: float = 0.0
+@export var guard_hitstop: float = 0.0
+# 2026-11-22 (the user): a sword guard pressed with a blow due within its
+# perfect window plus this (seconds) shows the deflect at once, at the press.
+@export var guard_foresight_slack: float = 0.15
+# 2026-11-22 (the user): the blade's glow while a perfect guard's sure crit
+# waits (Player._show_crit_glow), added over the blade's own colour.
+@export var guard_crit_glow_colour: Color = Color(1.0, 0.75, 0.2, 0.6)
+# 2026-11-23 (the user: "너무 조그맣게 빛남"): the glow is a shell grown this
+# far out of the blade's surface (m), plus a light of this reach (m, 0 = none)
+# and strength around the weapon.
+@export_range(0.0, 0.2, 0.005) var guard_crit_glow_grow: float = 0.05
+@export_range(0.0, 5.0, 0.1) var guard_crit_glow_light_range: float = 2.0
+@export_range(0.0, 8.0, 0.1) var guard_crit_glow_light_energy: float = 2.5
+
+# 2026-11-23 (the user): the body the cursor is on (the one a skill will be
+# aimed at, PlayerMovement.hovered_body) is drawn with a rim this colour and
+# this wide (m, out of its surface). Off: no rim; the aim is the same.
+@export var hover_outline_enabled: bool = true
+@export var hover_outline_colour: Color = Color(1.0, 0.25, 0.15, 1.0)
+@export_range(0.005, 0.1, 0.005) var hover_outline_width: float = 0.03
+
 @export_group("Terrain")
 # T-1b: a client's terrain collision is a patch around its own body
 # (Terrain3D DYNAMIC_GAME; the server builds the whole region). Metres of

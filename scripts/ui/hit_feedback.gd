@@ -17,6 +17,8 @@ extends Node3D
 # are two. A report with no id (0) is never folded.
 
 static var instance: HitFeedback
+# How many times the hit burst's particles a perfect guard's spark has.
+const GUARD_SPARK_MULT := 2.5
 
 # How many hit ids are remembered for the fold.
 const REMEMBER_IDS := 64
@@ -93,7 +95,12 @@ func on_hit(target: Node3D, point: Vector3, damage: float, big: bool, by_me: boo
 		if frames > 0 and player != null:
 			player.hitstop(frames)
 			hitstops += 1
-	if target.has_method("flash_hit"):
+	if target is Player:
+		# 2026-11-22: whether it cost anything tells a plain block from a
+		# perfect guard (a picture started at the press gives way to the first).
+		(target as Player).flash_hit(Tuning.values.hit_flash_time, damage > 0.0)
+		flashes += 1
+	elif target.has_method("flash_hit"):
 		target.flash_hit(Tuning.values.hit_flash_time)
 		flashes += 1
 	_burst(point)
@@ -119,8 +126,15 @@ func _shake() -> void:
 
 
 # A few bright specks out of the contact point.
-func _burst(point: Vector3) -> void:
-	var count := int(Tuning.values.hit_particle_count)
+# 2026-11-22 (the user): a perfect guard has no motion of its own for now (the
+# deflect pose is off till a real clip is found), so the touch shows as a
+# spark off the blade: the hit burst, brighter and denser, no sound.
+func guard_spark(point: Vector3) -> void:
+	_burst(point, Color(1.0, 1.0, 0.8), GUARD_SPARK_MULT)
+
+
+func _burst(point: Vector3, colour := Color(1.0, 0.9, 0.6), amount_mult := 1.0) -> void:
+	var count := int(float(Tuning.values.hit_particle_count) * amount_mult)
 	if count <= 0:
 		return
 	var burst := CPUParticles3D.new()
@@ -140,7 +154,7 @@ func _burst(point: Vector3) -> void:
 	burst.mesh = quad
 	var material := StandardMaterial3D.new()
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.albedo_color = Color(1.0, 0.9, 0.6)
+	material.albedo_color = colour
 	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	quad.material = material
 	burst.layers = SOUND_LAYER

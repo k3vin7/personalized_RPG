@@ -20,6 +20,12 @@ const YAW_LERP_RATE := 20.0
 # How often the server sends a body it places (a rock, a scarecrow, a carried
 # person) to every peer.
 const STATE_INTERVAL := 0.05
+# 2026-11-22: a raised guard slows the walk (SkillDef guard_move_mult). The
+# server holds the body to it only once the guard has been up this long:
+# positions sent before the raise can arrive after it. And never below this
+# floor (m/s): a body held still still jitters on the wire.
+const GUARD_SPEED_GRACE := 0.3
+const GUARD_SPEED_FLOOR := 0.5
 
 
 # The fraction of the remaining gap to close this step.

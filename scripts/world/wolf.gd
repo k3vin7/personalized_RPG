@@ -46,11 +46,14 @@ enum Mode {
 # The picture: a capsule on its side, nose along -Z. The shape is temporary
 # like every other body's; the numbers that are judged with (weight, strength,
 # HP, speeds, ranges) are Tuning.server's.
-const BODY_RADIUS := 0.35
-const BODY_LENGTH := 1.3
-# What the judge's rectangles add for this body: between its half width and
-# its half length.
-const HIT_RADIUS := 0.5
+# 2026-11-23: its size is the server's data now (Tuning.server.wolf_body_radius,
+# _body_length, _hit_radius), read through radius() / length() below.
+# The radius the wolves standing in the maps were put down for: a bigger body
+# is lifted by the difference when it enters the world, so its belly is where
+# the old one's was and not in the ground.
+const PLACED_RADIUS := 0.35
+# The nose box, for a body of PLACED_RADIUS; it grows with the body.
+const NOSE_SIZE := Vector3(0.22, 0.2, 0.3)
 const BASE_COLOUR := Color("8a8d91")
 # How close to its mark counts as home, and to a stroll's end as arrived.
 const HOME_RADIUS := 1.0
@@ -76,6 +79,7 @@ var mode := Mode.IDLE
 # Who it is after: the peer it noticed, replaced by whoever hits it.
 var target_peer := 0
 var bites_started := 0
+var shakes_started := 0
 var bites_interrupted := 0
 var corpses_made := 0
 var deaths := 0
@@ -119,12 +123,47 @@ func species() -> String:
 	return "wolf"
 
 
+# The capsule's radius and its length, nose to tail (the species' data).
+static func radius() -> float:
+	return float(Tuning.server.wolf_body_radius)
+
+
+static func length() -> float:
+	return float(Tuning.server.wolf_body_length)
+
+
 func body_radius() -> float:
-	return HIT_RADIUS
+	return float(Tuning.server.wolf_hit_radius)
 
 
 func body_half_height() -> float:
-	return BODY_RADIUS
+	return radius()
+
+
+# How far above or below the top of the back a rider's feet may be: the back
+# is round, so feet off its middle line stand lower.
+const BACK_FEET_BELOW := 0.45
+const BACK_FEET_ABOVE := 0.35
+
+
+func rideable() -> bool:
+	return bool(Tuning.server.wolf_rideable) and not _dead and _dying <= 0
+
+
+# The back is the top of the lying capsule: as long as the body, as wide as
+# it, in the body's own frame (so it turns with the wolf).
+func back_holds(feet: Vector3, reach: float) -> bool:
+	var local := to_local(feet)
+	var over := local.y - radius()
+	if over < -BACK_FEET_BELOW or over > BACK_FEET_ABOVE:
+		return false
+	return absf(local.z) <= length() * 0.5 + reach * 0.5 and absf(local.x) <= radius() + reach * 0.5
+
+
+func _ready() -> void:
+	# Before the scarecrow's _ready takes this place as its mark.
+	position.y += maxf(0.0, radius() - PLACED_RADIUS)
+	super()
 
 
 func attack_def() -> SkillDef:
@@ -150,31 +189,53 @@ func _build_body() -> void:
 	var lying := Basis(Vector3.RIGHT, PI * 0.5)
 	var collision := CollisionShape3D.new()
 	var shape := CapsuleShape3D.new()
-	shape.radius = BODY_RADIUS
-	shape.height = BODY_LENGTH
+	shape.radius = radius()
+	shape.height = length()
 	collision.shape = shape
 	collision.transform.basis = lying
 	add_child(collision)
 
 	var mesh_instance := MeshInstance3D.new()
 	var capsule := CapsuleMesh.new()
-	capsule.radius = BODY_RADIUS
-	capsule.height = BODY_LENGTH
+	capsule.radius = radius()
+	capsule.height = length()
 	mesh_instance.mesh = capsule
 	mesh_instance.transform.basis = lying
 	_material = StandardMaterial3D.new()
 	_material.albedo_color = base_colour()
 	mesh_instance.material_override = _material
 	add_child(mesh_instance)
+	_body_mesh = mesh_instance
 
 	# Which end is the head.
 	var nose := MeshInstance3D.new()
 	var box := BoxMesh.new()
-	box.size = Vector3(0.22, 0.2, 0.3)
+	var grown := radius() / PLACED_RADIUS
+	box.size = NOSE_SIZE * grown
 	nose.mesh = box
-	nose.position = Vector3(0.0, 0.05, -BODY_LENGTH * 0.5)
+	nose.position = Vector3(0.0, 0.05 * grown, -length() * 0.5)
 	nose.material_override = _material
 	add_child(nose)
+	_nose_mesh = nose
+
+
+# The shake-off's windup on every screen (the phase is pushed with the rest
+# of the scarecrow's state): the body sways from side to side. The picture
+# only -- the collider stays where it is.
+const SHAKE_SWAY := 0.12
+const SHAKE_RATE := 38.0
+var _body_mesh: MeshInstance3D
+var _nose_mesh: MeshInstance3D
+
+
+func _process(delta: float) -> void:
+	super(delta)
+	if _body_mesh == null:
+		return
+	var sway := sin(float(Time.get_ticks_msec()) / 1000.0 * SHAKE_RATE) * SHAKE_SWAY if attack_phase == "shake" else 0.0
+	_body_mesh.position.x = sway
+	if _nose_mesh != null:
+		_nose_mesh.position.x = sway
 
 
 func _refresh() -> void:
@@ -197,7 +258,7 @@ func _think(delta: float) -> void:
 	if not is_on_floor():
 		return
 	match attack_phase:
-		"windup", "recovery", "stunned":
+		"windup", "recovery", "stunned", "shake":
 			_stand()
 			return
 		"lunge":
@@ -411,6 +472,11 @@ func _begin_bite(to_target: Vector3) -> void:
 	var judge := ServerAuthority.instance
 	if def == null or judge == null:
 		return
+	# 2026-11-23: it does not bite at a body on its own back (the bite would
+	# pass it by): it stands, and shakes when wolf_shake_after is up.
+	if target_peer != 0 and judge.rider_mount(target_peer) == self:
+		_stand()
+		return
 	_bite_direction = to_target.normalized() if to_target.length_squared() > 0.0001 else attack_direction()
 	rotation.y = RangeShapes.yaw_for(_bite_direction)
 	_stand()
@@ -431,7 +497,21 @@ func _attack_step(delta: float) -> void:
 	var def := attack_def()
 	if def == null:
 		return
+	# 2026-11-23: someone has been on its back long enough: it shakes.
+	if (attack_phase == "" or attack_phase == "recovery" or attack_phase == "stunned") and _wants_shake():
+		_stand()
+		_phase_left = Tuning.server.wolf_shake_windup
+		shakes_started += 1
+		_set_attack_phase("shake")
+		print("PLAYGROUND_WOLF_SHAKE wolf=%s windup=%.2f" % [name, _phase_left])
 	match attack_phase:
+		"shake":
+			_phase_left -= delta
+			if _phase_left <= 0.0:
+				if ServerAuthority.instance != null:
+					ServerAuthority.instance.shake_riders_off(self, Tuning.server.wolf_shake_power, Tuning.server.wolf_shake_angle)
+				_phase_left = Tuning.server.wolf_shake_recovery
+				_set_attack_phase("recovery")
 		"windup":
 			_phase_left -= delta
 			# The leap starts once the judge has ruled the path, so the body
@@ -452,6 +532,18 @@ func _attack_step(delta: float) -> void:
 			_phase_left -= delta
 			if _phase_left <= 0.0:
 				_set_attack_phase("")
+
+
+# Whether anyone has been on this back for wolf_shake_after (the server's
+# rider table).
+func _wants_shake() -> bool:
+	var judge := ServerAuthority.instance
+	if judge == null or not rideable():
+		return false
+	for rider in judge.riders_of(self):
+		if judge.rider_seconds(rider.get_multiplayer_authority()) >= Tuning.server.wolf_shake_after:
+			return true
+	return false
 
 
 func _cancel_bite(why: String) -> void:

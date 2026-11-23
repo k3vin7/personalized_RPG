@@ -1,0 +1,38 @@
+[gd_resource type="Resource" script_class="SkillDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/skill_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "sword_guard"
+label = "막기"
+hands = 1
+intent = -1
+input_mode = 2
+outcome = 0
+usable_while_holding = false
+tuning_prefix = "sword_guard"
+weapon_id = "sword"
+reach = 0.0
+width = 0.0
+windup_lean_deg = 0.0
+recovery_lean_deg = 0.0
+strike_extent = 0.6
+strike_height = 0.4
+colour = Color(0.6, 0.8, 1.0, 1)
+range_shape = 0
+shape_angle_deg = 60.0
+arc_plane = 1
+arc_start_deg = 0.0
+arc_duration = 0.0
+trail = false
+guard_damage_taken = 0.15
+guard_raise_time = 0.0
+guard_posture_builds = false
+guard_perfect_window = 0.4
+guard_perfect_mastery = 1
+guard_reflect_mastery = 2
+guard_follows_cursor = false
+guard_move_mult = 0.0
+guard_counter_skill = "counter_cut"
+guard_counter_mastery = 2

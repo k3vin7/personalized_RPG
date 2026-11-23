@@ -81,11 +81,17 @@ func _ready() -> void:
 		race_x += 2.0
 	_sign("종족 허수아비 (종족 무게·근력)", Regions.ARENA + Vector3(6.5, 2.6, 13.5), Color("ffe9b0"))
 	_sign("결투장", Regions.ARENA + Vector3(0.0, 4.0, 8.0), Color("ffd6a0"))
+	# 2026-11-22: the guard's training ground: two sword scarecrows (south-east
+	# corner) and five pitching machines along the west edge, one per ball
+	# weight. In play, and in their own check (PM) only: the other checks use
+	# the arena and must not be cut at or thrown at.
+	if not Player.is_check_run() or Net.auto_only == "PM":
+		_build_guard_training()
 	# WF: one wolf on the arena, for its own check only. Built on every peer
 	# from the same scene, like a scarecrow; only its state travels.
-	if Net.auto_only == "WF":
+	if Net.auto_only == "WF" or Net.auto_only == "RB":
 		var wolf := (load("res://scenes/wolf.tscn") as PackedScene).instantiate() as Wolf
-		wolf.setup(Regions.ARENA + Vector3(-12.0, Wolf.BODY_RADIUS + 0.05, 8.0), "Wolf_0")
+		wolf.setup(Regions.ARENA + Vector3(-12.0, Wolf.PLACED_RADIUS + 0.05, 8.0), "Wolf_0")
 		add_child(wolf)
 		# A wall the path check stands a body behind: x 68, z 11 to the
 		# arena's north edge, so the only way round is its south end.
@@ -296,6 +302,30 @@ func _run_smoke() -> void:
 		t1a.name = "T1aChecks"
 		get_tree().root.add_child(t1a)
 		t1a.run(self)
+		return
+	if Net.auto_only == "PM":
+		var pm := preload("res://scripts/tests/pm_checks.gd").new()
+		pm.name = "PmChecks"
+		get_tree().root.add_child(pm)
+		pm.run(self)
+		return
+	if Net.auto_only == "GD":
+		var gd := preload("res://scripts/tests/gd_checks.gd").new()
+		gd.name = "GdChecks"
+		get_tree().root.add_child(gd)
+		gd.run(self)
+		return
+	if Net.auto_only == "RB":
+		var rb := preload("res://scripts/tests/rb_checks.gd").new()
+		rb.name = "RbChecks"
+		get_tree().root.add_child(rb)
+		rb.run(self)
+		return
+	if Net.auto_only == "RC":
+		var rc := preload("res://scripts/tests/rc_checks.gd").new()
+		rc.name = "RcChecks"
+		get_tree().root.add_child(rc)
+		rc.run(self)
 		return
 	if Net.auto_only == "CB":
 		var cb := preload("res://scripts/tests/cb_checks.gd").new()
@@ -2305,6 +2335,28 @@ func _nav_bridge(bridge_name: String, at_position: Vector3, size: Vector3) -> vo
 	collision.shape = shape
 	body.add_child(collision)
 	_region.add_child(body)
+
+
+const PITCH_WEIGHTS := [2.0, 5.0, 10.0, 20.0, 40.0]
+
+
+func _build_guard_training() -> void:
+	for index in 2:
+		var cutter := SwordDummy.new()
+		cutter.setup(Regions.ARENA + Vector3(14.0, 1.0, 2.0 + float(index) * 4.0), "SwordDummy_%d" % index)
+		add_child(cutter)
+	_sign("검 허수아비 (가까이 가면 벰)", Regions.ARENA + Vector3(14.0, 2.8, 4.0), Color("ffe9b0"))
+	for index in PITCH_WEIGHTS.size():
+		var weight: float = PITCH_WEIGHTS[index]
+		var at := Regions.ARENA + Vector3(-17.0, 0.0, 3.0 + float(index) * 3.0)
+		var ball := (load(ROCK_SCENE) as PackedScene).instantiate() as Rock
+		ball.setup("PitchBall_%d" % index, at + Vector3(2.0, Rock.radius_for(weight) + 0.05, 0.0), weight)
+		add_child(ball)
+		var machine := PitchingMachine.new()
+		# Facing east (-Z turned to +X), into the arena.
+		machine.setup("PitchingMachine_%d" % index, at, -PI * 0.5, ball)
+		add_child(machine)
+	_sign("피칭머신 (5초마다, 자기 레인에 선 사람에게)", Regions.ARENA + Vector3(-17.0, 3.2, 9.0), Color("ffe9b0"))
 
 
 func _sign(text: String, at_position: Vector3, color: Color) -> void:

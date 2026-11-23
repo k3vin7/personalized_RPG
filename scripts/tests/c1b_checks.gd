@@ -185,7 +185,12 @@ func _table_checks() -> void:
 	var all_ok := true
 	for id: String in rows:
 		var def := Skills.get_def(id)
-		var want: Array = rows[id]
+		var want: Array = (rows[id] as Array).duplicate()
+		if def.has_motion():
+			# 2026-11-21: the timing is the clip's (SkillDef "Motion"), read
+			# back through value() at the slider's pace.
+			want[0] = def.motion_windup / def.motion_pace()
+			want[1] = (def.motion_swing + def.motion_recovery) / def.motion_pace()
 		var got := [def.value("windup"), def.value("recovery"), def.value("cooldown"), def.value("reach"),
 			def.value("damage"), def.value("knock_power"), def.value("stamina_cost")]
 		var ok := def.weapon_id == "sword" and def.hands == SkillDef.Hands.ONE_HAND_WEAPON
@@ -256,7 +261,7 @@ func _range_checks() -> void:
 		var def := Skills.get_def(id)
 		# Out of reach is read off the skill, not written down: past its
 		# reach even after the whole cast step, with the target's own radius.
-		row.append(def.value("reach") + def.step_distance + dummy.body_radius() + 0.1)
+		row.append(def.value("reach") + def.travel_most() + dummy.body_radius() + 0.1)
 		await _stand_before(dummy, float(row[2]))
 		var hp_before := dummy.hp
 		var strike := await _cast_and_wait(slot)
@@ -678,7 +683,9 @@ func _walking_cut() -> Dictionary:
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	var south_after := -_local.velocity.z
-	await _wait(side.value("windup") + side.swing_time() + 0.3)
+	# 2026-11-21: measured once the whole cast is over (a baked path moves
+	# through the recovery too), against where the cast says it ends.
+	await _wait(side.value("windup") + side.value("recovery") + 0.3)
 	var from: Vector3 = at_press.get("from", _local.global_position)
 	var moved := _local.global_position - from
 	await _wait_idle()
@@ -686,7 +693,8 @@ func _walking_cut() -> Dictionary:
 		_local.movement.cancel_target()
 		_local.movement.set_aim_override(Vector3.INF))
 	return {"cast": at_press.get("cast", false), "walk_speed": walk_speed,
-		"south_after": south_after, "south": -moved.z, "east": moved.x, "step": side.step_distance}
+		"south_after": south_after, "south": -moved.z, "east": moved.x,
+		"step": side.body_travel_at(side.value("windup") + side.value("recovery")).z}
 
 
 func _cut_is_clean(seen: Dictionary) -> bool:
@@ -698,8 +706,8 @@ func _cut_is_clean(seen: Dictionary) -> bool:
 
 func _step_checks() -> void:
 	var side := Skills.get_def("side_cut")
-	note("side cut step %.2f m over windup %.2f + swing %.2f" % [side.step_distance, side.value("windup"), side.swing_time()])
-	expect(side.step_distance > 0.0, "the_side_cut_has_a_step")
+	note("side cut step %.2f m over windup %.2f + swing %.2f" % [side.travel_most(), side.value("windup"), side.swing_time()])
+	expect(side.travel_most() > 0.0, "the_side_cut_has_a_step")
 	var mate := _mate()
 	await tick_request(func() -> void:
 		placed()

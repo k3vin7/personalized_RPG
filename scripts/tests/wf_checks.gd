@@ -30,7 +30,7 @@ extends Node
 const STEP := 1.0 / 120.0
 const FAR := Vector3(0.0, 0.0, 11.0)
 const CLIENT_FAR := Vector3(-6.0, 0.0, 11.0)
-const WOLF_HOME := Regions.ARENA + Vector3(-12.0, Wolf.BODY_RADIUS + 0.05, 8.0)
+var WOLF_HOME := Regions.ARENA + Vector3(-12.0, Wolf.radius() + 0.05, 8.0)
 
 var _world: Node3D
 var _local: Player
@@ -362,7 +362,7 @@ func _path_checks() -> void:
 	# The wall (playground, WfWall) stands at arena x 14, z 11..18.
 	var wall_x := Regions.ARENA.x + 14.0
 	var wall_end := Regions.ARENA.z + 11.0
-	_wolf.harness_place(Regions.ARENA + Vector3(11.5, Wolf.BODY_RADIUS + 0.05, 16.0))
+	_wolf.harness_place(Regions.ARENA + Vector3(11.5, Wolf.radius() + 0.05, 16.0))
 	await _wait(0.4)
 	var detours := _wolf.detours
 	var hp_before := _local.hp

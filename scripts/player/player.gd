@@ -127,6 +127,20 @@ var sync_mount: int = PlayerMount.Stage.NONE
 # with the stage). A change tells every screen that this dismount leaves no
 # horse standing behind.
 var sync_mount_thrown := 0
+# 2026-11-22: the server's count of this body's perfect guards and broken
+# guards (Vitals). A change plays the picture on every screen.
+var sync_guard_perfects := 0
+var sync_guard_breaks := 0
+# The perfect guards that deflected a heavy blow (sync_guard_perfects are
+# the ones that knocked a blow away, or sent a thrown thing back).
+var sync_guard_deflects := 0
+# 2026-11-22 (the user): the blade glowing while a perfect guard's sure crit
+# waits for the next attack (seconds left; drawn only).
+var _crit_glow_left := 0.0
+static var _crit_glow_material: StandardMaterial3D
+var _guard_deflects_seen := 0
+var _guard_perfects_seen := 0
+var _guard_breaks_seen := 0
 # C-1c: the owner's raised shield, on the pose synchronizer for the picture
 # on other screens. The server keeps its own record of the block.
 var sync_blocking := false
@@ -215,6 +229,10 @@ const TRAIL_OVERREACH := 1.12
 const TRAIL_INNER := 0.35
 # A blade that turned through less than this drew no arc (a thrust).
 const TRAIL_MIN_TURN_DEG := 12.0
+# A line skill's trail (the thrust, 2026-11-21): the sliver's width against
+# the dash streak's.
+const TRAIL_LINE_WIDTH := 0.6
+var _trail_is_line := false
 var _trail_colour := Color("ffd166")
 const LIMB_BAR_THICKNESS := 0.14
 # The facing arrow on the ground: how far in front of the body's surface its
@@ -712,6 +730,34 @@ func _physics_process(delta: float) -> void:
 		mount.apply(sync_mount)
 	if mount != null and sync_mount_thrown != mount.thrown_seen:
 		mount.on_thrown(sync_mount_thrown)
+	if sync_guard_perfects != _guard_perfects_seen:
+		_guard_perfects_seen = sync_guard_perfects
+		if skills != null and is_local():
+			skills.free_block_hold()
+		if visual != null and not visual.confirm_guard("perfect"):
+			visual.play_guard("perfect")
+	if sync_guard_deflects != _guard_deflects_seen:
+		_guard_deflects_seen = sync_guard_deflects
+		# 2026-11-23: a perfect guard ends the guard's least hold.
+		if skills != null and is_local():
+			skills.free_block_hold()
+		# 2026-11-22: on the owner's screen it may be running already, from
+		# the press (PlayerSkills._guard_foresight).
+		if visual != null and not visual.confirm_guard("deflect"):
+			visual.play_guard("deflect")
+		# 2026-11-22 (the user): the sure crit is ready -- the blade glows for
+		# guard_crit_window, till the next attack starts (show_skill_phase).
+		_crit_glow_left = float(Tuning.server.guard_crit_window)
+		_show_crit_glow(true)
+		# 2026-11-22: the touch, a spark off the blade (no motion for now).
+		if HitFeedback.instance != null:
+			var ahead := -global_transform.basis.z
+			ahead.y = 0.0
+			HitFeedback.instance.guard_spark(hand_position() + ahead.normalized() * 0.4)
+	if sync_guard_breaks != _guard_breaks_seen:
+		_guard_breaks_seen = sync_guard_breaks
+		if visual != null:
+			visual.play_guard("break")
 	# M-5: the weapon follows the server's word on every peer, the owner too.
 	if sync_weapon != weapon:
 		_apply_weapon(sync_weapon)
@@ -1093,7 +1139,15 @@ func apply_force_event(event: Dictionary) -> void:
 	if climb != null and climb.is_climbing():
 		# Knocked off the wall rather than pushed along it.
 		climb.detach(0.0)
-	if movement != null:
+	# 2026-11-23 (the user: with a wolf close, the rising cut did not leave
+	# the ground): a force that moves nothing -- a wolf's bite has no push in
+	# it, power 0, verdict "slid" -- used to take the body all the same: it
+	# wrote a zero velocity over it and started the slide window, and a cast
+	# following its clip's path gives the path up for a push
+	# (PlayerMovement._cast_step). The hit still lands (HP, the knock shown,
+	# a stun or a knockdown below); the body keeps doing what it was doing.
+	var moves := launched or bool(event.get("spring", false)) or change.length_squared() > 0.0001
+	if movement != null and moves:
 		# 4-chapter: a push becomes this body's velocity, and the ground step
 		# must not write the move order over it on the next frame. Told for
 		# every force, not only the ones that land on a grounded body: a body
@@ -1115,7 +1169,7 @@ func apply_force_event(event: Dictionary) -> void:
 		# Already flying: the push bends the arc and costs nothing, which is
 		# what makes throwing a team mate a thing you can help with.
 		velocity += change
-	else:
+	elif moves:
 		velocity = change
 		if launched:
 			# Over the tolerance: this is leaving the ground, so it leaves the
@@ -1510,6 +1564,11 @@ func on_mount_changed() -> void:
 # into the strike, "strike" pushes the box out for a moment, "recovery" leans
 # it back; null ends it. Every number is the SkillDef's.
 func show_skill_phase(def: SkillDef, phase: String) -> void:
+	# 2026-11-22: an attack starting spends the perfect guard's crit (the
+	# server's ruling, _arm_guard_crit): the glow goes with it.
+	if _crit_glow_left > 0.0 and def != null and phase != "" and def.value("damage") > 0.0:
+		_crit_glow_left = 0.0
+		_show_crit_glow(false)
 	if is_local():
 		# M-5: stamped for the other screens, which replay the same hooks.
 		sync_skill_id = def.id if def != null else ""
@@ -1561,6 +1620,9 @@ func _start_swing(def: SkillDef) -> void:
 	_swing_active = true
 	swings_started += 1
 	_trail_samples.clear()
+	# 2026-11-21: the trail keeps this swing's shape through its fade too
+	# (_swing_def is gone by then: the fade fell back to the fan).
+	_trail_is_line = def.range_shape == SkillDef.RangeShape.LINE
 	_swing_pivot.position = Vector3(0.0, def.strike_height * body_scale(), 0.0)
 	# A bare skill shows a limb; a weapon skill turns the weapon in the hand.
 	var bare := def.hands == SkillDef.Hands.BARE or _weapon_node == null
@@ -1765,14 +1827,27 @@ func _draw_streak(delta: float) -> void:
 		return
 	var tail := _streak_from
 	var head := _streak_from + _streak_along * (_streak_length + STREAK_PAST_BODY)
+	_add_sliver(mesh, tail, head, _streak_colour, life, 1.0)
+	_streak.visible = true
+
+
+# One straight point-to-point sliver from `tail` to `head`: a wide faint one
+# under a thin bright one, laid flat and stood on edge, so it shows from any
+# camera pitch. The dash cut's streak and a line skill's trail (the thrust).
+func _add_sliver(mesh: ImmediateMesh, tail: Vector3, head: Vector3, colour: Color, life: float, width: float) -> void:
+	var along := head - tail
+	if along.length_squared() < 0.0001:
+		return
+	var across := along.cross(Vector3.UP)
+	if across.length_squared() < 0.0001:
+		across = along.cross(Vector3.RIGHT)
+	across = across.normalized()
+	var up := across.cross(along).normalized()
 	var widest := tail.lerp(head, 0.72)
-	var across := _streak_along.cross(Vector3.UP).normalized()
 	var core := Color(1.0, 1.0, 1.0)
 	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
-	# A wide faint one under a thin bright one, each a long point-to-point
-	# sliver; laid flat and stood on edge, so it shows from any camera pitch.
-	for layer: Array in [[STREAK_GLOW_HALF_WIDTH, 0.28, _streak_colour], [STREAK_HALF_WIDTH, 1.0, core]]:
-		for side: Vector3 in [across, Vector3.UP]:
+	for layer: Array in [[STREAK_GLOW_HALF_WIDTH * width, 0.28, colour], [STREAK_HALF_WIDTH * width, 1.0, core]]:
+		for side: Vector3 in [across, up]:
 			var half := side * float(layer[0]) * (1.0 if side == across else 0.6)
 			var tint := layer[2] as Color
 			var strength := float(layer[1]) * life
@@ -1782,11 +1857,16 @@ func _draw_streak(delta: float) -> void:
 				mesh.surface_set_color(Color(tint.r, tint.g, tint.b, float(corner[1])))
 				mesh.surface_add_vertex(corner[0] as Vector3)
 	mesh.surface_end()
-	_streak.visible = true
 
 
 func _process(delta: float) -> void:
 	_draw_streak(delta)
+	if is_local():
+		_update_hover_outline()
+	if _crit_glow_left > 0.0:
+		_crit_glow_left = maxf(0.0, _crit_glow_left - delta)
+		if _crit_glow_left == 0.0:
+			_show_crit_glow(false)
 	if _flash_left > 0.0:
 		_flash_left = maxf(0.0, _flash_left - delta)
 		if _flash_left == 0.0:
@@ -1833,6 +1913,19 @@ func _draw_trail() -> void:
 	# edge easing from the first tip's distance to the last's.
 	var last: Dictionary = _trail_samples[_trail_samples.size() - 1]
 	var fade := 1.0 if _swing_active else clampf(1.0 - (_swing_t - float(last["at"])) / TRAIL_FADE, 0.0, 1.0)
+	# 2026-11-21 (the user: the thrust's trail came out a fan, from the blade
+	# rising into it): a line skill's trail is a straight line, whatever the
+	# blade did before it went in. Its shape is the skill's, not the samples'.
+	if _trail_is_line:
+		var line := _trail_line() if fade > 0.0 else []
+		if not line.is_empty():
+			if _swing_def != null:
+				_trail_colour = _swing_def.colour
+			_add_sliver(mesh, line[0], line[1], _trail_colour, fade, TRAIL_LINE_WIDTH)
+		_trail.visible = not line.is_empty()
+		if fade <= 0.0 and not _swing_active:
+			_trail_samples.clear()
+		return
 	var fan := _trail_fan() if fade > 0.0 else {}
 	var any := not fan.is_empty()
 	if any:
@@ -1871,6 +1964,22 @@ func _draw_trail() -> void:
 	_trail.visible = any
 	if fade <= 0.0 and not _swing_active:
 		_trail_samples.clear()
+
+
+# A line skill's trail: the sliver on the blade itself, hilt to tip, where
+# the sword is now (its last sample) -- 2026-11-21, the user: no working out
+# of where the thrust ends, just the effect on the sword while it thrusts.
+# Samples are only taken through the swing, so it shows for the thrust and
+# fades after (TRAIL_FADE). [] with no sample.
+func _trail_line() -> Array:
+	if _trail_samples.is_empty():
+		return []
+	var last: Dictionary = _trail_samples[_trail_samples.size() - 1]
+	var base := last["base"] as Vector3
+	var tip := last["tip"] as Vector3
+	if base.distance_to(tip) < 0.05:
+		return []
+	return [base, tip]
 
 
 # The fan the blade's samples describe, or {} when there is none to draw: too
@@ -1925,14 +2034,14 @@ func hitstop(frames: int) -> void:
 
 
 # C-0: white for a moment. Drawn only; the colour comes back on its own.
-func flash_hit(seconds: float) -> void:
+func flash_hit(seconds: float, damaged := true) -> void:
 	if seconds <= 0.0:
 		return
 	_flash_left = maxf(_flash_left, seconds)
 	flashes_applied += 1
 	_apply_state_colour()
 	if visual != null:
-		visual.play_hit()
+		visual.play_hit(damaged)
 
 
 func flash_left() -> float:
@@ -2025,3 +2134,76 @@ func _apply_state_colour() -> void:
 			_label.text += "\n" + overhead_note
 		if sync_knock != "":
 			_label.text += "\n" + sync_knock
+
+
+# 2026-11-23 (the user): a rim round the body the cursor is on, on this
+# screen only. The usual way: the same meshes drawn once more, grown out
+# along their normals and showing only their back faces, in one flat colour
+# (an overlay material, so the body's own materials are not touched). A mesh
+# that already carries an overlay (a blade's glow) keeps it.
+var _hover_outlined: Node3D = null
+var _hover_meshes: Array[MeshInstance3D] = []
+static var _hover_material: StandardMaterial3D
+
+
+func _update_hover_outline() -> void:
+	var body: Node3D = null
+	if Tuning.values.hover_outline_enabled and movement != null and state != State.DEAD and not sync_dead:
+		body = movement.hovered_body()
+	if body == _hover_outlined and (body == null or is_instance_valid(body)):
+		return
+	for mesh in _hover_meshes:
+		if is_instance_valid(mesh) and mesh.material_overlay == _hover_material:
+			mesh.material_overlay = null
+	_hover_meshes.clear()
+	_hover_outlined = body
+	if body == null:
+		return
+	if _hover_material == null:
+		_hover_material = StandardMaterial3D.new()
+		_hover_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_hover_material.cull_mode = BaseMaterial3D.CULL_FRONT
+		_hover_material.grow = true
+	_hover_material.albedo_color = Tuning.values.hover_outline_colour
+	_hover_material.grow_amount = Tuning.values.hover_outline_width
+	for node in body.find_children("*", "MeshInstance3D", true, false):
+		var mesh := node as MeshInstance3D
+		# Not the marks a body draws on the ground (its telegraph), nor a
+		# mesh something else has already lit.
+		if mesh.top_level or mesh.mesh is ImmediateMesh or mesh.material_overlay != null or not mesh.is_visible_in_tree():
+			continue
+		mesh.material_overlay = _hover_material
+		_hover_meshes.append(mesh)
+
+
+# 2026-11-22 (the user): the held weapon lit over its own look (an overlay on
+# every mesh of it), or back to plain.
+func _show_crit_glow(on: bool) -> void:
+	if _weapon_node == null or not is_instance_valid(_weapon_node):
+		return
+	if on and _crit_glow_material == null:
+		_crit_glow_material = StandardMaterial3D.new()
+		_crit_glow_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_crit_glow_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_crit_glow_material.albedo_color = Tuning.values.guard_crit_glow_colour
+		_crit_glow_material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	if on and _crit_glow_material != null:
+		_crit_glow_material.albedo_color = Tuning.values.guard_crit_glow_colour
+		_crit_glow_material.grow = Tuning.values.guard_crit_glow_grow > 0.0
+		_crit_glow_material.grow_amount = Tuning.values.guard_crit_glow_grow
+	var light := _weapon_node.get_node_or_null("CritGlowLight") as OmniLight3D
+	if on and light == null and Tuning.values.guard_crit_glow_light_range > 0.0:
+		light = OmniLight3D.new()
+		light.name = "CritGlowLight"
+		light.shadow_enabled = false
+		_weapon_node.add_child(light)
+	if light != null:
+		light.visible = on
+		light.light_color = Tuning.values.guard_crit_glow_colour
+		light.omni_range = Tuning.values.guard_crit_glow_light_range
+		light.light_energy = Tuning.values.guard_crit_glow_light_energy
+	var meshes: Array[Node] = _weapon_node.find_children("*", "GeometryInstance3D", true, false)
+	if _weapon_node is GeometryInstance3D:
+		meshes.append(_weapon_node)
+	for mesh in meshes:
+		(mesh as GeometryInstance3D).material_overlay = _crit_glow_material if on else null

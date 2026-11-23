@@ -1,0 +1,30 @@
+[gd_resource type="Resource" script_class="SkillDef" format=3]
+
+[ext_resource type="Script" path="res://data/skill_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "thrust_pull"
+label = "찌르기 뽑기"
+hands = 1
+weapon_id = "sword"
+tuning_prefix = "thrust_pull"
+tuning_fallback_prefix = "thrust"
+combo_of = "thrust"
+form_levels = PackedInt32Array()
+form_skills = PackedStringArray()
+windup_lean_deg = 0.0
+recovery_lean_deg = 0.0
+strike_extent = 1.1
+strike_height = 0.15
+colour = Color(0.8745, 0.902, 0.9373, 1)
+range_shape = 1
+arc_duration = 0.12
+trail = false
+motion_swing = 0.033333335
+motion_times = PackedFloat32Array(0, 0.033333335)
+motion_path = PackedVector3Array(0, 0, 0, 0, 0, 0)
+motion_return = 0.3
+motion_return_foot = "r"
+motion_return_move = Vector3(-0.04755658, 0, 0.9301026)
+motion_return_only = true

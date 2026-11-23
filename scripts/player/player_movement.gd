@@ -12,6 +12,15 @@ const DRAG_RETARGET_INTERVAL := 0.1
 # walls and rocks. Players and dummies are deliberately not in it: you aim at
 # the ground behind them.
 const CLICK_MASK := Layers.TERRAIN | Layers.THROWABLE
+# 2026-11-23: the aim is another matter. With the camera looking down at a
+# slant, the cursor on a wolf's body meets the standing plane well behind
+# the wolf, and a narrow thrust aimed there goes past it. So the aim asks
+# first what body the cursor is on (people, scarecrows, monsters) and takes
+# that body's own place; only with none under it, the plane.
+const AIM_BODY_MASK := Layers.PLAYER | Layers.DUMMY
+const AIM_BODY_REACH := 200.0
+# A body hidden with its room or floor is passed through; this many at most.
+const AIM_BODY_PASSES := 4
 const ARRIVE_TOLERANCE := 0.3
 const PATH_LOOKAHEAD := 0.75
 const PATH_QUERY_RETRIES := 4
@@ -20,6 +29,9 @@ const PATH_QUERY_RETRIES := 4
 const UNREACHABLE_DISTANCE := 0.5
 # Pressing a touch early or a touch late still jumps.
 const JUMP_BUFFER := 0.1
+# 2026-11-21: a baked skill path that rises more than this (metres) leaves
+# the ground: it carries the height and is not held to the floor.
+const MOTION_LIFT_MIN := 0.05
 const COYOTE_TIME := 0.1
 # How far out a wall still counts as within reach when the catch is attempted.
 # Longer than the jump buffer on purpose: a catch is aimed at a wall you are
@@ -57,6 +69,10 @@ var _slide_lost_frames := 0
 const SLIDE_LOST_FRAMES := 2
 var _catch_buffer_left := 0.0
 var _aim_override := Vector3.INF
+# The body under the cursor, asked once a frame per cursor place.
+var _hover_body: Node3D = null
+var _hover_frame := -1
+var _hover_mouse := Vector2.INF
 var _intent_direction := Vector3.ZERO
 var _intent_left := 0.0
 var _pending_air_target: Variant = null
@@ -93,6 +109,16 @@ var _step_wait := 0.0
 # The step that follows the one going (queue_cast_step), or {}.
 var _step_next := {}
 var cast_steps := 0
+# 2026-11-21: a skill with a baked path (SkillDef "Motion"): the body follows
+# it through the whole cast, height and turn included, instead of the step.
+# The aim's frame and the turn the body had are fixed at the press.
+var _motion_def: SkillDef
+var _motion_t := 0.0
+var _motion_done := Vector3.ZERO
+var _motion_right := Vector3.RIGHT
+var _motion_forward := Vector3.FORWARD
+var _motion_yaw0 := 0.0
+var cast_motions := 0
 # 5-chapter smart key. With it off, a key arms the action and shows where it
 # would go; the left button casts. Jump and dash share this, and a basic attack
 # is meant to join them without a second mechanism.
@@ -689,18 +715,30 @@ func _ground_step(delta: float) -> void:
 		_mounted_drive(delta)
 	else:
 		var desired := _desired_velocity()
+		# 2026-11-22 (the user): with a guard up the walk is the guard's
+		# (the shield 0.6, the sword 0: still), and the facing too: the
+		# shield follows the cursor, the sword keeps the way it was turned at
+		# the press. The guard's angle is about the body's heading.
+		var guard: SkillDef = player.skills.block_def() if player.skills != null else null
+		if guard != null:
+			desired *= maxf(guard.value("guard_move_mult"), 0.0)
 		if desired.length_squared() > 0.0001:
 			player.velocity.x = desired.x
 			player.velocity.z = desired.z
-			player.face_direction(desired, delta)
+			if guard == null:
+				player.face_direction(desired, delta)
 		else:
 			player.velocity.x = 0.0
 			player.velocity.z = 0.0
+		if guard != null and guard.guard_follows_cursor:
+			_face_cursor(delta)
 	# Taken from whether an order stands, not from this frame's velocity: a
 	# re-query gap is still MOVE, because the order has not gone anywhere.
-	if _has_target and player.state == Player.State.IDLE:
+	# A guard that holds the body still (the sword's) shows it standing.
+	var held_still := _guard_holds_still()
+	if _has_target and player.state == Player.State.IDLE and not held_still:
 		player.change_state(Player.State.MOVE)
-	elif not _has_target and player.state == Player.State.MOVE:
+	elif (not _has_target or held_still) and player.state == Player.State.MOVE:
 		player.change_state(Player.State.IDLE)
 	# On the ground, or rolling over a lip's edge on the step below (where the
 	# engine's own floor flag is stale or says wall).
@@ -1245,6 +1283,70 @@ func cancel_cast_step() -> void:
 	_step_left = 0.0
 	_step_wait = 0.0
 	_step_velocity = Vector3.ZERO
+	_motion_def = null
+
+
+# The press of a skill with a baked path: the walk drops and the body is
+# taken along the path, off the aim `direction`, for the cast's length.
+func begin_cast_motion(direction: Vector3, def: SkillDef) -> void:
+	cancel_cast_step()
+	if _pushed_left <= 0.0:
+		player.velocity.x = 0.0
+		player.velocity.z = 0.0
+	var flat := Vector3(direction.x, 0.0, direction.z)
+	if flat.length_squared() < 0.0001:
+		flat = -player.global_transform.basis.z
+		flat.y = 0.0
+	if def == null or not def.has_motion() or flat.length_squared() < 0.0001:
+		return
+	_motion_forward = flat.normalized()
+	_motion_right = _motion_forward.cross(Vector3.UP).normalized()
+	_motion_def = def
+	_motion_t = 0.0
+	_motion_done = def.motion_at(0.0)
+	_motion_yaw0 = player.rotation.y
+	cast_motions += 1
+
+
+func cast_motion_active() -> bool:
+	return _motion_def != null
+
+
+# One physics step along the path: the velocity that covers this step's part
+# of it, so a wall or a body still stops it (move_and_slide), never a place
+# written over. A path that leaves the ground (the rising cut's leap) carries
+# the height too and is not held to the floor; at its end, or once a push
+# takes the body, the ordinary physics -- gravity -- has it again.
+func _follow_motion(delta: float) -> void:
+	var def := _motion_def
+	_motion_t += delta
+	var target := def.motion_at(_motion_t)
+	var moved := target - _motion_done
+	_motion_done = target
+	var lifts := def.motion_lift() > MOTION_LIFT_MIN
+	var world := _motion_right * moved.x + _motion_forward * moved.z
+	player.velocity.x = world.x / delta
+	player.velocity.z = world.z / delta
+	player.velocity.y = moved.y / delta if lifts else -0.5
+	if def.motion_yaw.size() == def.motion_times.size():
+		player.rotation.y = _motion_yaw0 + deg_to_rad(def.motion_turn_at(_motion_t))
+	if _motion_t >= def.motion_total_seconds():
+		_motion_def = null
+	if lifts and _motion_def != null:
+		player.floor_snap_length = 0.0
+		player.move_and_slide()
+		return
+	player.floor_snap_length = player.default_snap_length()
+	if lifts:
+		# The path's last step: the body is let go where it is.
+		player.move_and_slide()
+		return
+	if _step_up(delta):
+		_on_step = true
+		return
+	player.move_and_slide()
+	if not player.is_on_floor() and _step_down():
+		_on_step = true
 
 
 func cast_step_left() -> float:
@@ -1252,6 +1354,13 @@ func cast_step_left() -> float:
 
 
 func _cast_step(delta: float) -> void:
+	if _motion_def != null:
+		if _pushed_left > 0.0:
+			# A push has the body: the path is given up for good.
+			_motion_def = null
+		else:
+			_follow_motion(delta)
+			return
 	if _pushed_left > 0.0 or not (player.is_on_floor() or _was_on_step):
 		# Carrying a push, or off the ground: the stun's physics, as before.
 		_step_left = 0.0
@@ -1646,11 +1755,53 @@ func cursor_point() -> Vector3:
 	return point as Vector3 if point != null else player.global_position
 
 
+# 2026-11-22: a guard is up that lets no walking (the sword's block).
+func _guard_holds_still() -> bool:
+	var guard: SkillDef = player.skills.block_def() if player.skills != null else null
+	return guard != null and guard.value("guard_move_mult") <= 0.0
+
+
 func _face_cursor(delta: float) -> void:
 	var point: Variant = _cursor_ground_point()
 	if point == null:
 		return
 	player.face_direction((point as Vector3) - player.global_position, delta)
+
+
+# The body the cursor is on, or null: the first one the camera's ray through
+# the cursor meets that is drawn (a body hidden with its room is not there
+# to be pointed at -- by what is shown, not by where it is) and is not this
+# body. A dead or a carried body has no layer and is not met. The camera's
+# own ray, so a camera that turns changes nothing here.
+func hovered_body() -> Node3D:
+	if _aim_override != Vector3.INF or player.camera == null or player.camera.camera == null:
+		return null
+	var mouse := player.get_viewport().get_mouse_position()
+	var frame := Engine.get_process_frames()
+	if frame == _hover_frame and mouse == _hover_mouse:
+		return _hover_body if _hover_body != null and is_instance_valid(_hover_body) else null
+	_hover_frame = frame
+	_hover_mouse = mouse
+	_hover_body = _body_under(mouse)
+	return _hover_body
+
+
+func _body_under(mouse: Vector2) -> Node3D:
+	var from := player.camera.camera.project_ray_origin(mouse)
+	var to := from + player.camera.camera.project_ray_normal(mouse) * AIM_BODY_REACH
+	var exclude: Array[RID] = [player.get_rid()]
+	var space := player.get_world_3d().direct_space_state
+	for attempt in AIM_BODY_PASSES:
+		var query := PhysicsRayQueryParameters3D.create(from, to, AIM_BODY_MASK, exclude)
+		query.collide_with_areas = false
+		var hit := space.intersect_ray(query)
+		if hit.is_empty():
+			return null
+		var body := hit.get("collider") as Node3D
+		if body != null and body != player and body.is_visible_in_tree():
+			return body
+		exclude.append(hit["rid"] as RID)
+	return null
 
 
 # Where the cursor meets the plane the body is standing on.
@@ -1664,6 +1815,13 @@ func _cursor_ground_point() -> Variant:
 		return _aim_override
 	if player.camera == null or player.camera.camera == null:
 		return null
+	# 2026-11-23: a body under the cursor is the aim, at its own place on
+	# the standing plane (AIM_BODY_MASK above).
+	var body := hovered_body()
+	if body != null:
+		var at := Vector3(body.global_position.x, player.global_position.y, body.global_position.z)
+		if at.distance_squared_to(player.global_position) > 0.0004:
+			return at
 	var mouse := player.get_viewport().get_mouse_position()
 	var from := player.camera.camera.project_ray_origin(mouse)
 	var direction := player.camera.camera.project_ray_normal(mouse)

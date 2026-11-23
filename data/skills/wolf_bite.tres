@@ -5,6 +5,7 @@
 [resource]
 script = ExtResource("1")
 id = "wolf_bite"
+passes_riders = true
 label = "물기"
 intent = -1
 outcome = 0

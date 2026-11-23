@@ -172,8 +172,10 @@ func _cast_and_wait(slot: int) -> Dictionary:
 # step_distance x windup / (windup + swing) ahead of the press by then, so
 # the marks are set about that point.
 func _origin_of(def: SkillDef, from: Vector3, heading: Vector3) -> Vector3:
-	var windup := def.value("windup")
-	return from + heading * def.step_distance * windup / maxf(windup + def.swing_time(), 0.001)
+	# 2026-11-21: off the skill's own answer (a baked path or the old step).
+	var moved := def.body_travel_at(def.value("windup"))
+	var flat := Vector3(heading.x, 0.0, heading.z).normalized()
+	return from + flat * moved.z + flat.cross(Vector3.UP).normalized() * moved.x
 
 
 static func _names(order: Array) -> Array:

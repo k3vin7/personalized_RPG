@@ -211,6 +211,24 @@ func _ready() -> void:
 
 # The single entry point's landing place. A dummy is not an ally, so a push from
 # a player hurts it whatever the ally flags say.
+# 2026-11-23: whether this body's back can be stood on (a big monster's; the
+# species' data), and whether a body whose feet are at `feet` (world), `reach`
+# wide, is standing on it. The server asks (ServerAuthority._tick_riders).
+func rideable() -> bool:
+	return false
+
+
+func back_holds(_feet: Vector3, _reach: float) -> bool:
+	return false
+
+
+# 2026-11-23: a body set in the ground (the sword scarecrow): a force event
+# reaches it like any other -- the HP, the verdict, the hit on the screen --
+# and changes its velocity by nothing.
+func anchored() -> bool:
+	return false
+
+
 func apply_force_event(event: Dictionary) -> void:
 	if not is_multiplayer_authority():
 		return
@@ -226,7 +244,9 @@ func apply_force_event(event: Dictionary) -> void:
 	if not launched:
 		# Within tolerance: it holds its ground. Only the horizontal is kept.
 		change.y = 0.0
-	if is_on_floor():
+	if anchored():
+		pass
+	elif is_on_floor():
 		velocity = change
 		if launched and velocity.y < Tuning.server.launch_min_up_speed:
 			velocity.y = Tuning.server.launch_min_up_speed
@@ -516,6 +536,16 @@ func flash_hit(seconds: float) -> void:
 
 func flash_left() -> float:
 	return _flash_left
+
+
+# 2026-11-22: seconds until this body's booked strike lands as this screen
+# sees it (the telegraph's own clock); INF when none is coming. A guard
+# pressed against it reads this for its picture (PlayerSkills).
+func strike_in() -> float:
+	var def := attack_def()
+	if attack_phase != "windup" or def == null:
+		return INF
+	return def.impact_time() - (float(Time.get_ticks_msec()) / 1000.0 - _telegraph_started)
 
 
 # Which way the strike goes: the way the scarecrow faces.

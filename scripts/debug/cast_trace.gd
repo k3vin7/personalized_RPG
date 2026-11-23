@@ -49,8 +49,10 @@ func _process(delta: float) -> void:
 	var visual := player.visual
 	if visual != null and visual.model_loaded():
 		var skeleton := visual.skeleton()
-		row["hand"] = skeleton.global_transform * skeleton.get_bone_global_pose(skeleton.find_bone("RightHand")).origin
-		row["hips"] = skeleton.global_transform * skeleton.get_bone_global_pose(skeleton.find_bone("Hips")).origin
+		for role in ["hand", "hips"]:
+			var bone := skeleton.find_bone(CharacterVisual.named_bone(role))
+			row[role] = skeleton.global_transform * skeleton.get_bone_global_pose(bone).origin if bone >= 0 \
+				else skeleton.global_position
 		row["clip"] = visual.current_clip()
 		row["at"] = visual._anim.current_animation_position if visual._anim.is_playing() else -1.0
 		row["speed"] = visual.clip_speed()

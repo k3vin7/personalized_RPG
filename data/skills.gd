@@ -12,6 +12,8 @@ const PATHS := {
 	"kick": "res://data/skills/kick.tres",
 	# M-7: the scarecrow's one attack, a stand-in for a boss swing.
 	"dummy_slam": "res://data/skills/dummy_slam.tres",
+	# 2026-11-22: the sword scarecrow's cut (SwordDummy).
+	"dummy_sword_cut": "res://data/skills/dummy_sword_cut.tres",
 	# 늑대 a: the wolf's bite. Never in a player's slot.
 	"wolf_bite": "res://data/skills/wolf_bite.tres",
 	# C-1b: the sword's four. Which weapon holds them is the WeaponDef's
@@ -20,6 +22,12 @@ const PATHS := {
 	# 2026-11-18: the thrust's second step, the push kick that frees the
 	# blade. Bare numbers (the kick's): it is the foot that lands.
 	"thrust_2": "res://data/skills/thrust_2.tres",
+	# 2026-11-23 (the user): a thrust that landed stays in; its own key, or
+	# nothing pressed, pulls the blade out, which cuts again (thrust_2, the
+	# push kick, is out of the chain; its file stays for the checks).
+	"thrust_pull": "res://data/skills/thrust_pull.tres",
+	# 2026-11-23: the thrust's key on a monster's back: the stab down.
+	"back_stab": "res://data/skills/back_stab.tres",
 	"side_cut": "res://data/skills/side_cut.tres",
 	# 2026-11-18: the side cut's second step. Never in a slot: the side cut
 	# pressed again while it is going casts it. (A third step was taken out
@@ -31,7 +39,18 @@ const PATHS := {
 	# 2026-11-19: low, the sword hand at the left hip, then gone along a
 	# straight line and through whatever stood on it.
 	"dash_cut": "res://data/skills/dash_cut.tres",
+	# 2026-11-20: the rising cut took the dash cut's slot (the user's call;
+	# the dash cut's file and numbers stay). 2026-11-22: Attack_Rising, and
+	# at mastery 2 the dive from the top of its leap (m2).
+	"rising_cut": "res://data/skills/rising_cut.tres",
+	"rising_cut_m2": "res://data/skills/rising_cut_m2.tres",
+	# 2026-11-22: the sword's fourth slot is the held block (sword_guard);
+	# the tapped parry's file and ruling stay, in no slot.
 	"parry": "res://data/skills/parry.tres",
+	"sword_guard": "res://data/skills/sword_guard.tres",
+	# 2026-11-22: the sword guard's counter (mastery 2), cast from the side
+	# cut's slot right after a perfect guard.
+	"counter_cut": "res://data/skills/counter_cut.tres",
 	# C-1c: the shield's four.
 	"shield_raise": "res://data/skills/shield_raise.tres",
 	"shield_bash": "res://data/skills/shield_bash.tres",

@@ -130,6 +130,9 @@ func limits_for(field: String) -> Vector2:
 	# and means an angle short of a quarter turn.
 	if field == "mount_turn_slow_deg":
 		return Vector2(0.0, 89.0)
+	# 2026-11-20: mastery steps 0..5 (ships at 5 since 11-21, every form open).
+	if field == "mastery_debug_level":
+		return Vector2(0.0, 5.0)
 	return Vector2(1.0 if field == "grabbed_escape_presses" else 0.0, maxf(value * 4.0, 1.0))
 
 

@@ -77,6 +77,8 @@ const HOLDABLE_GROUP := "holdable"
 # A request/approve protocol needs a window: the client marks itself pending
 # when it submits and nothing answers a refusal, so the mark has to time out.
 const INTENT_TIMEOUT := 1.0
+# 2026-11-20: skill forms by mastery (preloaded: not a class_name).
+const MASTERY := preload("res://data/mastery.gd")
 
 # The owner's position and state reach the server a round trip late, so a hold
 # is left alone this long before the holder is required to look like a holder.
@@ -667,7 +669,8 @@ func _intake(sender: int, kind: int, payload: Dictionary) -> Variant:
 		Intent.CHARGE:
 			result = _rule_charge(actor, bool(payload.get("on", false)))
 		Intent.BLOCK:
-			result = _rule_block(actor, bool(payload.get("on", false)))
+			result = _rule_block(actor, bool(payload.get("on", false)), String(payload.get("guard", "shield_raise")),
+				_direction_of(payload))
 		Intent.MOUNT:
 			result = _rule_mount(actor, bool(payload.get("on", false)))
 		Intent.DEBUG_TELEPORT:
@@ -720,8 +723,12 @@ func _shape_is_valid(kind: int, payload: Dictionary) -> bool:
 			return _target_for(payload) != null
 		Intent.DROP, Intent.ESCAPE, Intent.RESPAWN, Intent.DASH:
 			return true
-		Intent.CHARGE, Intent.BLOCK, Intent.MOUNT:
+		Intent.CHARGE, Intent.MOUNT:
 			return payload.get("on") is bool
+		Intent.BLOCK:
+			# 2026-11-22: a heading may come with it; if it does it must be one.
+			return payload.get("on") is bool \
+				and (not payload.has("direction") or _direction_of(payload) != Vector3.ZERO)
 		Intent.DEBUG_TELEPORT:
 			for axis in ["x", "z"]:
 				var number: Variant = payload.get(axis)
@@ -1700,12 +1707,21 @@ func apply_hit(attacker: Node3D, target: Node3D, def: SkillDef, ctx: Dictionary)
 		base = def.value("damage") * def.attack_power()
 	base *= float(ctx.get("mult", 1.0))
 	var crit := _roll_crit(attacker, peer)
+	# 2026-11-23: a skill whose blow is always one (the stab down from a back).
+	if def != null and def.sure_crit:
+		crit = true
+	# 2026-11-22 (the user): a perfect guard's sure crit, on the attacker it
+	# guarded, from the guard's next attack.
+	if attacker is Player and _takes_guard_crit(peer, target):
+		crit = true
+		print("PLAYGROUND_GUARD_CRIT by=%s target=%s skill=%s" % [attacker.name, target.name, def.id if def != null else ""])
 	var rolled := base * (Tuning.server.crit_mult if crit else 1.0)
 	var armour := armor_of(target)
 	var final := damage_after_armor(rolled, armour)
 	var ally := bool(ctx.get("ally", false))
 	var dealt := final
 	var posture := -1.0
+	var perfect := false
 	if target is Player:
 		var person := target as Player
 		if person.sync_dead:
@@ -1718,14 +1734,33 @@ func apply_hit(attacker: Node3D, target: Node3D, def: SkillDef, ctx: Dictionary)
 		else:
 			# C-1c: a raised shield between the blow and the body: no HP,
 			# stamina instead, and the push judged against the posture.
-			posture = _block_guards(person, attacker)
-			if posture >= 0.0:
-				_block_absorbs(person, final, posture, attacker)
-				dealt = 0.0
+			# 2026-11-22: the guard that is up says how much still lands
+			# (the sword's block 0.15) and whether this was a perfect guard.
+			# A thrown thing is guarded where it comes from, not its thrower.
+			var guard_from: Node3D = ctx["from_node"] if ctx.has("from_node") else attacker
+			# 2026-11-23: ctx.unguardable -- from underfoot (a shake-off).
+			var guard := {} if bool(ctx.get("unguardable", false)) else guard_against(person, guard_from)
+			if not guard.is_empty():
+				posture = float(guard["posture"])
+				var guard_def: SkillDef = guard["def"]
+				if bool(guard["perfect"]):
+					perfect = true
+					dealt = 0.0
+					# 2026-11-22: a small price (a share of the plain block's).
+					_block_absorbs(person, final * float(Tuning.server.guard_perfect_stamina_share), posture, attacker)
+				else:
+					var taken := clampf(guard_def.value("guard_damage_taken"), 0.0, 1.0) if guard_def != null else 0.0
+					_block_absorbs(person, final * (1.0 - taken), posture, attacker)
+					dealt = final * taken
 	elif not (target is Dummy):
 		# A rock has no HP to lose.
 		dealt = 0.0
 	var power := float(ctx.get("power", def.value("knock_power") if def != null else 0.0))
+	if perfect:
+		# 2026-11-22: super stance -- the blow pushes nothing -- and the
+		# attacker is held still for one time whatever its blow was.
+		_perfect_guard(target as Player, attacker, def)
+		power = 0.0
 	var event := ForceSystem.make_event(
 		int(ctx.get("kind", ForceSystem.Kind.KNOCKBACK)),
 		ctx.get("direction", Vector3.FORWARD) as Vector3,
@@ -1742,12 +1777,14 @@ func apply_hit(attacker: Node3D, target: Node3D, def: SkillDef, ctx: Dictionary)
 	if posture >= 0.0:
 		event["blocked"] = true
 		event["block_posture"] = posture
+	if perfect:
+		event["perfect_guard"] = true
 	if def != null:
 		event["skill"] = def.id
-		if def.stun_on_hit > 0.0:
+		if def.stun_on_hit > 0.0 and not perfect:
 			event["stun_on_hit"] = def.stun_on_hit
 	for key in ["hit_y", "down_request", "spring"]:
-		if ctx.has(key):
+		if ctx.has(key) and not (perfect and key == "down_request"):
 			event[key] = ctx[key]
 	var hit_id := int(event["id"])
 	if dealt > 0.0:
@@ -2031,6 +2068,101 @@ func _rule_fall(actor: Player, payload: Dictionary) -> Variant:
 
 # Watched once per physics step, for every body: the height it reached, whether
 # it has fallen out of the world, and when a dead one comes back.
+# ------------------------------------------- 2026-11-23: on a monster's back
+# Who stands on which monster's back, by the server's own copy of both
+# bodies: peer -> {"mount": Dummy, "since": msec it got on, "seen": msec it
+# was last found there, "carry": the fastest the mount went under it, m/s}.
+# A body's place arrives a round trip late and a back moves, so a rider not
+# found for a moment is still one for RIDE_GRACE (CLAUDE.md note 2).
+const RIDE_GRACE := 0.6
+# A body just shaken off is not a rider again for this long: it is still
+# over the back while it flies clear.
+const RIDE_BLOCK_AFTER_SHAKE := 1.0
+var _riders := {}
+# peer -> msec until which it is not taken for a rider (just shaken off).
+var _ride_block := {}
+var rides_begun := 0
+var rides_ended := 0
+
+
+# The monster `peer` is on (within the grace), or null.
+func rider_mount(peer: int) -> Dummy:
+	if not _riders.has(peer):
+		return null
+	var mount: Variant = _riders[peer].get("mount", null)
+	if mount == null or not is_instance_valid(mount):
+		return null
+	return mount as Dummy
+
+
+# Seconds `peer` has been on its mount's back (0: on none).
+func rider_seconds(peer: int) -> float:
+	if rider_mount(peer) == null:
+		return 0.0
+	return float(Time.get_ticks_msec() - int(_riders[peer]["since"])) / 1000.0
+
+
+func riders_of(mount: Dummy) -> Array[Player]:
+	var out: Array[Player] = []
+	for peer: int in _riders.keys():
+		if rider_mount(peer) == mount:
+			var actor := actor_for(peer)
+			if actor != null:
+				out.append(actor)
+	return out
+
+
+# What the move check allows a rider on top of its own speed.
+func rider_carry(peer: int) -> float:
+	if rider_mount(peer) == null:
+		return 0.0
+	return float(_riders[peer].get("carry", 0.0))
+
+
+func _tick_riders() -> void:
+	if not is_instance_valid(Net.spawn_root):
+		return
+	var now := Time.get_ticks_msec()
+	var mounts: Array[Dummy] = []
+	for node in get_tree().get_nodes_in_group(HOLDABLE_GROUP):
+		var dummy := node as Dummy
+		if dummy != null and dummy.rideable() and dummy.holder_peer == 0:
+			mounts.append(dummy)
+	for node in Net.spawn_root.get_children():
+		var player := node as Player
+		if player == null:
+			continue
+		var peer := player.get_multiplayer_authority()
+		var found: Dummy = null
+		# (Not for a moment after a shake-off: the thrown body is still over
+		# the back for a step or two.)
+		if not player.sync_dead and player.state != Player.State.GRABBED and not player.is_mounted() 				and now >= int(_ride_block.get(peer, 0)):
+			var feet := player.global_position - Vector3.UP * player.half_height()
+			for mount in mounts:
+				if mount.back_holds(feet, player.radius()):
+					found = mount
+					break
+		var record: Dictionary = _riders.get(peer, {})
+		if found != null:
+			if record.get("mount", null) != found:
+				record = {"mount": found, "since": now, "carry": 0.0}
+				rides_begun += 1
+				print("PLAYGROUND_RIDE_ON peer=%d mount=%s" % [peer, found.name])
+			record["seen"] = now
+			record["carry"] = maxf(float(record.get("carry", 0.0)), Vector2(found.velocity.x, found.velocity.z).length())
+			_riders[peer] = record
+		elif not record.is_empty():
+			var mount: Variant = record.get("mount", null)
+			if mount == null or not is_instance_valid(mount) or not (mount as Dummy).rideable() \
+					or now - int(record.get("seen", 0)) > int(RIDE_GRACE * 1000.0):
+				_riders.erase(peer)
+				rides_ended += 1
+				print("PLAYGROUND_RIDE_OFF peer=%d" % peer)
+	for peer: int in _riders.keys():
+		if actor_for(peer) == null:
+			_riders.erase(peer)
+
+
 func _watch_vitals(delta: float) -> void:
 	if not is_instance_valid(Net.spawn_root):
 		return
@@ -2137,11 +2269,23 @@ func move_allowance(player: Player) -> Vector2:
 		horizontal = maxf(horizontal, player.get_mount_speed())
 	if now - float(_dash_seen.get(peer, -100.0)) <= _dash_window(player):
 		horizontal = maxf(horizontal, player.dash_speed())
+	# 2026-11-22: a raised guard walks at its own pace (the shield 0.6 of the
+	# walk, the sword still), once it has been up past the grace.
+	if _blocks.has(peer) and _blocks[peer].get("def", null) != null:
+		var held := float(Time.get_ticks_msec() - int(_blocks[peer]["since"])) / 1000.0
+		if held >= SyncRules.GUARD_SPEED_GRACE:
+			var guard_def: SkillDef = _blocks[peer]["def"]
+			horizontal = maxf(player.get_move_speed() * maxf(guard_def.value("guard_move_mult"), 0.0),
+				SyncRules.GUARD_SPEED_FLOOR)
 	# A skill's own step (the dash cut's 3 m in its swing): the speed the
 	# skill's data says, while the cast the server itself ruled is going.
 	var step: Dictionary = _step_seen.get(peer, {})
 	if now <= float(step.get("until", -100.0)):
 		horizontal = maxf(horizontal, float(step["speed"]))
+	# 2026-11-23: on a monster's back the body goes where the monster goes:
+	# the fastest the server saw that monster move while it carried this
+	# body, on top of the body's own (it can still walk on the back).
+	horizontal += rider_carry(peer)
 	# Vertical has two honest sources: our own jump, and gravity acting over
 	# the height the server watched this body reach.
 	var watch: Dictionary = _fall_watch.get(peer, {})
@@ -2149,6 +2293,9 @@ func move_allowance(player: Player) -> Vector2:
 	# A standing jump now spends the whole budget upward, so the fastest a body
 	# may legitimately be climbing is the cap itself, not its jump velocity.
 	var vertical := maxf(player.leap_speed_cap(), sqrt(2.0 * Tuning.server.gravity * drop))
+	# 2026-11-21: a baked skill path that leaves the ground (the rising cut).
+	if now <= float(step.get("until", -100.0)):
+		vertical = maxf(vertical, float(step.get("vertical", 0.0)))
 	# What the server knows of a remote body's apex is a packet old, so the drop
 	# it computes can be short of the real one and an honest fall then reads as
 	# too fast. One sample's worth of gravity covers that gap. (Measured: a team
@@ -2566,6 +2713,10 @@ func holds_shield(peer: int) -> bool:
 # The raise's angle for this body: the shield_raise skill as its off hand
 # casts it (a family member's multiplier on it), never past a full turn.
 func block_angle(peer: int) -> float:
+	# 2026-11-22: the guard that is up says (the sword's block is its own).
+	if _blocks.has(peer) and _blocks[peer].get("def", null) != null \
+			and (_blocks[peer]["def"] as SkillDef).id != "shield_raise":
+		return minf((_blocks[peer]["def"] as SkillDef).value("shape_angle_deg"), 360.0)
 	var def := Skills.for_holder("shield_raise", WeaponKinds.Kind.NONE, offhand_of(peer))
 	if def == null:
 		return Tuning.server.shield_raise_angle
@@ -2583,27 +2734,113 @@ func block_angle(peer: int) -> float:
 # until the pool is back to block_recover_fraction of its maximum.
 var _blocks := {}
 var _block_lockout := {}
+# 2026-11-22: when each peer's guard last came down, and which guard.
+var _block_downs := {}
+const GUARD_RAISE_SLACK := 0.1
 var blocks_broken := 0
+# 2026-11-22: the sword's block, for the checks.
+var guards_perfect := 0
+# 2026-11-22 (the user): peer -> {"target": instance id, "until": msec}: a
+# perfect guard's sure crit, waiting for the guard's next attack cast; then
+# peer -> {"target", "until"} in _guard_crit_armed, riding that cast to its
+# blow. Spent at the cast (hit or miss), on the one body it names.
+var _guard_crit := {}
+var _guard_crit_armed := {}
+var guard_crits := 0
+var counters_opened := 0
+var guards_deflected := 0
+var guards_reflected := 0
+var last_guard := {}
 var last_block := {}
 
 
-func _rule_block(actor: Player, on: bool) -> Variant:
+# 2026-11-22: `guard` names the held skill: the shield raise, or the sword's
+# block (sword_guard), which needs the sword in the hand instead of a shield.
+func _rule_block(actor: Player, on: bool, guard := "shield_raise", direction := Vector3.ZERO) -> Variant:
 	var peer := actor.get_multiplayer_authority()
 	if not on:
-		_blocks.erase(peer)
+		# 2026-11-23: inside the guard's least hold (SkillDef.guard_min_hold)
+		# it stays up, on this clock, and comes down when that is over
+		# (_tick_blocks) -- a blow in between is still guarded.
+		var left_ms := _block_hold_left_ms(peer)
+		if left_ms > 0:
+			_blocks[peer]["down_at"] = Time.get_ticks_msec() + left_ms
+			print("PLAYGROUND_BLOCK_HELD by=%s for_ms=%d" % [actor.name, left_ms])
+			return true
+		_bring_block_down(peer)
 		return true
 	if actor.sync_dead or not actor.is_grounded_state():
 		print("PLAYGROUND_BLOCK_REFUSED by=%s why=state_%s" % [actor.name, Player.State.keys()[actor.state]])
 		return null
-	if not holds_shield(peer):
-		print("PLAYGROUND_BLOCK_REFUSED by=%s why=no_shield" % actor.name)
+	var def := Skills.get_def(guard)
+	if def == null or def.input_mode != SkillDef.InputMode.HOLD_BLOCK:
+		print("PLAYGROUND_BLOCK_REFUSED by=%s why=not_a_guard guard=%s" % [actor.name, guard])
 		return null
+	if guard == "shield_raise":
+		if not holds_shield(peer):
+			print("PLAYGROUND_BLOCK_REFUSED by=%s why=no_shield" % actor.name)
+			return null
+	else:
+		var weapon := Weapons.get_def(def.weapon_id)
+		if weapon == null or not holds_weapon(peer, weapon):
+			print("PLAYGROUND_BLOCK_REFUSED by=%s why=no_weapon guard=%s" % [actor.name, guard])
+			return null
 	if _block_lockout.has(peer):
 		print("PLAYGROUND_BLOCK_REFUSED by=%s why=recovering stamina=%.1f" % [actor.name, actor.stamina])
 		return null
-	_blocks[peer] = {"since": Time.get_ticks_msec()}
-	print("PLAYGROUND_BLOCK_UP by=%s" % actor.name)
+	# 2026-11-22: the guard's own recovery after it last came down (the
+	# sword's 0.4 s), less a little for the two presses' trips varying.
+	var down: Dictionary = _block_downs.get(peer, {})
+	if not down.is_empty() and down.get("def", null) == def:
+		var since_down := float(Time.get_ticks_msec() - int(down["at"])) / 1000.0
+		if since_down < def.value("recovery") - GUARD_RAISE_SLACK:
+			print("PLAYGROUND_BLOCK_REFUSED by=%s why=guard_recovery after=%.3fs" % [actor.name, since_down])
+			return null
+	_blocks[peer] = {"since": Time.get_ticks_msec(), "def": def}
+	# 2026-11-22: a guard that keeps the way it was turned is judged about
+	# the heading its press sent.
+	var flat := Vector3(direction.x, 0.0, direction.z)
+	if not def.guard_follows_cursor and flat.length_squared() > 0.0001:
+		_blocks[peer]["direction"] = flat.normalized()
+	print("PLAYGROUND_BLOCK_UP by=%s guard=%s" % [actor.name, guard])
 	return true
+
+
+# The guard comes down: when, for its recovery; and the walk's samples
+# around it are forgiven.
+func _bring_block_down(peer: int) -> void:
+	if _blocks.has(peer):
+		_block_downs[peer] = {"at": Time.get_ticks_msec(), "def": _blocks[peer].get("def", null)}
+	_blocks.erase(peer)
+	# The walk comes back with the guard down, a round trip before this
+	# word did: the samples around it are not held to the guard's pace.
+	forgive_move(peer, "guard_down")
+	var watch: Dictionary = _move_watch.get(peer, {})
+	watch["speed_over"] = 0
+	_move_watch[peer] = watch
+
+
+# 2026-11-23: how much of its least hold the guard `peer` has up still owes,
+# ms (0: none, or a perfect guard freed it). GUARD_RAISE_SLACK is taken off:
+# the press and the release do not take the same time over the wire.
+func _block_hold_left_ms(peer: int) -> int:
+	if not _blocks.has(peer):
+		return 0
+	var record: Dictionary = _blocks[peer]
+	var def: SkillDef = record.get("def", null)
+	if def == null or bool(record.get("freed", false)):
+		return 0
+	var least := def.value("guard_min_hold") - GUARD_RAISE_SLACK
+	if least <= 0.0:
+		return 0
+	return maxi(0, int(record["since"]) + int(least * 1000.0) - Time.get_ticks_msec())
+
+
+# A perfect guard ends the hold: what follows it (the counter, the sure crit)
+# is cast straight out of the guard.
+func _free_block_hold(peer: int) -> void:
+	if _blocks.has(peer):
+		_blocks[peer]["freed"] = true
 
 
 func is_blocking(peer: int) -> bool:
@@ -2620,11 +2857,80 @@ func block_posture(peer: int) -> float:
 	if not _blocks.has(peer):
 		return -1.0
 	var held := float(Time.get_ticks_msec() - int(_blocks[peer]["since"])) / 1000.0
+	var def: SkillDef = _blocks[peer].get("def", null)
 	var raise: float = Tuning.server.shield_raise_time
+	if def != null and def.guard_raise_time >= 0.0:
+		raise = def.guard_raise_time
 	var full: float = Tuning.server.shield_posture_time
 	if held < raise:
 		return -1.0
+	if def != null and not def.guard_posture_builds:
+		# Up, but it builds no posture: a guarded blow pushes like a hit.
+		return 0.0
 	return clampf((held - raise) / maxf(full - raise, 0.001), 0.0, 1.0)
+
+
+# 2026-11-22: the guard that is up on `target` against a blow from `from`
+# (a body, or a thrown thing): {} when none guards it, else {"def",
+# "posture", "perfect", "reflect"}: perfect inside the guard's perfect window
+# with its mastery reached; reflect from guard_reflect_mastery on.
+func guard_against(target: Player, from: Node3D) -> Dictionary:
+	if from == null or not is_instance_valid(from):
+		return {}
+	var posture := _block_guards(target, from)
+	if posture < 0.0:
+		return {}
+	var peer := target.get_multiplayer_authority()
+	var def: SkillDef = _blocks[peer].get("def", null)
+	var out := {"def": def, "posture": posture, "perfect": false, "reflect": false}
+	if def == null:
+		return out
+	var held := float(Time.get_ticks_msec() - int(_blocks[peer]["since"])) / 1000.0
+	var window := def.value("guard_perfect_window")
+	if window > 0.0 and held <= window:
+		var level := MASTERY.level_of(target, def.id)
+		out["perfect"] = level >= def.guard_perfect_mastery
+		out["reflect"] = def.guard_reflect_mastery >= 0 and level >= def.guard_reflect_mastery \
+			and held <= def.guard_reflect_seconds()
+	return out
+
+
+# 2026-11-22: a thrown thing reaching a body whose guard sends it back
+# (Rock._on_body_entered asks): it goes back the way it came at the speed it
+# came, through the one force door, and is the guarder's throw now.
+func reflects_thrown(target: Player, thrown: Rock, velocity: Vector3) -> bool:
+	if target.sync_dead:
+		return false
+	var guard := guard_against(target, thrown)
+	# 2026-11-22: only up to guard_reflect_max_weight; a heavier thing is
+	# blocked like a blow (Rock._on_body_entered goes on to apply_hit).
+	if not guard.is_empty() and thrown.weight > float(Tuning.server.guard_reflect_max_weight):
+		print("PLAYGROUND_GUARD_TOO_HEAVY by=%s thrown=%s weight=%.0f" % [target.name, thrown.name, thrown.weight])
+		return false
+	if guard.is_empty() or not bool(guard["reflect"]):
+		if _blocks.has(target.get_multiplayer_authority()):
+			var record: Dictionary = _blocks[target.get_multiplayer_authority()]
+			var facing: Vector3 = record.get("direction", -target.global_transform.basis.z)
+			var offset := thrown.global_position - target.global_position
+			offset.y = 0.0
+			facing.y = 0.0
+			print("PLAYGROUND_GUARD_NO_REFLECT by=%s held=%.3fs angle=%.0f guarded=%s" % [target.name,
+				float(Time.get_ticks_msec() - int(record["since"])) / 1000.0,
+				rad_to_deg(facing.angle_to(offset)) if offset.length_squared() > 0.0001 else 0.0, not guard.is_empty()])
+		return false
+	var speed := velocity.length()
+	if speed <= 0.01:
+		return false
+	var peer := target.get_multiplayer_authority()
+	send_force(thrown, ForceSystem.make_event(
+		ForceSystem.Kind.THROW, -velocity / speed, speed, 0.0, peer, true, 0.0, 0.0))
+	thrown.note_thrown(peer)
+	guards_reflected += 1
+	_free_block_hold(peer)
+	# Sent back is knocked away: the same picture.
+	target.sync_guard_perfects += 1
+	print("PLAYGROUND_GUARD_REFLECT by=%s thrown=%s speed=%.2f" % [target.name, thrown.name, speed])
+	return true
 
 
 # The posture that guards `target` against `attacker`, or -1: a shield up,
@@ -2634,6 +2940,9 @@ func _block_guards(target: Player, attacker: Node3D) -> float:
 	if posture < 0.0 or attacker == null or not is_instance_valid(attacker):
 		return -1.0
 	var forward := -target.global_transform.basis.z
+	var guard_record: Dictionary = _blocks.get(target.get_multiplayer_authority(), {})
+	if guard_record.has("direction"):
+		forward = guard_record["direction"]
 	forward.y = 0.0
 	var offset := attacker.global_position - target.global_position
 	offset.y = 0.0
@@ -2643,6 +2952,86 @@ func _block_guards(target: Player, attacker: Node3D) -> float:
 	if angle > block_angle(target.get_multiplayer_authority()) * 0.5:
 		return -1.0
 	return posture
+
+
+# 2026-11-22: a perfect guard landed: the attacker held still for
+# guard_perfect_stun (the parry's way: a knockback with no push that carries
+# the stun, or the scarecrow's own stun).
+# 2026-11-22 (the user): a blow perfectly guarded is deflected past the
+# guard's left side -- the side the blade sends it -- and the attacker is
+# drawn on that way (guard_deflect_pull) and held guard_perfect_stun. The
+# picture goes to every screen (sync_guard_deflects).
+func _perfect_guard(target: Player, attacker: Node3D, attack: SkillDef) -> void:
+	guards_perfect += 1
+	guards_deflected += 1
+	target.sync_guard_deflects += 1
+	var stun: float = Tuning.server.guard_perfect_stun
+	last_guard = {"by": target.get_multiplayer_authority(), "attacker": attacker.name if attacker != null else "-",
+		"skill": attack.id if attack != null else "", "stun": stun}
+	if attacker != null and is_instance_valid(attacker) and attacker != target \
+			and (attacker is Player or attacker is Dummy):
+		# On past the guard: from the attacker through where the guard stands,
+		# turned toward the guard's left.
+		var through := target.global_position - attacker.global_position
+		through.y = 0.0
+		var facing := -target.global_transform.basis.z
+		var record: Dictionary = _blocks.get(target.get_multiplayer_authority(), {})
+		if record.has("direction"):
+			facing = record["direction"]
+		facing.y = 0.0
+		var left := Vector3.UP.cross(facing.normalized()) if facing.length_squared() > 0.0001 else Vector3.ZERO
+		var pull := through.normalized() + left
+		if pull.length_squared() < 0.0001:
+			pull = Vector3.FORWARD
+		var event := ForceSystem.make_event(ForceSystem.Kind.KNOCKBACK, pull.normalized(),
+			float(Tuning.server.guard_deflect_pull), 0.0, target.get_multiplayer_authority(), false, 0.0, 0.0)
+		if attacker is Player:
+			event["catch_stun"] = stun
+			send_force(attacker, event)
+		else:
+			send_force(attacker, event)
+			(attacker as Dummy).apply_catch_stun(stun)
+	print("PLAYGROUND_GUARD_PERFECT by=%s attacker=%s skill=%s deflected stun=%.2f" % [
+		target.name, last_guard["attacker"], last_guard["skill"], stun])
+	_open_counter(target)
+	_free_block_hold(target.get_multiplayer_authority())
+	# 2026-11-22 (the user): the guard's next attack is a sure crit on this
+	# attacker (_arm_guard_crit at its cast, apply_hit at the touch).
+	if attacker != null and is_instance_valid(attacker) and attacker != target:
+		_guard_crit[target.get_multiplayer_authority()] = {"target": attacker.get_instance_id(),
+			"until": Time.get_ticks_msec() + int((float(Tuning.server.guard_crit_window) + Tuning.server.combo_grace) * 1000.0)}
+
+
+# 2026-11-22 (the user): from the guard's guard_counter_mastery, its counter
+# may follow a perfect guard: the combo chain is opened on it (from now to
+# guard_counter_window + combo_grace), so _rule_skill takes it as a step in
+# turn, and the owner is told so its slot casts it (counter_open).
+func _open_counter(target: Player) -> void:
+	var peer := target.get_multiplayer_authority()
+	var guard: SkillDef = (_blocks.get(peer, {}) as Dictionary).get("def", null)
+	if guard == null or guard.guard_counter_skill == "" or guard.guard_counter_mastery < 0 			or MASTERY.level_of(target, guard.id) < guard.guard_counter_mastery:
+		return
+	var now := Time.get_ticks_msec()
+	var window := float(Tuning.server.guard_counter_window)
+	_combo_chain[peer] = {"next": guard.guard_counter_skill, "from": now,
+		"until": now + int((window + Tuning.server.combo_grace) * 1000.0)}
+	counters_opened += 1
+	print("PLAYGROUND_COUNTER_OPEN by=%s next=%s window=%.2f" % [target.name, guard.guard_counter_skill, window])
+	if target.is_local():
+		if target.skills != null:
+			target.skills.open_counter(guard.guard_counter_skill, window)
+	else:
+		counter_open.rpc_id(peer, guard.guard_counter_skill, window)
+
+
+# Server -> the guard's owner: its counter may be cast for `window` seconds.
+@rpc("any_peer", "call_remote", "reliable")
+func counter_open(next_id: String, window: float) -> void:
+	if not result_is_server_sent("counter_open", multiplayer.get_remote_sender_id()):
+		return
+	var actor := actor_for(multiplayer.get_unique_id())
+	if actor != null and actor.is_local() and actor.skills != null:
+		actor.skills.open_counter(next_id, window)
 
 
 # Called by apply_hit for a blocked blow: the stamina, and the break at 0.
@@ -2656,6 +3045,7 @@ func _block_absorbs(target: Player, damage: float, posture: float, attacker: Nod
 		_blocks.erase(peer)
 		_block_lockout[peer] = true
 		blocks_broken += 1
+		target.sync_guard_breaks += 1
 		last_block["broken"] = true
 		_tell_block(target, false)
 		print("PLAYGROUND_BLOCK_BROKEN by=%s attacker=%s" % [target.name, last_block["attacker"]])
@@ -2680,13 +3070,28 @@ func block_result(raised: bool) -> void:
 		actor.skills.on_block_result(raised)
 
 
+# 2026-11-22: whether what the guard that is up needs is still in the hand:
+# the shield for the shield raise, the weapon for the sword's block.
+func _guard_in_hand(peer: int) -> bool:
+	var def: SkillDef = _blocks[peer].get("def", null) if _blocks.has(peer) else null
+	if def == null or def.id == "shield_raise":
+		return holds_shield(peer)
+	var weapon := Weapons.get_def(def.weapon_id)
+	return weapon != null and holds_weapon(peer, weapon)
+
+
 # Every step: a block whose body left the ground or died is over; a lockout
 # lifts when the pool is back.
 func _tick_blocks() -> void:
+	var now := Time.get_ticks_msec()
 	for peer: int in _blocks.keys():
 		var actor := actor_for(peer)
-		if actor == null or actor.sync_dead or not actor.is_grounded_state() or not holds_shield(peer):
+		if actor == null or actor.sync_dead or not actor.is_grounded_state() or not _guard_in_hand(peer):
 			_blocks.erase(peer)
+		elif (_blocks[peer] as Dictionary).has("down_at") and (now >= int(_blocks[peer]["down_at"]) or bool(_blocks[peer].get("freed", false))):
+			# 2026-11-23: let go inside its least hold, which is over (or a
+			# perfect guard freed it since).
+			_bring_block_down(peer)
 	for peer: int in _block_lockout.keys():
 		var actor := actor_for(peer)
 		if actor == null:
@@ -2718,7 +3123,8 @@ func _rule_weapon_throw(actor: Player, def: SkillDef, direction: Vector3) -> Var
 	# The body that leaves the hand is the weapon that was in it.
 	var thrown_kind := offhand_of(peer)
 	actor.sync_offhand = WeaponKinds.Kind.NONE
-	_blocks.erase(peer)
+	if not _guard_in_hand(peer):
+		_blocks.erase(peer)
 	forgive_move(peer, "shield_thrown")
 	_shield_seq += 1
 	var shield_name := "Shield_%d" % _shield_seq
@@ -2815,7 +3221,14 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 	var chain: Dictionary = _combo_chain.get(peer, {})
 	var chained := def.combo_of != "" and String(chain.get("next", "")) == def.id \
 		and now <= int(chain.get("until", 0)) and now >= int(chain.get("from", 0))
-	if now < int(_skill_lock.get(peer, 0)) and not chained:
+	# 2026-11-23: or one of the slot skills the open chain lets out of turn
+	# (SkillDef.combo_branches: out of a thrust that landed, the cuts).
+	var branched := def.combo_of == "" and (chain.get("branches", PackedStringArray()) as PackedStringArray).has(def.id) \
+		and now <= int(chain.get("until", 0)) and now >= int(chain.get("branch_from", 0))
+	if branched:
+		combo_branches_ruled += 1
+		print("PLAYGROUND_COMBO_BRANCH by=%s skill=%s" % [actor.name, def.id])
+	if now < int(_skill_lock.get(peer, 0)) and not chained and not branched:
 		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=recovery early_ms=%d" % [
 			actor.name, def.id, int(_skill_lock.get(peer, 0)) - now])
 		return null
@@ -2839,6 +3252,21 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 			print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=combo_out_of_turn next=%s late_ms=%d" % [
 				actor.name, def.id, String(chain.get("next", "")), now - int(chain.get("until", now))])
 			return null
+	# 2026-11-23: a skill cast from a monster's back only for a body the
+	# rider table has on one.
+	if def.needs_mount and rider_mount(peer) == null:
+		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=not_on_a_back" % [actor.name, def.id])
+		return null
+	# 2026-11-20: a skill's mastered form only for a body that has mastered it,
+	# by the server's own number.
+	if not MASTERY.allows(def, actor):
+		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=mastery" % [actor.name, def.id])
+		return null
+	# 2026-11-23: not out of a guard still inside its least hold (the owner's
+	# slot would not have sent it).
+	if _block_hold_left_ms(peer) > 0:
+		print("PLAYGROUND_SKILL_REFUSED by=%s skill=%s why=guard_hold left_ms=%d" % [actor.name, def.id, _block_hold_left_ms(peer)])
+		return null
 	# C-1c: a cast brings the shield down.
 	_blocks.erase(peer)
 	# C-1b: a weapon's skill needs that weapon in the hand, by the server's
@@ -2869,14 +3297,27 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 	# that is not a step forward ends the chain it was in.
 	_combo_chain.erase(peer)
 	_combo_wait_hit.erase(peer)
-	if def.combo_next != "":
+	# 2026-11-21: a step past the body's mastery is not opened (Mastery.next_step).
+	var next_id := MASTERY.next_step(def, actor)
+	if next_id != "":
 		var opens := {
-			"next": def.combo_next,
+			"next": next_id,
 			# From the end of this step's swing (less combo_early_slack: the
-			# press's trip varies) to the end of its recovery plus the window.
-			"from": now + impact_ms + int((def.swing_time() - Tuning.server.combo_early_slack) * 1000.0),
-			"until": _skill_lock[peer] + int((Tuning.server.combo_window + Tuning.server.combo_grace) * 1000.0),
+			# press's trip varies) to combo_press_after_swing past it
+			# (2026-11-21), plus combo_grace; or, with a combo_window, to the
+			# end of its recovery plus that window, if that is later.
+			# 2026-11-22: a step that starts later (combo_next_at) moves both.
+			"from": now + impact_ms + int((def.swing_time() + def.combo_next_delay() - Tuning.server.combo_early_slack) * 1000.0),
+			"until": now + impact_ms + int((def.swing_time() + def.combo_press_until() + Tuning.server.combo_grace) * 1000.0),
+			"branches": def.combo_branches,
+			"branch_from": now + impact_ms + int((def.swing_time() - Tuning.server.combo_early_slack) * 1000.0),
 		}
+		if Tuning.server.combo_window > 0.0:
+			opens["until"] = maxi(int(opens["until"]), _skill_lock[peer] + int((Tuning.server.combo_window + Tuning.server.combo_grace) * 1000.0))
+		if def.combo_after_recovery:
+			# The next step follows the end of this one's recovery.
+			opens["from"] = int(_skill_lock[peer]) - int(Tuning.server.combo_early_slack * 1000.0)
+			opens["until"] = maxi(int(opens["until"]), int(_skill_lock[peer]) + int(Tuning.server.combo_grace * 1000.0))
 		if def.combo_needs_hit:
 			# Held back until this blow lands on a body (_open_combo_on_hit).
 			_combo_wait_hit[peer] = opens
@@ -2906,7 +3347,40 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 		mult = 1.0 + bonus * seen / maxf(Tuning.server.base_move_speed, 0.01)
 		print("PLAYGROUND_SPEED_BONUS by=%s skill=%s h_speed=%.2f base=%.2f mult=%.3f" % [
 			actor.name, def.id, seen, Tuning.server.base_move_speed, mult])
+	_arm_guard_crit(peer, def)
 	schedule_strike(actor, def, direction, mult)
+	return true
+
+
+# 2026-11-22 (the user): an attack cast spends the perfect guard's sure crit
+# waiting for it (in time or not): it rides this cast to its blow, until the
+# end of its swing (+ combo_grace). Any cast drops one an earlier cast carried.
+func _arm_guard_crit(peer: int, def: SkillDef) -> void:
+	_guard_crit_armed.erase(peer)
+	if not _guard_crit.has(peer) or def.value("damage") <= 0.0:
+		return
+	var waiting: Dictionary = _guard_crit[peer]
+	_guard_crit.erase(peer)
+	var now := Time.get_ticks_msec()
+	if now > int(waiting["until"]):
+		return
+	_guard_crit_armed[peer] = {"target": waiting["target"],
+		"until": now + int((def.impact_time() + def.swing_time() + Tuning.server.combo_grace) * 1000.0)}
+	print("PLAYGROUND_GUARD_CRIT_ARMED peer=%d skill=%s" % [peer, def.id])
+
+
+# Whether this blow is the armed sure crit (spent if so).
+func _takes_guard_crit(peer: int, target: Node3D) -> bool:
+	if peer == 0 or not _guard_crit_armed.has(peer):
+		return false
+	var armed: Dictionary = _guard_crit_armed[peer]
+	if Time.get_ticks_msec() > int(armed["until"]):
+		_guard_crit_armed.erase(peer)
+		return false
+	if int(armed["target"]) != target.get_instance_id():
+		return false
+	_guard_crit_armed.erase(peer)
+	guard_crits += 1
 	return true
 
 
@@ -2921,6 +3395,19 @@ var steps_noted := 0
 
 func _note_step(peer: int, def: SkillDef) -> void:
 	_step_seen.erase(peer)
+	if def.has_motion():
+		# 2026-11-21: a baked path (SkillDef "Motion"): its fastest sample,
+		# across and up, for its whole length (the recovery included).
+		var top := def.motion_top_speed()
+		if top.x <= 0.0 and top.y <= 0.0:
+			return
+		steps_noted += 1
+		_step_seen[peer] = {
+			"speed": top.x,
+			"vertical": top.y,
+			"until": float(Time.get_ticks_msec()) / 1000.0 + def.motion_total_seconds() + MOVE_SAMPLE * 2.0 + DASH_WINDOW_SLACK,
+		}
+		return
 	if def.step_distance <= 0.0:
 		return
 	var cast_time := def.value("windup") + def.swing_time()
@@ -2940,6 +3427,7 @@ var _combo_wait_hit := {}
 var combo_opened_by_hit := 0
 var combo_steps_ruled := 0
 var combo_steps_refused := 0
+var combo_branches_ruled := 0
 
 
 # ------------------------------------------------------------ C-1d: the combo
@@ -3257,6 +3745,8 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0)
 	elif actor is Dummy:
 		caster_strength = (actor as Dummy).strength()
 	var caster_scale := caster.body_scale() if caster != null else 1.0
+	if def.needs_mount:
+		return _rule_back_strike(caster, def, direction, caster_strength, mult)
 	var reach := def.value("reach")
 	var half_width := def.value("width") * 0.5
 	var forward := Vector3(direction.x, 0.0, direction.z)
@@ -3266,6 +3756,11 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0)
 	var side := Vector3(-forward.z, 0.0, forward.x)
 	var shape := SphereShape3D.new()
 	shape.radius = sqrt(reach * reach + half_width * half_width)
+	if def.range_shape == SkillDef.RangeShape.CIRCLE:
+		# 2026-11-22: a disc reaches reach + its radius (the query ball was
+		# reach and width only: the dive's disc round the body, reach 0, found
+		# no one, and the shield slam's far edge was missed).
+		shape.radius = maxf(shape.radius, reach + def.circle_radius_value())
 	var params := PhysicsShapeQueryParameters3D.new()
 	params.shape = shape
 	params.transform = Transform3D(Basis.IDENTITY, actor.global_position)
@@ -3337,6 +3832,66 @@ func same_species(actor: Node3D, body: Node3D) -> bool:
 	return species != "" and species == (body as Dummy).species()
 
 
+# 2026-11-23: a blow from a monster's back (SkillDef.needs_mount): it lands
+# on the monster the rider table has this body on at the impact -- no shape,
+# nothing else is reached -- or on nothing if the body is off it by then.
+var back_strikes_landed := 0
+
+
+func _rule_back_strike(caster: Player, def: SkillDef, direction: Vector3, caster_strength: float, mult: float) -> Variant:
+	if caster == null:
+		return null
+	var tally := _new_tally()
+	var mount := rider_mount(caster.get_multiplayer_authority())
+	var forward := Vector3(direction.x, 0.0, direction.z)
+	forward = forward.normalized() if forward.length_squared() > 0.0001 else Vector3.FORWARD
+	if mount == null or not mount.rideable():
+		print("PLAYGROUND_BACK_STRIKE by=%s skill=%s missed=not_on_a_back" % [caster.name, def.id])
+	elif _land_strike(caster, def, mount, forward, mount.global_position.y, caster_strength, mult, tally):
+		back_strikes_landed += 1
+		print("PLAYGROUND_BACK_STRIKE by=%s skill=%s mount=%s" % [caster.name, def.id, mount.name])
+	_finish_strike(caster, def, mult, tally)
+	return int(tally["hits"])
+
+
+# 2026-11-23: a monster throws everyone off its back (its shake-off): one
+# force event each, through apply_hit like every push -- no damage, `power`
+# strong, `angle_deg` up and out to the side the rider is on (the left where
+# it stands dead centre). A lift, so the tolerance does not hold it; a guard
+# does not either (it comes from underfoot). The rider is one no longer.
+var riders_shaken := 0
+
+
+func shake_riders_off(mount: Dummy, power: float, angle_deg: float) -> int:
+	if not is_judge() or mount == null:
+		return 0
+	var thrown := 0
+	var angle := deg_to_rad(clampf(angle_deg, 0.0, 89.0))
+	for rider in riders_of(mount):
+		var out := rider.global_position - mount.global_position
+		out.y = 0.0
+		# Across the back, not along it: the short way off.
+		var across := mount.global_transform.basis.x
+		across.y = 0.0
+		across = across.normalized() if across.length_squared() > 0.0001 else Vector3.RIGHT
+		if out.dot(across) < 0.0:
+			across = -across
+		var direction := across * cos(angle) + Vector3.UP * sin(angle)
+		apply_hit(mount, rider, null, {
+			"direction": direction,
+			"power": power,
+			"raw_damage": 0.0,
+			"source_strength": mount.strength(),
+			"unguardable": true,
+		})
+		_riders.erase(rider.get_multiplayer_authority())
+		_ride_block[rider.get_multiplayer_authority()] = Time.get_ticks_msec() + int(RIDE_BLOCK_AFTER_SHAKE * 1000.0)
+		thrown += 1
+		riders_shaken += 1
+		print("PLAYGROUND_SHAKE_OFF mount=%s rider=%s power=%.1f angle=%.0f" % [mount.name, rider.name, power, angle_deg])
+	return thrown
+
+
 func _new_tally() -> Dictionary:
 	return {"hits": 0, "downed": 0, "parried": 0, "skipped_airborne": 0, "order": []}
 
@@ -3351,6 +3906,17 @@ func _land_strike(actor: Node3D, def: SkillDef, body: Node3D, forward: Vector3, 
 	if body is Rock and holder_of(body) != 0:
 		return false
 	if same_species(actor, body):
+		return false
+	# 2026-11-23 (the user): a monster's own blow passes by whoever is on its
+	# back -- it cannot bite its own back; its answer to a rider is the
+	# shake-off. By the rider table, not by where the body is. Another
+	# monster's blow reaches a rider like anyone, unless the skill is one
+	# made at the ground that says so (SkillDef.passes_riders: the bite).
+	var ridden: Dummy = null
+	if body is Player:
+		ridden = rider_mount((body as Player).get_multiplayer_authority())
+	if actor is Dummy and ridden != null and (ridden == actor or def.passes_riders):
+		print("PLAYGROUND_STRIKE_SKIPPED_RIDER by=%s skill=%s target=%s" % [actor.name, def.id, body.name])
 		return false
 	# C-1b: the side cut leaves a body off the ground alone.
 	if def.skip_airborne and is_airborne(body):
@@ -3685,6 +4251,7 @@ func _physics_process(delta: float) -> void:
 	_expire_parries()
 	_tick_blocks()
 	_tick_mounts(delta)
+	_tick_riders()
 	_watch_vitals(delta)
 	# N-1: any write to the server's table reaches the replicas within a step,
 	# whoever made it. The heartbeat below repairs a dropped push.

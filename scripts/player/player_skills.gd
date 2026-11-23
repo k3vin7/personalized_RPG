@@ -23,6 +23,16 @@ const ACTION_PREFIX := "slot_"
 const EMPTY_KEY_LABEL := "—"
 # How long the strike box is shown.
 const STRIKE_SHOW := 0.12
+const Mastery := preload("res://data/mastery.gd")
+# 2026-11-22: the guard's foresight (_guard_foresight) -- only for a picture,
+# so loose: degrees past the guard's / the blow's own angle, metres a blow's
+# reach or a thrown thing's line may miss by, the slowest a thrown thing
+# still counts as coming (m/s), and how long after its strike time a blow
+# seen on this screen may still be on its way (the telegraph runs late here).
+const GUARD_FORESIGHT_ANGLE_SLACK := 20.0
+const GUARD_FORESIGHT_PASS := 0.8
+const GUARD_FORESIGHT_MIN_SPEED := 2.0
+const GUARD_FORESIGHT_LATE := 0.1
 
 var player: Player
 var slots: Array[SkillDef] = []
@@ -51,6 +61,11 @@ var parries_lost := 0
 # record (Intent.BLOCK on/off) and rules every blow against that.
 var _block_def: SkillDef
 var _blocking := false
+# 2026-11-23: the guard's least hold (SkillDef.guard_min_hold): when it went
+# up, whether its key has come up since, and whether a perfect guard freed it.
+var _block_since_msec := 0
+var _block_release_wanted := false
+var _block_freed := false
 var _block_recovery_left := 0.0
 var blocks_started := 0
 var blocks_broken := 0
@@ -66,6 +81,7 @@ var _chain_slot_id := ""
 var _chain_next := ""
 var _chain_until_msec := 0
 var combo_steps_cast := 0
+var combo_branches_cast := 0
 # The slot pressed again while its cast was still going: the next step is
 # owed, and follows the moment this one's swing is through.
 var _buffered_slot := -1
@@ -253,7 +269,15 @@ func press_slot(index: int) -> bool:
 		return false
 	# 2026-11-18: the same slot again while its cast is still going asks for
 	# the next step of its combo. Remembered, not cast: it follows this one.
-	if is_busy() and index == _cast_slot and _cast_def != null and _cast_def.combo_next != "":
+	if is_busy() and index == _cast_slot and _cast_def != null and Mastery.next_step(_cast_def, player) != "" 			and _chain_press_open():
+		if _buffered_slot != index:
+			presses_buffered += 1
+		_buffered_slot = index
+		return true
+	# 2026-11-23: another slot whose skill this cast lets out of turn
+	# (SkillDef.combo_branches). Remembered the same way; it follows once the
+	# blade is through and the chain is open (_branch_ready).
+	if is_busy() and index != _cast_slot and _cast_def != null and _is_branch(index) and _chain_press_open():
 		if _buffered_slot != index:
 			presses_buffered += 1
 		_buffered_slot = index
@@ -272,6 +296,11 @@ func press_slot(index: int) -> bool:
 	if def.input_mode == SkillDef.InputMode.HOLD_BLOCK:
 		return _block_press(def)
 	# C-1c: any other key brings the shield down first.
+	# 2026-11-23: not inside the guard's least hold.
+	if _blocking and block_held_fast():
+		presses_ignored += 1
+		print("PLAYGROUND_SLOT_IGNORED slot=%d why=guard_hold" % [index + 1])
+		return false
 	if _blocking:
 		end_block()
 	if def.input_mode == SkillDef.InputMode.HOLD_RELEASE:
@@ -308,6 +337,10 @@ func release_slot(index: int) -> bool:
 	var def := slot_def(index)
 	if def != null and def.input_mode == SkillDef.InputMode.HOLD_BLOCK:
 		if _blocking and _block_def == def:
+			if block_held_fast():
+				# Let go inside the least hold: it comes down when that is over.
+				_block_release_wanted = true
+				return true
 			end_block()
 			return true
 		return false
@@ -349,8 +382,20 @@ func cast_slot(index: int) -> bool:
 			or (not player.is_grounded_state() and not _airborne_cast_allowed(def)):
 		presses_ignored += 1
 		return false
+	# 2026-11-20: the form the caster's mastery has made of the slot's skill
+	# (the rising cut's three-step form), before any step of its chain.
+	def = Mastery.form_for(def, player, player.weapon, player.offhand)
 	# 2026-11-18: inside the combo window the slot casts its next step.
 	def = _chain_step(def)
+	# 2026-11-23: on a monster's back the slot casts its on_back_skill (the
+	# thrust: the stab down). The server rules it by its own rider table.
+	if def.on_back_skill != "" and mount_under() != null:
+		var on_back := Skills.for_holder(def.on_back_skill, player.weapon, player.offhand)
+		if on_back != null:
+			def = on_back
+	if _blocking and block_held_fast():
+		presses_ignored += 1
+		return false
 	if _blocking:
 		end_block()
 	# C-1c: from the air the intent goes out and the body stays in the air;
@@ -403,6 +448,11 @@ func cast_slot(index: int) -> bool:
 	# grab keep their own entries, called when the (zero) windup ends.
 	_sent_at_start = false
 	var heading := player.movement.shove_direction() if player.movement != null else -player.global_transform.basis.z
+	if def.motion_return_only:
+		# 2026-11-23: the way back out of the step before it: along the way
+		# the body already faces, not re-aimed at the cursor.
+		heading = -player.global_transform.basis.z
+		heading.y = 0.0
 	if def.server_intent() == ServerAuthority.Intent.SKILL:
 		if heading != Vector3.ZERO:
 			player.snap_facing(heading)
@@ -416,7 +466,10 @@ func cast_slot(index: int) -> bool:
 	# it has one) goes toward the aim over the windup and the swing. After
 	# the intent, so the speed the server reads at the intent (the thrust's
 	# C-1b bonus) is the speed the body was pressed at, not the stop.
-	if player.movement != null:
+	if player.movement != null and def.has_motion():
+		# 2026-11-21: the clip's own path, measured off it (SkillDef "Motion").
+		player.movement.begin_cast_motion(heading, def)
+	elif player.movement != null:
 		var cast_time := def.value("windup") + def.swing_time()
 		player.movement.begin_cast_step(heading, def.step_distance, cast_time, def.step_from, def.step_to)
 		if def.recovery_step > 0.0:
@@ -496,12 +549,13 @@ func _chain_step(slot_skill: SkillDef) -> SkillDef:
 # With combo_window 0 (the default) nothing opens: the next step has to be
 # asked for while this one is still going (_chain_on).
 func _note_chain(def: SkillDef) -> void:
-	if def == null or def.combo_next == "" or Tuning.server.combo_window <= 0.0 \
-			or (def.combo_needs_hit and _combo_open != def.combo_next):
+	var next_id := Mastery.next_step(def, player)
+	if next_id == "" or Tuning.server.combo_window <= 0.0 \
+			or (def.combo_needs_hit and _combo_open != next_id):
 		_chain_next = ""
 		return
 	_chain_slot_id = def.combo_of if def.combo_of != "" else def.id
-	_chain_next = def.combo_next
+	_chain_next = next_id
 	_chain_until_msec = Time.get_ticks_msec() + int(Tuning.server.combo_window * 1000.0)
 
 
@@ -513,7 +567,7 @@ func _chain_on() -> void:
 	var def := _cast_def
 	_buffered_slot = -1
 	_chain_slot_id = def.combo_of if def.combo_of != "" else def.id
-	_chain_next = def.combo_next
+	_chain_next = Mastery.next_step(def, player)
 	_chain_until_msec = Time.get_ticks_msec() + 100
 	_cast_def = null
 	_cast_slot = -1
@@ -526,17 +580,99 @@ func _chain_on() -> void:
 		player.show_skill_phase(null, "")
 
 
+# 2026-11-21 (the user's rule): a press asks for the next step only up to
+# combo_press_after_swing past this step's blade; later in the recovery it
+# does nothing (the cast is busy).
+func _chain_press_open() -> bool:
+	if player.state != Player.State.RECOVERING:
+		return true
+	var since_blow := _cast_def.value("recovery") - _phase_left
+	return since_blow <= _cast_def.swing_time() + _cast_def.combo_press_until()
+
+
 func _owes_next_step() -> bool:
-	if _cast_def == null or _buffered_slot != _cast_slot or _cast_def.combo_next == "":
+	# 2026-11-21: only a step the body's mastery reaches (Mastery.next_step).
+	if _cast_def == null or Mastery.next_step(_cast_def, player) == "":
+		return false
+	# Asked for by its own slot's press, or (2026-11-23, combo_auto_after)
+	# owed unasked when nothing was pressed.
+	if _buffered_slot != _cast_slot and not (_buffered_slot < 0 and _cast_def.combo_auto_delay() >= 0.0):
 		return false
 	# A step that needs a hit waits for the server's word that it landed. If
 	# the word has not come by the end of the recovery the cast just ends.
 	return not _cast_def.combo_needs_hit or _combo_open == _cast_def.combo_next
 
 
+# How long after the blade is through the owed step starts: combo_next_at,
+# and for a step nobody pressed for, its combo_auto_after on top.
+func _next_step_delay() -> float:
+	var delay := _cast_def.combo_next_delay()
+	if _buffered_slot < 0 and _cast_def.combo_auto_delay() >= 0.0:
+		delay += _cast_def.combo_auto_delay()
+	return delay
+
+
+# 2026-11-23: the monster whose back this body is standing on, by the same
+# test the server's rider table makes (Dummy.back_holds), or null.
+func mount_under() -> Dummy:
+	var feet := player.global_position - Vector3.UP * player.half_height()
+	for node in get_tree().get_nodes_in_group(ServerAuthority.HOLDABLE_GROUP):
+		var dummy := node as Dummy
+		if dummy != null and dummy.rideable() and dummy.back_holds(feet, player.radius()):
+			return dummy
+	return null
+
+
+# 2026-11-23: whether slot `index` holds a skill the cast under way lets
+# follow it out of turn.
+func _is_branch(index: int) -> bool:
+	var def := slot_def(index)
+	return def != null and _cast_def != null and _cast_def.combo_branches.has(def.id) \
+		and not slot_locked(index) and not slot_on_cooldown(index)
+
+
+# A branch was pressed for, the blade is through (`since_blow` seconds of the
+# recovery gone) and the chain is open (a combo_needs_hit cast: it landed).
+func _branch_ready(since_blow: float) -> bool:
+	if _cast_def == null or _buffered_slot < 0 or _buffered_slot == _cast_slot or not _is_branch(_buffered_slot):
+		return false
+	if _cast_def.combo_needs_hit and _combo_open != _cast_def.combo_next:
+		return false
+	return since_blow >= _cast_def.swing_time()
+
+
+# The branch's slot is cast now, out of the pose this cast is in: its own
+# skill from its first step, no recovery between (as _chain_on).
+func _branch_on() -> void:
+	var index := _buffered_slot
+	_buffered_slot = -1
+	_chain_next = ""
+	_cast_def = null
+	_cast_slot = -1
+	if player.movement != null:
+		player.movement.cancel_cast_step()
+	player.change_state(Player.State.IDLE)
+	combo_branches_cast += 1
+	if not cast_slot(index):
+		player.show_skill_phase(null, "")
+
+
 # Server -> owner: this cast's blow landed on a body, so its next step is open.
 func on_combo_open(next_id: String) -> void:
 	_combo_open = next_id
+
+
+# 2026-11-22 (the user): the server's word that a perfect guard opened its
+# counter: for `window` seconds the counter's slot (its combo_of, the side
+# cut) casts it (_chain_step), as a combo's next step.
+func open_counter(next_id: String, window: float) -> void:
+	var counter := Skills.get_def(next_id)
+	if counter == null:
+		return
+	_chain_slot_id = counter.combo_of if counter.combo_of != "" else counter.id
+	_chain_next = next_id
+	_chain_until_msec = Time.get_ticks_msec() + int(window * 1000.0)
+	print("PLAYGROUND_COUNTER_READY next=%s window=%.2f" % [next_id, window])
 
 
 func _finish() -> void:
@@ -562,6 +698,11 @@ func is_blocking() -> bool:
 	return _blocking
 
 
+# The guard that is up on this machine (null when none).
+func block_def() -> SkillDef:
+	return _block_def if _blocking else null
+
+
 func block_recovery_left() -> float:
 	return _block_recovery_left
 
@@ -583,22 +724,144 @@ func _block_press(def: SkillDef) -> bool:
 		return false
 	_blocking = true
 	_block_def = def
+	_block_since_msec = Time.get_ticks_msec()
+	_block_release_wanted = false
+	_block_freed = false
 	blocks_started += 1
 	if player.movement != null:
 		player.movement.cancel_armed()
-	ServerAuthority.submit_intent(player, ServerAuthority.Intent.BLOCK, {"on": true})
+		# 2026-11-22: a guard that does not follow the cursor (the sword's)
+		# turns to it once, now, as every other skill does at its press.
+		# 2026-11-22 (the user): a guard that holds the body still ends the
+		# move order, as every cast does (cast_slot); the shield, which is
+		# walked with, keeps it.
+		if def.value("guard_move_mult") <= 0.0:
+			player.movement.cancel_target()
+		if not def.guard_follows_cursor:
+			var toward := player.movement.shove_direction()
+			if toward.length_squared() > 0.0001:
+				player.rotation.y = atan2(-toward.x, -toward.z)
+	# 2026-11-22: which guard (the shield raise or the sword's block), and
+	# for one that does not follow the cursor the way it was turned: the
+	# server judges it about that, not about a facing that is still on its
+	# way over the wire.
+	var payload := {"on": true, "guard": def.id}
+	if not def.guard_follows_cursor:
+		payload["direction"] = -player.global_transform.basis.z
+	ServerAuthority.submit_intent(player, ServerAuthority.Intent.BLOCK, payload)
 	player.show_block(true)
+	# 2026-11-22 (the user): with a blow about to land, the perfect guard's
+	# picture at once, at the press -- not at the ruling, a round trip later.
+	var foreseen := _guard_foresight(def)
+	if foreseen != "" and player.visual != null:
+		player.visual.play_guard(foreseen, true)
 	return true
+
+
+# 2026-11-22 (the user): what a guard pressed now will meet, read off what
+# this screen sees coming: a telegraph's clock (a scarecrow, a wolf), a cast's
+# stamp (another person), a thrown thing's flight. "deflect" for a blow,
+# "perfect" (the knock-away) for a thrown thing this guard would send back,
+# "" for nothing within the perfect window (+ guard_foresight_slack) or a
+# mastery short of the perfect guard. Only the picture: the ruling is still
+# the server's, at the touch; a feint cancelled after this still shows the
+# deflect, as the user wants (the guard did try).
+func _guard_foresight(def: SkillDef) -> String:
+	var window := def.value("guard_perfect_window")
+	var level := Mastery.level_of(player, def.id)
+	if window <= 0.0 or level < def.guard_perfect_mastery:
+		return ""
+	var reflects := def.guard_reflect_mastery >= 0 and level >= def.guard_reflect_mastery
+	var horizon := window + float(Tuning.values.guard_foresight_slack)
+	var facing := -player.global_transform.basis.z
+	facing.y = 0.0
+	facing = facing.normalized() if facing.length_squared() > 0.0001 else Vector3.FORWARD
+	var half_angle := def.value("shape_angle_deg") * 0.5 + GUARD_FORESIGHT_ANGLE_SLACK
+	var me := player.global_position
+	for node in get_tree().get_nodes_in_group(ServerAuthority.HOLDABLE_GROUP):
+		if node == player or not (node is Node3D):
+			continue
+		var from := (node as Node3D).global_position
+		var toward_from := from - me
+		toward_from.y = 0.0
+		if toward_from.length_squared() > 0.0001 and rad_to_deg(facing.angle_to(toward_from.normalized())) > half_angle:
+			continue
+		var rock := node as Rock
+		if rock != null:
+			if rock.holder_peer != 0:
+				continue
+			var flight := rock.flight_velocity()
+			var gap := me - from
+			var closing := flight.dot(gap.normalized()) if gap.length_squared() > 0.0001 else 0.0
+			if closing < GUARD_FORESIGHT_MIN_SPEED:
+				continue
+			# Off the line it flies by more than a body's width: it passes.
+			var aside := gap - flight.normalized() * gap.dot(flight.normalized())
+			if aside.length() > GUARD_FORESIGHT_PASS:
+				continue
+			if gap.length() / closing <= horizon:
+				# 2026-11-23: sent back only inside the guard's reflect window.
+				var sends_back := reflects and rock.weight <= float(Tuning.server.guard_reflect_max_weight) \
+					and gap.length() / closing <= def.guard_reflect_seconds() + float(Tuning.values.guard_foresight_slack)
+				return "perfect" if sends_back else "deflect"
+			continue
+		var attack: SkillDef = null
+		var strike_in := INF
+		var heading := Vector3.ZERO
+		var dummy := node as Dummy
+		var person := node as Player
+		if dummy != null:
+			attack = dummy.attack_def()
+			strike_in = dummy.strike_in()
+			heading = dummy.attack_direction()
+		elif person != null and person.sync_skill_phase == "windup" and person.sync_skill_id != "":
+			attack = Skills.for_holder(person.sync_skill_id, person.sync_weapon, person.sync_offhand)
+			if attack != null:
+				strike_in = person.sync_skill_at + attack.impact_time() - Time.get_unix_time_from_system()
+			heading = -person.global_transform.basis.z
+		if attack == null or strike_in < -GUARD_FORESIGHT_LATE or strike_in > horizon:
+			continue
+		# Within its reach, and (but for a ring round it) in its heading.
+		var to_me := me - from
+		to_me.y = 0.0
+		if to_me.length() > RangeShapes.extent_of(attack) + GUARD_FORESIGHT_PASS:
+			continue
+		heading.y = 0.0
+		if attack.range_shape != SkillDef.RangeShape.CIRCLE and heading.length_squared() > 0.0001 \
+				and to_me.length_squared() > 0.0001 \
+				and rad_to_deg(heading.normalized().angle_to(to_me.normalized())) > maxf(attack.value("shape_angle_deg"), 30.0) * 0.5 + GUARD_FORESIGHT_ANGLE_SLACK:
+			continue
+		return "deflect"
+	return ""
 
 
 # The release, or anything that takes the shield down: a cast, a fall, the
 # server breaking it. The raise's recovery (후딜 0.1) runs from here.
+# 2026-11-23: whether the guard that is up is still inside its least hold
+# (and no perfect guard has freed it).
+func block_held_fast() -> bool:
+	if not _blocking or _block_def == null or _block_freed:
+		return false
+	var least := _block_def.value("guard_min_hold")
+	return least > 0.0 and float(Time.get_ticks_msec() - _block_since_msec) / 1000.0 < least
+
+
+# The server's word reached this screen: a perfect guard. The hold is over.
+func free_block_hold() -> void:
+	_block_freed = true
+	if _blocking and _block_release_wanted:
+		end_block()
+
+
 func end_block() -> void:
 	if not _blocking:
 		return
 	_blocking = false
+	_block_release_wanted = false
+	# 2026-11-22: the guard's own recovery (the shield's shield_raise_recovery,
+	# the sword's sword_guard_recovery).
+	_block_recovery_left = _block_def.value("recovery") if _block_def != null else Tuning.server.shield_raise_recovery
 	_block_def = null
-	_block_recovery_left = Tuning.server.shield_raise_recovery
 	ServerAuthority.submit_intent(player, ServerAuthority.Intent.BLOCK, {"on": false})
 	player.show_block(false)
 
@@ -682,6 +945,9 @@ func _physics_process(delta: float) -> void:
 	_block_recovery_left = maxf(0.0, _block_recovery_left - delta)
 	if _blocking and (not player.is_grounded_state() or player.sync_dead or player.state == Player.State.DEAD):
 		end_block()
+	# 2026-11-23: the key came up inside the least hold, which is over now.
+	if _blocking and _block_release_wanted and not block_held_fast():
+		end_block()
 	if _air_cast_def != null:
 		_air_cast_left -= delta
 		if _air_cast_left <= 0.0:
@@ -697,7 +963,12 @@ func _physics_process(delta: float) -> void:
 	elif player.state == Player.State.RECOVERING:
 		_phase_left -= delta
 		# A step that is owed follows once this swing is through.
-		if _owes_next_step() and _cast_def.value("recovery") - _phase_left >= _cast_def.swing_time():
+		# (A step that waits for this one's recovery to be over -- combo_after_recovery --
+		# follows from _finish instead.)
+		if _branch_ready(_cast_def.value("recovery") - _phase_left):
+			_branch_on()
+		elif _owes_next_step() and not _cast_def.combo_after_recovery \
+				and _cast_def.value("recovery") - _phase_left >= _cast_def.swing_time() + _next_step_delay():
 			_chain_on()
 		elif _phase_left <= 0.0:
 			_finish()

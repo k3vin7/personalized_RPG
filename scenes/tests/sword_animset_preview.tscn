@@ -1,0 +1,56 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/debug/sword_animset_preview.gd" id="1_script"]
+[ext_resource type="PackedScene" uid="uid://2i8o6a5473k7" path="res://assets/characters_fbx/onehandedsword_asset/Armature.fbx" id="2_mannequin"]
+[ext_resource type="PackedScene" uid="uid://dppngajn4ljtm" path="res://assets/characters_fbx/onehandedsword_asset/Weapon_Sword.FBX" id="3_sword"]
+[ext_resource type="AnimationLibrary" path="res://assets/characters_fbx/onehandedsword_asset/onehandedsword_library.res" id="4_library"]
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_floor"]
+size = Vector2(8, 8)
+
+[sub_resource type="StandardMaterial3D" id="Mat_floor"]
+albedo_color = Color(0.42, 0.44, 0.46, 1)
+
+[node name="SwordAnimsetPreview" type="Node3D"]
+script = ExtResource("1_script")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 4, 0)
+shadow_enabled = true
+
+[node name="Floor" type="MeshInstance3D" parent="."]
+mesh = SubResource("PlaneMesh_floor")
+surface_material_override/0 = SubResource("Mat_floor")
+
+[node name="CameraPivot" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+
+[node name="Camera3D" type="Camera3D" parent="CameraPivot"]
+transform = Transform3D(1, 0, 0, 0, 0.990268, 0.139173, 0, -0.139173, 0.990268, 0, 0.6, 4.2)
+current = true
+
+[node name="Mannequin" parent="." instance=ExtResource("2_mannequin")]
+
+[node name="Weapon_R" type="BoneAttachment3D" parent="Mannequin/Skeleton3D"]
+bone_name = "Weapon_R"
+
+[node name="Sword" parent="Mannequin/Skeleton3D/Weapon_R" instance=ExtResource("3_sword")]
+transform = Transform3D(1.0000011, -2.6449612e-07, -2.9802374e-07, -2.9802322e-07, 5.960465e-07, -1, 2.64496e-07, 1, 5.960464e-07, 1.5258803e-07, -7.6293986e-08, 8.5833616e-14)
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+root_node = NodePath("../Mannequin")
+root_motion_track = NodePath("Skeleton3D:root")
+libraries = {
+&"": ExtResource("4_library")
+}
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Info" type="Label" parent="HUD"]
+offset_left = 16.0
+offset_top = 12.0
+offset_right = 1200.0
+offset_bottom = 200.0
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 18

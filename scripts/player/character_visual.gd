@@ -29,6 +29,12 @@ const SS := DRAW + "sword and shield "
 # The user's own one-handed sword (2026-11-19), in place of the KayKit one.
 const SWORD_PATH := FBX + "one hand sword/tripo_convert_8c06890a-718d-415e-b5ec-41cfaa3a632b.fbx"
 const SHIELD_PATH := PACK + "Assets/gltf/shield_round.gltf"
+# 2026-11-20: the one-handed sword pack's own mannequin, played on its own
+# bone names with no retarget, exactly as the preview plays it
+# (scenes/tests/sword_animset_preview.tscn). Read through the editor's import
+# (tools/sword_animset/setup_import.gd), not at run time: the import is what
+# turns the clip files' bones into bones and reads them at their 60 fps.
+const MANNEQUIN := FBX + "onehandedsword_asset/"
 
 # Both rigs carry these two slot bones (the Tripo rig gets them in
 # tools/blender/tripo_human_build.py): the slot's +Y is where a held prop
@@ -61,6 +67,228 @@ const PROFILES := {
 		"dash_speed": 1.0,
 		"clips": {},
 		"looping": [],
+	},
+	# 2026-11-20: the sword pack's mannequin (the user's call: the default,
+	# the others still a button away on the debug panel). Everything that
+	# would be a measurement is read off the model and the clips when they
+	# load instead of written here:
+	#   "height" 0: floor to the top of the meshes, in the model's units.
+	#   "yaw_from": the heel and the ball of one foot in the rest pose; the
+	#     model is turned so that line points the way the body faces.
+	#   walk/run pace: the clip's own root travel per second.
+	"mannequin": {
+		"model": MANNEQUIN + "Armature.fbx",
+		# Through load(), the editor's import (see MANNEQUIN).
+		"imported": true,
+		"library": MANNEQUIN + "onehandedsword_library.res",
+		"height": 0.0,
+		"yaw": 0.0,
+		"yaw_from": ["foot_r", "ball_r"],
+		"bones": 74,
+		# Where the sword hangs: the pack's own weapon bone. Its +X runs along
+		# the blade and its Y across the guard (the pack's sword measured
+		# 2026-11-20: 1.54 long along +X from just behind the grip, the guard
+		# 0.25 along Z of its file, which sits on Weapon_R's Y). A prop's -Z is
+		# its blade and its X its guard, so: X -> +Y, Y -> -Z, Z -> -X.
+		"hand_bone": "Weapon_R",
+		"offhand_bone": "weapon_L",
+		"grip_basis": Basis(Vector3(0.0, 1.0, 0.0), Vector3(0.0, 0.0, -1.0), Vector3(-1.0, 0.0, 0.0)),
+		# The bone the pack moves the whole body by (root motion).
+		"root_bone": "root",
+		# 2026-11-21: the legs the feet are held by (foot_lock_modifier.gd):
+		# hip, knee, foot. A profile without them holds no feet.
+		# The fourth, the ball of the foot, says when the foot is down.
+		"leg_bones": {"l": ["thigh_l", "calf_l", "foot_l", "ball_l"], "r": ["thigh_r", "calf_r", "foot_r", "ball_r"]},
+		# For the debug recorder.
+		"named_bones": {"hand": "hand_r", "hips": "pelvis"},
+		"walk_speed": 1.0,
+		"run_speed": 3.0,
+		"dash_speed": 1.0,
+		# Clips out of the library, by the name used here. "source" is the
+		# library's "<Folder>.<File>". "travel" as for the Mixamo clips, on
+		# the root bone: the body does the walking. "renames": bone names put
+		# right on the way in (Attack_Sprint calls its weapon bone "Weapom_R",
+		# so the sword did not follow it; the user's call: fix the name only).
+		"library_clips": {
+			"m_idle": {"source": "InPlace.Idle"},
+			"m_walk": {"source": "RootPlace.Walk_F", "travel": "ramp"},
+			"m_run": {"source": "RootPlace.Run_F", "travel": "ramp"},
+			"m_sprint": {"source": "RootPlace.Sprint", "travel": "ramp"},
+			"m_jump": {"source": "RootPlace.Jump_In", "travel": "pin"},
+			"m_fall": {"source": "InPlace.Jump_Loop"},
+			"m_hit": {"source": "RootPlace.Hit_01_F", "travel": "pin"},
+			"m_dead": {"source": "RootPlace.Dead", "travel": "pin"},
+			"m_weak": {"source": "InPlace.Weak_01_loop_01"},
+			"m_block_in": {"source": "InPlace.Block_In"},
+			"m_block": {"source": "InPlace.Block_Hold"},
+			# 2026-11-22 (the user's picks off renders): the perfect guard is
+			# Block_CounterAttacks up to where the blade has knocked the blow
+			# up and aside (0.5 s; its counter-cut after that is left out); a
+			# blow on the guard Block_Hit; a guard broken (the pool at 0)
+			# Block_Breach.
+			"m_guard_perfect": {"source": "InPlace.Block_CounterAttacks", "to": 0.5},
+			"m_guard_hit": {"source": "InPlace.Block_Hit"},
+			# 2026-11-22 (the user): the deflect -- from Block_Hold (left foot
+			# 0.3 m ahead, right foot 0.3 m behind, the blade to the left) the
+			# whole body turns counter-clockwise from above about the right
+			# foot, so the left foot goes back past the right one and the body
+			# faces left-forward, the blade swinging round to the left-back
+			# (_twist_pose "pivot"). 55 deg puts the left foot ~0.3 m behind.
+			# 2026-11-22 (the user): the left foot steps first, at once, back and
+			# to the right -- 0.5 m behind the right foot, the leg out behind to
+			# brace -- over 0.15 s (a backward walk's left step, Walk_B); 0.1 s
+			# in, the body turns about the right foot and the blade sweeps to
+			# the left-back over 0.25 s, the planted foot staying put; held,
+			# then all back over the last 0.2 s.
+			"m_guard_deflect": {"compose": [
+				{"clip": "InPlace.Block_Hold", "to": 0.6,
+					"twist": {"pivot": 65.0, "pivot_foot": "foot_r", "delay": 0.05, "in": 0.25, "out": 0.2,
+						"sink": 0.07, "yaw": 15.0, "head": -45.0,
+						"arm_r": {"at": [0.05, 0.6, 0.35], "blade": [-0.75, -0.6, -0.15]},
+						"arm_l": {"at": [-0.15, 0.35, 0.3]},
+						"step": "l", "foot_in": 0.15, "step_target": [0.2, 0.4],
+						"step_clip": "RootPlace.Walk_B", "step_from": 0.9, "step_to": 2.0}},
+			]},
+			"m_guard_break": {"source": "RootPlace.Block_Breach", "travel": "pin"},
+			# 2026-11-21: "travel": "body" -- the skills these play have their
+			# path baked off them (SkillDef "Motion", tools/sword_animset/
+			# bake.tscn), so the body carries the root's whole travel, the
+			# height too, and the model stays on it. Re-bake after changing one.
+			# The side cut's two steps (2026-11-20). "strike": "auto": timed off
+			# the clip's own blade (_time_blade): played up to the end of the
+			# pass over windup + swing, the rest as its way back. Step 1 is to
+			# go right to left, step 2 left to right; which way each goes is
+			# printed (PLAYGROUND_CLIP_BLADE) when the game loads.
+			"m_cut_1": {"source": "RootPlace.Attack_Combo_01_01", "travel": "body", "strike": "auto"},
+			"m_cut_2": {"source": "RootPlace.Attack_Combo_01_02", "travel": "body", "strike": "auto"},
+			# The rising cut (2026-11-22, the user: the old three-step chain
+			# went, too close to the side cut): Attack_Rising, a leap with the
+			# blade going up. "then_clip": it ends still landing (hips 1.10 m
+			# up at its last frame), so the pack's landing (Jump_Out, which
+			# starts at 1.09 m and ends in the stance) follows its own way back.
+			# 2026-11-22 (the user: the way back is too long): the landing is
+			# cut at 0.4 s of its 0.87 (back up out of the crouch; the rest is
+			# the blend into the stance).
+			"m_rise": {"source": "RootPlace.Attack_Rising", "travel": "body", "strike": "auto",
+				"then_clip": {"source": "InPlace.Jump_Out", "to": 0.4}},
+			# Its second step at mastery 2 (the user, 2026-11-22): from the top
+			# of the leap the sword is driven down into the ground. Only ever
+			# played after m_rise, from the top of its leap (rising_cut's
+			# combo_next_at = 0.567 less its blade's end), so it begins on that
+			# frame of Attack_Rising. Put together here ("compose",
+			# _composed). Measured 2026-11-22: Attack_Rising tops out at 0.567 s
+			# (root 2.00 up, hips at -134 deg, the stance's -125);
+			# Air_Attack_06_In at 0.233 s has its hips at -130 with the sword
+			# going up overhead; it is held at the top ("hold", its own hop
+			# taken out) while the sword turns to point down. 06_Loop is a pose
+			# with no height (root 0): "dive" drives it from the top to the
+			# ground at one speed from its first frame (the user: straight down
+			# fast, not speeding up like a fall; hang 0.37 s, drop 0.08 s);
+			# 06_Out lands, the sword in the ground, and stands. Short blends
+			# between. "strike" on a part: the blow is that part's first
+			# `strike` seconds (the landing), the rest is the way back.
+			"m_plunge": {"compose": [
+				{"clip": "RootPlace.Attack_Rising", "from": 0.567, "to": 0.6},
+				{"blend": 0.05},
+				{"clip": "RootPlace.Air_Attack_06_In", "from": 0.233, "hold": true},
+				{"blend": 0.03},
+				{"clip": "RootPlace.Air_Attack_06_Loop", "to": 0.08, "dive": true},
+				{"blend": 0.03},
+				# 2026-11-22 (the user: too long): up to where the body has
+				# stood up with the sword still down (1.0 s of 1.9; the twirl
+				# after it is left out), 1.2 times as fast.
+				{"clip": "RootPlace.Air_Attack_06_Out", "strike": 0.05, "to": 1.0, "speed": 1.2},
+			]},
+			# 2026-11-22 (the user): the sword guard's counter (mastery 2, right
+			# after a perfect guard): Attack_Combo_03_03's first pass, from low
+			# left up to the right with a step in. From the block pose (the
+			# deflect pose is off). Measured: the clip first hops back 1.09 m
+			# (0-0.2 s), then the pass (0.32-0.42) steps 0.8 m in; it is cut
+			# from the hop's far end ("from" 0.2), so the counter is the step
+			# in and the cut. Its own split leaves no way back, so the way
+			# back is the clip on from the pass's end to 0.6 s ("back_clip").
+			"m_counter": {"source": "RootPlace.Attack_Combo_03_03", "travel": "body", "strike": "auto", "pass": 0,
+				"from": 0.2, "back_clip": {"source": "RootPlace.Attack_Combo_03_03", "from": 0.42, "to": 0.6}},
+			# The thrust: Attack_Combo_02_02 (the user's pick; the step after
+			# this one rewires the thrust itself).
+			"m_thrust": {"source": "RootPlace.Attack_Combo_02_02", "travel": "body", "strike": "auto", "return": true},
+			# 2026-11-23 (the user): the stab down from a monster's back: the
+			# dive's own pieces without the fall -- the sword raised and turned
+			# to point down (Air_Attack_06_In from 0.233 s, held where it is),
+			# then driven in and the body standing up over it (06_Out, as the
+			# dive ends). Not seen yet.
+			"m_back_stab": {"compose": [
+				{"clip": "RootPlace.Air_Attack_06_In", "from": 0.233, "hold": true},
+				{"blend": 0.05},
+				{"clip": "RootPlace.Air_Attack_06_Out", "strike": 0.05, "to": 1.0, "speed": 1.2},
+			]},
+			# Stand-ins for a skill with no clip of its own.
+			"m_slash_h": {"source": "RootPlace.Attack_Combo_01_01", "travel": "pin", "strike": "auto"},
+			"m_slash_v": {"source": "RootPlace.Attack_Rising", "travel": "pin", "strike": "auto"},
+		},
+		# Bones below the waist, by the start of their names (the upper body of
+		# one clip over the legs of another). Without it: LOWER_BONES (Mixamo).
+		"lower_bones": ["root", "pelvis", "thigh_", "calf_", "foot_", "ball_", "ik_foot"],
+		# The clips that follow one another, end against start
+		# (PLAYGROUND_CLIP_GAP on load).
+		"pose_gaps": [
+			["m_cut_1", "m_cut_2"],
+		],
+		# Every attack clip of the pack, timed and printed on load (which way
+		# the blade goes, when), to pick the skills' clips by.
+		"blade_report": [
+			"RootPlace.Attack_Combo_01_01", "RootPlace.Attack_Combo_01_02", "RootPlace.Attack_Combo_01_03",
+			"RootPlace.Attack_Combo_01_04", "RootPlace.Attack_Combo_02_01", "RootPlace.Attack_Combo_02_02",
+			"RootPlace.Attack_Combo_02_03", "RootPlace.Attack_Combo_02_04", "RootPlace.Attack_Combo_03_01",
+			"RootPlace.Attack_Combo_03_02", "RootPlace.Attack_Combo_03_03", "RootPlace.Attack_Combo_03_04",
+			"RootPlace.Attack_Rising", "RootPlace.Attack_Sprint", "InPlace.Block_CounterAttacks",
+			"RootPlace.Block_Breach",
+		],
+		# Per weapon (its family id), ahead of "clips": the skills' own.
+		"armed_by": {
+			"sword": {
+				"side_cut": "m_cut_1",
+				"side_cut_2": "m_cut_2",
+				"rising_cut": "m_rise",
+				"rising_cut_m2": "m_plunge",
+				"counter_cut": "m_counter",
+				"thrust": "m_thrust",
+				"back_stab": "m_back_stab",
+			},
+		},
+		"renames": {"Weapom_R": "Weapon_R"},
+		# The pack is a sword pack: the same clips with or without a weapon.
+		# A bare skill (punch, kick, shove) has no clip of its own here and
+		# shows the nearest (slash_h / thrust) or none.
+		"clips": {
+			"idle": "m_idle",
+			"walk": "m_walk",
+			"run": "m_run",
+			"dash": "m_sprint",
+			"jump": "m_jump",
+			"fall": "m_fall",
+			"slash_h": "m_slash_h",
+			"slash_v": "m_slash_v",
+			"thrust": "m_thrust",
+			"block": "m_block",
+			"block_raise": "m_block_in",
+			"hit": "m_hit",
+			"death": "m_dead",
+			"down": "m_idle",
+			"carry": "",
+			"carried": "",
+			"climb": "",
+			"stunned": "m_weak",
+			"guard_perfect": "m_guard_perfect",
+			"guard_hit": "m_guard_hit",
+			# 2026-11-22 (the user): off -- the made-up deflect pose did not look
+			# like a person; a perfect guard stays in the block (a spark shows
+			# the touch, HitFeedback.guard_spark) till a real clip is found.
+			# m_guard_deflect and _twist_pose stay for then.
+			"guard_break": "m_guard_break",
+		},
+		"looping": ["idle", "walk", "run", "dash", "fall", "block", "stunned"],
+		"holds": {"down": 0.0},
 	},
 	"kaykit": {
 		"model": PACK + "Characters/gltf/Knight.glb",
@@ -310,7 +538,8 @@ const PROFILES := {
 # 2026-11-19: the game draws the Tripo model (the user's call). An automated
 # run still draws none unless it names one with --model= (CHECK_PROFILE): the
 # checks were written against the capsule and the floating hands.
-const DEFAULT_PROFILE := "tripo"
+# 2026-11-20: the sword pack's mannequin (the user's call), Tripo before.
+const DEFAULT_PROFILE := "mannequin"
 const CHECK_PROFILE := "none"
 # Bones a draw or a sheathe moves while the legs keep their own clip.
 const LOWER_BONES := ["Hips", "UpLeg", "Leg", "Foot", "ToeBase", "Toe_End"]
@@ -343,6 +572,7 @@ const AIM_RATE := 8.0
 # all the way in 0.2 s, which is most of the thrust's windup + swing.
 const LEAN_RATE := 5.0
 const SPINE_LEAN := preload("res://scripts/player/spine_lean_modifier.gd")
+const FOOT_LOCK := preload("res://scripts/player/foot_lock_modifier.gd")
 
 static var _profile_name := ""
 static var _scene_cache := {}
@@ -352,6 +582,48 @@ static var _upper_library: AnimationLibrary
 static var _clip_lengths := {}
 # For a clip made of two files: how long the first one is.
 static var _first_part := {}
+# Read off the model when it loads, for a profile that leaves them to be
+# measured ("height" 0, "yaw_from"): the height in the model's units, the
+# skeleton's place in the model (an FBX may carry a unit scale on it) and the
+# turn that faces the model the body's way.
+static var _measured_height := 0.0
+static var _skeleton_in_model := Transform3D()
+static var _measured_yaw := 0.0
+# The gait clips' own root travel, m/s at the human capsule, by clip.
+static var _measured_paces := {}
+# The way the model faces in its own space, before the yaw (the foot's line).
+static var _measured_forward := Vector3.ZERO
+# A library clip marked "strike": "auto": where its blade's pass starts
+# (seconds, as the profile's "strikes"), and the clip made of what comes
+# after the pass (its way back, as the profile's "recoveries").
+static var _auto_strikes := {}
+static var _auto_recoveries := {}
+# 2026-11-21: for the motion bake (baked_motion): a timed clip's parts
+# ({"part_from", "pass_from", "pass_to", "back_to"}, seconds of the source)
+# and the source itself before its root travel was taken out.
+static var _blade_parts := {}
+static var _raw_sources := {}
+# 2026-11-21: for the feet (foot_lock_modifier.gd): per clip as it is played
+# (an attack clip and its "_end"), which feet are on the ground, one entry
+# per MOTION_SAMPLE of its own time ({"l": PackedByteArray, "r": ...}); and
+# per timed clip, the moment (seconds of the source) both feet first leave
+# the ground after its blade starts to move, or -1.
+static var _foot_contacts := {}
+static var _leaves_ground := {}
+# A timed clip whose way back is another clip ("back_clip"): that clip, as
+# played (its time 0 is the blow's end).
+static var _raw_backs := {}
+# A "pivot" way back: per MOTION_SAMPLE of it, where the body goes so the
+# pivot foot stays put ((right, 0, forward) metres off the blow's place);
+# and which foot is the pivot.
+static var _pivot_paths := {}
+static var _pivot_feet := {}
+# 2026-11-22: every timed clip as it was before it was cut (travel taken
+# out, source time), for a "lead" spin out of it into another clip.
+static var _timed_full := {}
+# 2026-11-22: a composed clip's blow ("strike" on a part): Vector2(from, to),
+# seconds of the composed clip.
+static var _compose_strikes := {}
 
 var player: Player
 var _model: Node3D
@@ -371,7 +643,22 @@ var _aim_weight := 0.0
 var _strike_at := -1.0
 # What is left of the hold after a blow before its way back starts.
 var _follow_hold := 0.0
+# The return-only step (SkillDef.motion_return_only) whose return is showing.
+var _attack_phase_of_return := ""
+# 2026-11-21: the attack showing is a skill whose motion was baked off this
+# very clip (SkillDef "Motion"): it runs at the clip's own pace start to end,
+# the body under it moving by the same numbers, so the blow is not held
+# (FOLLOW_HOLD) and the way back is not hurried.
+var _attack_baked := false
+# The step back into the stance after it (SkillDef motion_return_*): how
+# long, the foot kept, and whether it has been shown for this cast.
+var _return_seconds := 0.0
+var _return_foot := ""
+var _returned := false
 var _lean: SkeletonModifier3D
+# 2026-11-21: the feet held to the ground (foot_lock_modifier.gd), and the
+# engine's two-bone IK that bends the legs to it. Null without "leg_bones".
+var _feet: SkeletonModifier3D
 var _lean_weight := 0.0
 var _straight_weight := 0.0
 var _look_weight := 0.0
@@ -454,9 +741,20 @@ func is_armed() -> bool:
 	return player.weapon != WeaponKinds.Kind.NONE or player.offhand != WeaponKinds.Kind.NONE
 
 
-# The clip for a picture on this body now.
+# The clip for a picture on this body now. 2026-11-20: a weapon's own table
+# first ("armed_by", by the weapon's family id: "sword", later "bow", "staff",
+# "shield"), then the shared "armed" one, then the bare one.
 func clip_now(key: String) -> String:
 	if is_armed():
+		var by_weapon: Dictionary = profile().get("armed_by", {})
+		if player != null and not by_weapon.is_empty():
+			for kind: int in [player.weapon, player.offhand]:
+				var weapon := Weapons.def_for_kind(kind)
+				if weapon == null:
+					continue
+				var own: Dictionary = by_weapon.get(weapon.family_id(), {})
+				if own.has(key):
+					return String(own[key])
 		var armed: Dictionary = profile().get("armed", {})
 		if armed.has(key):
 			return String(armed[key])
@@ -494,10 +792,44 @@ static func use_profile(name_text: String) -> void:
 	_upper_library = null
 	_clip_lengths.clear()
 	_first_part.clear()
+	_measured_height = 0.0
+	_skeleton_in_model = Transform3D()
+	_measured_yaw = 0.0
+	_measured_paces.clear()
+	_measured_forward = Vector3.ZERO
+	_auto_strikes.clear()
+	_auto_recoveries.clear()
+	_blade_parts.clear()
+	_raw_sources.clear()
+	_foot_contacts.clear()
+	_leaves_ground.clear()
+	_raw_backs.clear()
+	_pivot_paths.clear()
+	_pivot_feet.clear()
+	_timed_full.clear()
 
 
 static func model_height() -> float:
-	return float(profile()["height"])
+	var height := float(profile()["height"])
+	if height <= 0.0:
+		return maxf(_measured_height, 0.01)
+	return height
+
+
+# The bone the main-hand prop hangs off, and the off hand's.
+static func hand_bone() -> String:
+	return String(profile().get("hand_bone", HAND_BONE))
+
+
+static func offhand_bone() -> String:
+	return String(profile().get("offhand_bone", OFFHAND_BONE))
+
+
+# A bone by what it is (the hand, the hips), for the debug tools. The Mixamo
+# names unless the profile names its own.
+static func named_bone(role: String) -> String:
+	var named: Dictionary = profile().get("named_bones", {})
+	return String(named.get(role, {"hand": "RightHand", "hips": "Hips"}.get(role, "")))
 
 
 # ------------------------------------------------------------------ loading
@@ -530,7 +862,8 @@ static func _build_library() -> AnimationLibrary:
 	if _library != null:
 		return _library
 	var library := AnimationLibrary.new()
-	for path in profile()["clip_files"]:
+	_add_library_clips(library)
+	for path in profile().get("clip_files", []):
 		var packed := _generate(path)
 		if packed == null:
 			continue
@@ -584,6 +917,1266 @@ static func _build_library() -> AnimationLibrary:
 			_upper_library.add_animation(clip, _upper_only(library.get_animation(clip)))
 	_library = library
 	return library
+
+
+# ------------------------------------------------------------------ library clips
+
+# A profile with a prebuilt library ("library", the sword pack's): each of
+# its "library_clips" copied out of it under the name used here, its bone
+# names put right ("renames"), its root travel measured and taken out.
+static func _add_library_clips(library: AnimationLibrary) -> void:
+	var path := String(profile().get("library", ""))
+	if path == "":
+		return
+	var source := load(path) as AnimationLibrary
+	if source == null:
+		push_error("CharacterVisual: %s would not load" % path)
+		return
+	var root_bone := String(profile().get("root_bone", "Hips"))
+	var renames: Dictionary = profile().get("renames", {})
+	var specs: Dictionary = profile().get("library_clips", {})
+	# The model's skeleton, for the clips whose blade is timed here.
+	var rig_root: Node = null
+	var rig: Skeleton3D = null
+	var model := load(String(profile()["model"])) as PackedScene
+	if model != null:
+		rig_root = model.instantiate()
+		var found := rig_root.find_children("*", "Skeleton3D", true, false)
+		if not found.is_empty():
+			rig = found[0] as Skeleton3D
+	for clip in specs:
+		var spec: Dictionary = specs[clip]
+		if spec.has("compose"):
+			if rig != null:
+				var made := _composed(String(clip), source, spec["compose"], rig, root_bone)
+				if made != null and _compose_strikes.has(clip):
+					# Timed by its "strike" part: travel off the root (the body
+					# carries it, SkillDef "Motion"), the model on the root's rest.
+					_raw_sources[clip] = made.duplicate(true)
+					_strip_travel(made, "body", root_bone)
+					_rest_root(made, rig, root_bone)
+					var marks: Vector2 = _compose_strikes[clip]
+					made = _time_given(library, String(clip), made, marks.x, marks.y)
+					_study_feet(String(clip), rig)
+				if made != null:
+					library.add_animation(clip, made)
+					_clip_lengths[clip] = made.length
+			continue
+		var from_name := StringName(String(spec["source"]))
+		if not source.has_animation(from_name):
+			push_error("CharacterVisual: no clip %s in %s" % [from_name, path])
+			continue
+		var animation := source.get_animation(from_name).duplicate(true) as Animation
+		for track in animation.get_track_count():
+			var track_path := animation.track_get_path(track)
+			if track_path.get_subname_count() == 0:
+				continue
+			var bone := String(track_path.get_subname(0))
+			if renames.has(bone):
+				animation.track_set_path(track, NodePath("%s:%s" % [track_path.get_concatenated_names(), renames[bone]]))
+		var travel := String(spec.get("travel", ""))
+		if travel == "ramp":
+			_measured_paces[clip] = _root_pace(animation, root_bone)
+		if String(spec.get("strike", "")) == "auto":
+			_raw_sources[clip] = animation.duplicate(true)
+			# 2026-11-22: cut where the clip is ("from"/"to"), so the blade's
+			# times (_blade_parts) and the baked motion read the same seconds.
+			if spec.has("from") or spec.has("to"):
+				_raw_sources[clip] = _cut(_raw_sources[clip] as Animation, float(spec.get("from", 0.0)),
+					float(spec.get("to", animation.length)))
+		_strip_travel(animation, travel, root_bone)
+		if spec.has("from") or spec.has("to"):
+			animation = _cut(animation, float(spec.get("from", 0.0)), float(spec.get("to", animation.length)))
+		if String(spec.get("strike", "")) == "auto" and rig != null:
+			animation = _time_blade(library, String(clip), String(spec["source"]), animation, rig,
+				int(spec.get("pass", -1)), _back_clip(source, spec.get("back_clip", {}), renames, root_bone),
+				_back_clip(source, spec.get("then_clip", {}), renames, root_bone), spec.get("pivot", {}))
+			if _blade_parts.has(clip):
+				_study_feet(String(clip), rig)
+		library.add_animation(clip, animation)
+		_clip_lengths[clip] = animation.length
+	if rig != null:
+		# Candidates studied and printed only (PLAYGROUND_CLIP_BLADE), to pick
+		# a clip by its blade. Nothing is kept of them.
+		for name_text in profile().get("blade_report", []):
+			var from_name := StringName(String(name_text))
+			if not source.has_animation(from_name):
+				continue
+			var candidate := source.get_animation(from_name).duplicate(true) as Animation
+			_strip_travel(candidate, "pin", root_bone)
+			_print_study("(후보)", String(name_text), candidate, _blade_study(candidate, rig))
+		# How far apart the end of one clip and the start of the next are, for
+		# the clips that follow one another (PLAYGROUND_CLIP_GAP).
+		for pair in profile().get("pose_gaps", []):
+			if library.has_animation(String(pair[0])) and library.has_animation(String(pair[1])):
+				_print_gap(String(pair[0]), library.get_animation(String(pair[0])),
+					String(pair[1]), library.get_animation(String(pair[1])), rig)
+	if rig_root != null:
+		rig_root.free()
+
+
+# ------------------------------------------------------------------ the blade
+
+# An attack clip of the pack, timed off its own blade. A pass is a run of
+# frames where the blade (halfway along it) moves at least BLADE_PASS_SHARE
+# of its fastest; gaps under BLADE_PASS_GAP are one pass; a run whose own
+# fastest is under BLADE_PASS_MIN of the clip's is no pass. The clip is cut
+# where its pass ends -- the cast plays up to there over windup + swing, the
+# pass itself over the swing -- and what follows, up to where the next pass
+# begins to wind up (the slowest frame between the two) or the clip's end, is
+# its way back, played through the recovery. `pass_index` picks a pass (0 the
+# first); -1 the fastest. A part past the first starts at that slowest frame.
+const BLADE_PASS_SHARE := 0.35
+const BLADE_PASS_MIN := 0.5
+const BLADE_PASS_GAP := 0.05
+const BLADE_SAMPLE := 1.0 / 60.0
+
+
+static func _track_map(animation: Animation) -> Dictionary:
+	var tracks := {}
+	for track in animation.get_track_count():
+		var kind := animation.track_get_type(track)
+		var track_path := animation.track_get_path(track)
+		if track_path.get_subname_count() == 0:
+			continue
+		if kind == Animation.TYPE_ROTATION_3D:
+			tracks[String(track_path.get_subname(0)) + "/r"] = track
+		elif kind == Animation.TYPE_POSITION_3D:
+			tracks[String(track_path.get_subname(0)) + "/p"] = track
+	return tracks
+
+
+# The skeleton's up and the body's right, in the skeleton's own space.
+static func _body_axes() -> Array[Vector3]:
+	var to_skeleton := _skeleton_in_model.basis.inverse()
+	var up := (to_skeleton * Vector3.UP).normalized()
+	var forward := (to_skeleton * _measured_forward).normalized()
+	return [up, forward.cross(up).normalized()]
+
+
+# Which way the hips face at a moment, as a bearing about the up axis
+# (degrees): the line from the left thigh to the right one.
+static func _hips_bearing(globals: Array[Transform3D], rig: Skeleton3D, up: Vector3, right: Vector3) -> float:
+	var left := rig.find_bone("thigh_l")
+	var right_thigh := rig.find_bone("thigh_r")
+	if left < 0 or right_thigh < 0:
+		return 0.0
+	var line := globals[right_thigh].origin - globals[left].origin
+	line -= up * line.dot(up)
+	var ahead := up.cross(right)
+	return rad_to_deg(atan2(line.dot(ahead), line.dot(right)))
+
+
+static func _blade_study(animation: Animation, rig: Skeleton3D) -> Dictionary:
+	var hand := rig.find_bone(hand_bone())
+	if hand < 0 or animation.length < BLADE_SAMPLE * 4.0:
+		return {}
+	var tracks := _track_map(animation)
+	# Halfway along the blade, in the skeleton's units; the blade runs along
+	# the weapon bone's +X (see the profile's grip_basis).
+	var inner := maxf(_skeleton_in_model.basis.get_scale().x, 0.0001)
+	var reach := SWORD_LENGTH * 0.5 * model_height() / (Player.BODY_HALF_HEIGHT * 2.0) / inner
+	var axes := _body_axes()
+	var times: Array[float] = []
+	var tips: Array[Vector3] = []
+	var bearings: Array[float] = []
+	var time := 0.0
+	while time <= animation.length + 0.0001:
+		var globals := _globals_of(rig, _locals_at(animation, rig, minf(time, animation.length), tracks))
+		var weapon := globals[hand]
+		tips.append(weapon.origin + weapon.basis.x.normalized() * reach - globals[0].origin)
+		bearings.append(_hips_bearing(globals, rig, axes[0], axes[1]))
+		times.append(minf(time, animation.length))
+		time += BLADE_SAMPLE
+	var speeds: Array[float] = []
+	var top := 0.0
+	for index in tips.size() - 1:
+		speeds.append(tips[index].distance_to(tips[index + 1]))
+		top = maxf(top, speeds[index])
+	# The runs over the share, joined across short gaps, kept if fast enough.
+	var runs: Array = []
+	var gap_frames := int(ceil(BLADE_PASS_GAP / BLADE_SAMPLE))
+	var index := 0
+	while index < speeds.size():
+		if speeds[index] < top * BLADE_PASS_SHARE:
+			index += 1
+			continue
+		var first := index
+		while index < speeds.size() and speeds[index] >= top * BLADE_PASS_SHARE:
+			index += 1
+		if not runs.is_empty() and first - int(runs[-1][1]) <= gap_frames:
+			runs[-1][1] = index
+		else:
+			runs.append([first, index])
+	var passes: Array = []
+	var fastest := -1
+	for run in runs:
+		var peak := 0.0
+		for at in range(int(run[0]), int(run[1])):
+			peak = maxf(peak, speeds[at])
+		if peak < top * BLADE_PASS_MIN:
+			continue
+		if peak >= top - 0.000001:
+			fastest = passes.size()
+		passes.append(run)
+	# Between two passes: the slowest frame, where the one ends and the next
+	# begins.
+	var splits: Array[int] = []
+	for at in passes.size() - 1:
+		var slowest := int(passes[at][1])
+		for frame in range(int(passes[at][1]), int(passes[at + 1][0]) + 1):
+			if speeds[mini(frame, speeds.size() - 1)] < speeds[mini(slowest, speeds.size() - 1)]:
+				slowest = frame
+		splits.append(slowest)
+	return {
+		"times": times, "tips": tips, "bearings": bearings, "passes": passes, "splits": splits,
+		"fastest": maxi(fastest, 0), "up": axes[0], "right": axes[1],
+		"metre": (SWORD_LENGTH * 0.5) / maxf(reach, 0.0001),
+	}
+
+
+static func _print_study(clip: String, source: String, animation: Animation, study: Dictionary) -> void:
+	if study.is_empty():
+		return
+	var times: Array[float] = study["times"]
+	var tips: Array[Vector3] = study["tips"]
+	var bearings: Array[float] = study["bearings"]
+	var up: Vector3 = study["up"]
+	var right: Vector3 = study["right"]
+	var metre := float(study["metre"])
+	var parts := PackedStringArray()
+	var number := 0
+	for run in study["passes"]:
+		number += 1
+		var start := tips[int(run[0])]
+		var end := tips[int(run[1])]
+		parts.append("%d) %.2f-%.2f s %s 좌우 %.2f->%.2f m 높이 %.2f->%.2f m" % [number, times[int(run[0])], times[int(run[1])],
+			"오른쪽→왼쪽" if start.dot(right) > end.dot(right) else "왼쪽→오른쪽",
+			start.dot(right) * metre, end.dot(right) * metre, start.dot(up) * metre, end.dot(up) * metre])
+	var turn := wrapf(bearings[-1] - bearings[0], -180.0, 180.0)
+	print("PLAYGROUND_CLIP_BLADE clip=%s source=%s 길이 %.2f s  몸 회전 %+.0f°  칼 지나감 %d번: %s" % [
+		clip, source, animation.length, turn, parts.size(), "  |  ".join(parts)])
+
+
+# 2026-11-21: a "back_clip" spec ({"source", "to"}) out of the pack's
+# library: the clip up to "to", its bone names put right, its root's travel
+# across the ground taken out like the attack's ("body"; its turn is kept:
+# the turn is the clip). Null for no spec.
+static func _back_clip(source: AnimationLibrary, spec: Dictionary, renames: Dictionary, root_bone: String) -> Animation:
+	if spec.is_empty() or not source.has_animation(StringName(String(spec["source"]))):
+		return null
+	var back := source.get_animation(StringName(String(spec["source"]))).duplicate(true) as Animation
+	for track in back.get_track_count():
+		var track_path := back.track_get_path(track)
+		if track_path.get_subname_count() > 0 and renames.has(String(track_path.get_subname(0))):
+			back.track_set_path(track, NodePath("%s:%s" % [track_path.get_concatenated_names(), renames[String(track_path.get_subname(0))]]))
+	_strip_travel(back, "body", root_bone)
+	# 2026-11-22: "from" as well (the counter's way back is the middle of a
+	# combo clip).
+	if spec.has("to") or spec.has("from"):
+		back = _cut(back, float(spec.get("from", 0.0)), float(spec.get("to", back.length)))
+	return back
+
+
+# 2026-11-22 TEST ("compose"): parts end to end, each made into a pose for
+# every bone 30 times a second so they join cleanly. A part is
+#   {"clip": <library name>, "travel": ...}  a library clip as it is;
+#   {"upper": <name>, "legs": <name>, "legs_mix": <name>, "mix": 0..1,
+#    "seconds": s}  the upper body of one clip over the legs of another
+#    (_is_lower; the legs optionally part way to a third), `seconds` long
+#    (default the upper clip's length; it holds its last frame after);
+#   {"spin": <pivot spec>}  a spin made here (_pivot_clip, linked) from the
+#    part before's last frame into the part after's first.
+#   {"blend": s}  `s` seconds from the part before's last frame into the
+#    part after's first, every bone on the straight way.
+# A clip part may also take "from"/"to" (seconds of the clip), "from_pass_of"
+# (from where that timed clip's blow ends), "speed" (played that much
+# faster), "hold": true (its root kept at the height the part before ended
+# at, its own rise and fall taken out), "dive": true (its root driven from
+# that height to the ground at one speed) and "strike": s (the clip's blow is
+# this part's first `s` seconds: _compose_strikes). Each clip part after the
+# first goes on across the ground from where the part before left the root.
+static func _composed(clip: String, source: AnimationLibrary, parts: Array, rig: Skeleton3D, root_bone: String) -> Animation:
+	var pieces: Array = []
+	var owners: Array = []
+	var last_made: Animation = null
+	_compose_strikes.erase(clip)
+	for part: Dictionary in parts:
+		owners.append(part)
+		if part.has("spin") or part.has("blend"):
+			pieces.append(part)
+			continue
+		var made := _composed_part(source, part, rig, root_bone, last_made)
+		if made == null:
+			push_error("CharacterVisual: %s: a part would not build (%s)" % [clip, part])
+			return null
+		pieces.append(made)
+		last_made = made
+	var out: Animation = null
+	for index in pieces.size():
+		var starts_at := out.length if out != null else 0.0
+		if (owners[index] as Dictionary).has("strike"):
+			_compose_strikes[clip] = Vector2(starts_at, starts_at + float(owners[index]["strike"]))
+		var piece: Variant = pieces[index]
+		var animation: Animation
+		if piece is Dictionary:
+			if index == 0 or index == pieces.size() - 1 or not (pieces[index - 1] is Animation) \
+					or not (pieces[index + 1] is Animation):
+				push_error("CharacterVisual: %s: a spin or blend needs a part on each side" % clip)
+				return null
+			var before := pieces[index - 1] as Animation
+			var after := pieces[index + 1] as Animation
+			if (piece as Dictionary).has("blend"):
+				var from_pose := _locals_at(before, rig, before.length, _track_map(before))
+				var to_pose := _locals_at(after, rig, 0.0, _track_map(after))
+				var seconds := maxf(float(piece["blend"]), MOTION_SAMPLE)
+				animation = _baked_poses(rig, String(before.track_get_path(0)).get_slice(":", 0), seconds,
+					func(time: float) -> Array[Transform3D]:
+						var share := time / seconds
+						var pose: Array[Transform3D] = []
+						for bone in from_pose.size():
+							pose.append(Transform3D(Basis(from_pose[bone].basis.get_rotation_quaternion().slerp(
+								to_pose[bone].basis.get_rotation_quaternion(), share)),
+								from_pose[bone].origin.lerp(to_pose[bone].origin, share)))
+						return pose)
+			else:
+				animation = _pivot_clip("%s_spin%d" % [clip, index], before, before.length, rig, piece["spin"], after, 0.0)
+			if animation == null:
+				return null
+		else:
+			animation = piece as Animation
+		out = animation if out == null else _joined(out, animation)
+	print("PLAYGROUND_CLIP_COMPOSE clip=%s parts=%d length=%.2f s" % [clip, pieces.size(), out.length if out != null else 0.0])
+	return out
+
+
+static func _composed_part(source: AnimationLibrary, part: Dictionary, rig: Skeleton3D, root_bone: String,
+		before: Animation = null) -> Animation:
+	var first := String(part.get("clip", part.get("upper", "")))
+	if not source.has_animation(StringName(first)):
+		return null
+	var main := source.get_animation(StringName(first)).duplicate(true) as Animation
+	var prefix := String(main.track_get_path(0)).get_slice(":", 0)
+	if part.has("clip"):
+		_strip_travel(main, String(part.get("travel", "")), root_bone)
+		var from := float(part.get("from", 0.0))
+		var pass_of := String(part.get("from_pass_of", ""))
+		if pass_of != "":
+			if not _blade_parts.has(pass_of):
+				push_error("CharacterVisual: a part starts where %s's blow ends, which is not timed before it" % pass_of)
+				return null
+			from = float((_blade_parts[pass_of] as Dictionary)["pass_to"])
+		if from > 0.0 or part.has("to"):
+			main = _cut(main, from, float(part.get("to", main.length)))
+		var main_tracks := _track_map(main)
+		# Where the part before left the root: its height along the skeleton's
+		# up, and across the ground, where this part goes on from.
+		var up: Vector3 = _body_axes()[0]
+		var root := rig.find_bone(root_bone)
+		var height_before := 0.0
+		var across := Vector3.ZERO
+		if before != null and root >= 0:
+			var end_place := _locals_at(before, rig, before.length, _track_map(before))[root].origin
+			var start_place := _locals_at(main, rig, 0.0, main_tracks)[root].origin
+			height_before = end_place.dot(up)
+			across = end_place - start_place
+			across -= up * across.dot(up)
+		var hold := bool(part.get("hold", false))
+		var dive := bool(part.get("dive", false))
+		var speed := maxf(float(part.get("speed", 1.0)), 0.01)
+		var length := main.length / speed
+		var twist: Dictionary = (part.get("twist", {}) as Dictionary).duplicate()
+		if twist.has("step_clip") and source.has_animation(StringName(String(twist["step_clip"]))):
+			twist["step_anim"] = source.get_animation(StringName(String(twist["step_clip"])))
+		return _baked_poses(rig, prefix, length, func(time: float) -> Array[Transform3D]:
+			var pose := _locals_at(main, rig, minf(time * speed, main.length), main_tracks)
+			if not twist.is_empty():
+				_twist_pose(pose, rig, twist, time, length)
+			if root >= 0:
+				pose[root].origin += across
+			if root >= 0 and (hold or dive):
+				var own := pose[root].origin.dot(up)
+				var height := height_before
+				if dive:
+					height = height_before * (1.0 - time / maxf(length, 0.001))
+				pose[root].origin += up * (height - own)
+			return pose)
+	var main_tracks := _track_map(main)
+	var legs_name := String(part.get("legs", ""))
+	if not source.has_animation(StringName(legs_name)):
+		return null
+	var legs := source.get_animation(StringName(legs_name))
+	var legs_tracks := _track_map(legs)
+	var other: Animation = null
+	var other_tracks := {}
+	if source.has_animation(StringName(String(part.get("legs_mix", "")))):
+		other = source.get_animation(StringName(String(part["legs_mix"])))
+		other_tracks = _track_map(other)
+	var mix := clampf(float(part.get("mix", 0.5)), 0.0, 1.0)
+	var lower: Array[bool] = []
+	for bone in rig.get_bone_count():
+		lower.append(_is_lower(rig.get_bone_name(bone)))
+	var seconds := float(part.get("seconds", main.length))
+	return _baked_poses(rig, prefix, seconds, func(time: float) -> Array[Transform3D]:
+		var up := _locals_at(main, rig, minf(time, main.length), main_tracks)
+		var down := _locals_at(legs, rig, fmod(time, maxf(legs.length, 0.001)), legs_tracks)
+		if other != null:
+			var down_2 := _locals_at(other, rig, fmod(time, maxf(other.length, 0.001)), other_tracks)
+			for bone in down.size():
+				down[bone] = Transform3D(Basis(down[bone].basis.get_rotation_quaternion().slerp(
+					down_2[bone].basis.get_rotation_quaternion(), mix)), down[bone].origin.lerp(down_2[bone].origin, mix))
+		for bone in up.size():
+			if lower[bone]:
+				up[bone] = down[bone]
+		return up)
+
+
+# 2026-11-22 (the user's deflect, off Block_Hold). Seen from the skeleton,
+# each a turn about its own axes, put on a bone in its parent's frame:
+#   "yaw" / "lean" (degrees): the upper body from the waist (spine_01..03
+#     share them), + counter-clockwise from above / + to the body's left;
+#   "hand": the sword hand about the up axis;
+#   "tip_drop": the sword hand tipped so the blade's tip goes down by that
+#     much (the hilt high, a hanging parry: the blow slides down the blade);
+#   "pivot": the whole body about "pivot_foot", which stays (the root bone
+#     turned and moved round it);
+#   "sink" (metres): the hips lowered, both legs bent to keep the feet where
+#     they are (the weight settled onto the braced leg);
+# all easing in over "in" seconds after "delay", held, and back over the
+# last "out". The feet are not touched by these.
+# "step" ("l" / "r": the leg_bones side) steps that foot first, from the
+# start: over "foot_in" it goes to "step_target" -- (right, back) metres from
+# the pivot foot, in the stance's own frame -- lifted on the way as high as
+# "step_clip"'s heel is off the ground between "step_from" and "step_to"
+# (seconds, wrapping round its end; else "lift" at the middle), the ankle
+# and toes turned as that clip turns them; and back the same way over the
+# last "out". The leg is bent to the foot every frame (_reach), so a foot
+# that has landed stays put while the body turns above it.
+static func _twist_pose(pose: Array[Transform3D], rig: Skeleton3D, spec: Dictionary, time: float, length: float) -> void:
+	var rise := maxf(float(spec.get("in", 0.1)), 0.001)
+	var fall := maxf(float(spec.get("out", 0.1)), 0.001)
+	var delay := maxf(float(spec.get("delay", 0.0)), 0.0)
+	var going_back := 1.0 - smoothstep(0.0, 1.0, (time - (length - fall)) / fall)
+	var share := smoothstep(0.0, 1.0, (time - delay) / rise) * going_back
+	var foot_rise := maxf(float(spec.get("foot_in", rise)), 0.001)
+	var foot_share := smoothstep(0.0, 1.0, time / foot_rise) * going_back
+	if share <= 0.0 and foot_share <= 0.0:
+		return
+	var axes := _body_axes()
+	var up: Vector3 = axes[0]
+	var right: Vector3 = axes[1]
+	var forward := up.cross(right).normalized()
+	var base := _globals_of(rig, pose)
+	# The whole body round the pivot foot.
+	var pivot_deg := float(spec.get("pivot", 0.0))
+	var root := rig.find_bone(String(profile().get("root_bone", "root")))
+	var pivot_foot := rig.find_bone(String(spec.get("pivot_foot", "foot_r")))
+	if pivot_deg != 0.0 and root >= 0 and pivot_foot >= 0:
+		var at := base[pivot_foot].origin
+		var whole := Basis(up, deg_to_rad(pivot_deg) * share)
+		pose[root] = Transform3D((whole * pose[root].basis).orthonormalized(), at + whole * (pose[root].origin - at))
+	# The hips lowered; the planted foot bent back to where it stood.
+	var sink := float(spec.get("sink", 0.0)) * share
+	var hips := rig.find_bone(String((profile().get("named_bones", {}) as Dictionary).get("hips", "pelvis")))
+	var legs_all: Dictionary = profile().get("leg_bones", {})
+	if sink != 0.0 and hips >= 0 and pivot_foot >= 0:
+		var turned := _globals_of(rig, pose)
+		var hips_parent := rig.get_bone_parent(hips)
+		var parent_basis := turned[hips_parent].basis if hips_parent >= 0 else Basis.IDENTITY
+		pose[hips] = Transform3D(pose[hips].basis, pose[hips].origin + parent_basis.inverse() * (-up * sink))
+		for leg_side: String in legs_all:
+			var leg: Array = legs_all[leg_side]
+			if String(leg[2]) != rig.get_bone_name(pivot_foot):
+				continue
+			var top := rig.find_bone(String(leg[0]))
+			var mid := rig.find_bone(String(leg[1]))
+			if top < 0 or mid < 0:
+				continue
+			var now_legs := _globals_of(rig, pose)
+			var bend := now_legs[mid].origin - (now_legs[top].origin + now_legs[pivot_foot].origin) * 0.5
+			_reach(rig, pose, top, mid, pivot_foot, turned[pivot_foot].origin,
+				bend.normalized() if bend.length_squared() > 0.0001 else forward)
+			_face(rig, pose, pivot_foot, turned[pivot_foot].basis)
+	# The stepping foot.
+	var legs: Dictionary = profile().get("leg_bones", {})
+	var side := String(spec.get("step", ""))
+	if legs.has(side) and spec.has("step_target") and pivot_foot >= 0:
+		var bones: Array = legs[side]
+		var thigh := rig.find_bone(String(bones[0]))
+		var calf := rig.find_bone(String(bones[1]))
+		var step_foot := rig.find_bone(String(bones[2]))
+		var ball := rig.find_bone(String(bones[3])) if bones.size() > 3 else -1
+		if thigh >= 0 and calf >= 0 and step_foot >= 0:
+			var offset: Array = spec["step_target"]
+			var from_place := base[step_foot].origin
+			var to_place := base[pivot_foot].origin + right * float(offset[0]) - forward * float(offset[1])
+			to_place += up * (from_place - to_place).dot(up)
+			# How far along the step (0..1) while the foot is in the air.
+			var along := -1.0
+			if time < foot_rise:
+				along = time / foot_rise
+			elif time > length - fall:
+				along = 1.0 - clampf((time - (length - fall)) / fall, 0.0, 1.0)
+			var raise := 0.0
+			var step_anim := spec.get("step_anim", null) as Animation
+			var ref: Array[Transform3D] = []
+			if along >= 0.0 and step_anim != null:
+				var from := float(spec.get("step_from", 0.0))
+				var clip_t := fmod(from + (float(spec.get("step_to", from)) - from) * along, step_anim.length)
+				var tracks := _track_map(step_anim)
+				ref = _locals_at(step_anim, rig, clip_t, tracks)
+				var ground := _globals_of(rig, _locals_at(step_anim, rig, fmod(from, step_anim.length), tracks))[step_foot].origin.dot(up)
+				raise = maxf(_globals_of(rig, ref)[step_foot].origin.dot(up) - ground, 0.0)
+			elif along >= 0.0:
+				raise = float(spec.get("lift", 0.0)) * sin(PI * along)
+			var target := from_place.lerp(to_place, foot_share) + up * raise
+			var now := _globals_of(rig, pose)
+			var knee_out := now[calf].origin - (now[thigh].origin + now[step_foot].origin) * 0.5
+			if knee_out.length_squared() < 0.0001:
+				knee_out = forward
+			_reach(rig, pose, thigh, calf, step_foot, target, knee_out.normalized())
+			if ref.is_empty():
+				# Landed: the foot keeps lying as it lay, the leg bent above it.
+				_face(rig, pose, step_foot, now[step_foot].basis)
+			else:
+				pose[step_foot] = Transform3D(ref[step_foot].basis, pose[step_foot].origin)
+				if ball >= 0:
+					pose[ball] = Transform3D(ref[ball].basis, pose[ball].origin)
+	# The upper body and the hand.
+	var spine := ["spine_01", "spine_02", "spine_03"]
+	var yaw := deg_to_rad(float(spec.get("yaw", 0.0))) * share / float(spine.size())
+	var lean := deg_to_rad(float(spec.get("lean", 0.0))) * share / float(spine.size())
+	var turns := {}
+	for bone_name: String in spine:
+		turns[bone_name] = Basis(up, yaw) * Basis(forward, -lean)
+	turns["hand_r"] = Basis(up, deg_to_rad(float(spec.get("hand", 0.0))) * share)
+	var globals := _globals_of(rig, pose)
+	for bone_name: String in turns:
+		var bone := rig.find_bone(bone_name)
+		if bone < 0:
+			continue
+		var parent := rig.get_bone_parent(bone)
+		var parent_basis := globals[parent].basis.orthonormalized() if parent >= 0 else Basis.IDENTITY
+		var local_turn := parent_basis.inverse() * (turns[bone_name] as Basis) * parent_basis
+		pose[bone] = Transform3D((local_turn * pose[bone].basis).orthonormalized(), pose[bone].origin)
+	# 2026-11-22 (the user: the whole body, not a twist on the guard): the
+	# head kept on the foe ("head", degrees about up, against the turn), and
+	# the arms put where the end pose has them -- "arm_r" / "arm_l": {"at":
+	# [right, up, forward] metres from the hips, "blade": [right, up, forward]
+	# the way the blade points (right arm only)}, both in the body's frame once
+	# turned by the whole "pivot" -- eased there from the clip's own by share,
+	# the elbows bent by _reach.
+	var head_bone := rig.find_bone("neck_01")
+	if head_bone >= 0 and spec.has("head"):
+		var now_head := _globals_of(rig, pose)
+		var neck_parent := rig.get_bone_parent(head_bone)
+		var neck_basis := now_head[neck_parent].basis.orthonormalized()
+		var neck_turn := neck_basis.inverse() * Basis(up, deg_to_rad(float(spec["head"])) * share) * neck_basis
+		pose[head_bone] = Transform3D((neck_turn * pose[head_bone].basis).orthonormalized(), pose[head_bone].origin)
+	var end_turn := Basis(up, deg_to_rad(pivot_deg))
+	var end_right := end_turn * right
+	var end_forward := end_turn * forward
+	for arm_side: String in ["r", "l"]:
+		var arm_key := "arm_" + arm_side
+		if not spec.has(arm_key) or hips < 0:
+			continue
+		var arm: Dictionary = spec[arm_key]
+		var upper := rig.find_bone("upperarm_" + arm_side)
+		var lower := rig.find_bone("lowerarm_" + arm_side)
+		var wrist := rig.find_bone("hand_" + arm_side)
+		if upper < 0 or lower < 0 or wrist < 0:
+			continue
+		var now_arm := _globals_of(rig, pose)
+		var at: Array = arm.get("at", [0.0, 0.0, 0.0])
+		var wanted: Vector3 = now_arm[hips].origin + end_right * float(at[0]) + up * float(at[1]) + end_forward * float(at[2])
+		var hand_target: Vector3 = now_arm[wrist].origin.lerp(wanted, share)
+		var side_sign := 1.0 if arm_side == "r" else -1.0
+		var elbow: Vector3 = (-up + end_right * side_sign * 0.6 - end_forward * 0.3).normalized()
+		_reach(rig, pose, upper, lower, wrist, hand_target, elbow)
+		if arm.has("blade") and arm_side == "r":
+			var held_now := _globals_of(rig, pose)
+			var weapon_bone := rig.find_bone(hand_bone())
+			if weapon_bone >= 0:
+				var b: Array = arm["blade"]
+				var want_blade: Vector3 = (end_right * float(b[0]) + up * float(b[1]) + end_forward * float(b[2])).normalized()
+				var have_blade: Vector3 = held_now[weapon_bone].basis.x.normalized()
+				var toward_blade := have_blade.slerp(want_blade, share).normalized()
+				if have_blade.cross(toward_blade).length_squared() > 0.000001:
+					var swing := Basis(Quaternion(have_blade, toward_blade))
+					_face(rig, pose, wrist, swing * held_now[wrist].basis.orthonormalized())
+	# The tip down, the hilt up: the hand turned about the level line across
+	# the blade (the blade runs along the weapon bone's +X).
+	var drop := deg_to_rad(float(spec.get("tip_drop", 0.0))) * share
+	var hand := rig.find_bone("hand_r")
+	var weapon := rig.find_bone(hand_bone())
+	if drop != 0.0 and hand >= 0 and weapon >= 0:
+		var held := _globals_of(rig, pose)
+		var blade := held[weapon].basis.x.normalized()
+		var across := blade.cross(-up)
+		if across.length_squared() > 0.0001:
+			var hand_parent := rig.get_bone_parent(hand)
+			var parent_basis := held[hand_parent].basis.orthonormalized() if hand_parent >= 0 else Basis.IDENTITY
+			var local_turn := parent_basis.inverse() * Basis(across.normalized(), drop) * parent_basis
+			pose[hand] = Transform3D((local_turn * pose[hand].basis).orthonormalized(), pose[hand].origin)
+
+
+# A rotation and a position track for every bone, `sample` (time -> local
+# poses) taken every MOTION_SAMPLE.
+static func _baked_poses(rig: Skeleton3D, prefix: String, length: float, sample: Callable) -> Animation:
+	var out := Animation.new()
+	out.length = maxf(length, MOTION_SAMPLE)
+	var turns: Array[int] = []
+	var moves: Array[int] = []
+	for bone in rig.get_bone_count():
+		var path := NodePath("%s:%s" % [prefix, rig.get_bone_name(bone)])
+		turns.append(out.add_track(Animation.TYPE_ROTATION_3D))
+		out.track_set_path(turns[bone], path)
+		moves.append(out.add_track(Animation.TYPE_POSITION_3D))
+		out.track_set_path(moves[bone], path)
+	var count := int(ceil(out.length / MOTION_SAMPLE - 0.001))
+	for index in count + 1:
+		var time := minf(index * MOTION_SAMPLE, out.length)
+		var locals: Array[Transform3D] = sample.call(time)
+		for bone in locals.size():
+			out.rotation_track_insert_key(turns[bone], time, locals[bone].basis.get_rotation_quaternion())
+			out.position_track_insert_key(moves[bone], time, locals[bone].origin)
+	return out
+
+
+# Turns `back` about the skeleton's up axis (its root bone's rotation keys)
+# so that its first frame's hips face the way `before`'s hips do at `at`:
+# the blend from the one into the other then has nothing to turn through.
+static func _face_like(back: Animation, before: Animation, at: float, rig: Skeleton3D) -> void:
+	var axes := _body_axes()
+	var root_bone := String(profile().get("root_bone", "Hips"))
+	var want := _hips_bearing(_globals_of(rig, _locals_at(before, rig, at, _track_map(before))), rig, axes[0], axes[1])
+	var tracks := _track_map(back)
+	if not tracks.has(root_bone + "/r"):
+		return
+	var track := int(tracks[root_bone + "/r"])
+	var originals: Array[Quaternion] = []
+	for key in back.track_get_key_count(track):
+		originals.append(back.track_get_key_value(track, key) as Quaternion)
+	var have := _hips_bearing(_globals_of(rig, _locals_at(back, rig, 0.0, tracks)), rig, axes[0], axes[1])
+	var turn := deg_to_rad(wrapf(want - have, -180.0, 180.0))
+	# Which way a turn about `up` moves the bearing is the rig's: tried, and
+	# turned the other way if it went the wrong way.
+	for attempt in 2:
+		var by := Quaternion(axes[0], turn if attempt == 0 else -turn)
+		for key in originals.size():
+			back.track_set_key_value(track, key, by * originals[key])
+		var got := _hips_bearing(_globals_of(rig, _locals_at(back, rig, 0.0, tracks)), rig, axes[0], axes[1])
+		if absf(wrapf(want - got, -180.0, 180.0)) < 2.0:
+			break
+	# And it ends facing the way the stance does (the profile's idle clip,
+	# first frame: what the next step starts from): what is left over is
+	# spread along it, nothing at its first frame, all of it at its last.
+	var idle_spec: Dictionary = (profile().get("library_clips", {}) as Dictionary).get(
+		String((profile().get("clips", {}) as Dictionary).get("idle", "")), {})
+	var library := load(String(profile().get("library", ""))) as AnimationLibrary
+	var ends_at := 0.0
+	if not idle_spec.is_empty() and library != null:
+		var idle := library.get_animation(StringName(String(idle_spec["source"])))
+		var stance := _hips_bearing(_globals_of(rig, _locals_at(idle, rig, 0.0, _track_map(idle))), rig, axes[0], axes[1])
+		var started: Array[Quaternion] = []
+		for key in back.track_get_key_count(track):
+			started.append(back.track_get_key_value(track, key) as Quaternion)
+		var got_end := _hips_bearing(_globals_of(rig, _locals_at(back, rig, back.length, tracks)), rig, axes[0], axes[1])
+		var left_over := deg_to_rad(wrapf(stance - got_end, -180.0, 180.0))
+		for attempt in 2:
+			for key in started.size():
+				var share := back.track_get_key_time(track, key) / maxf(back.length, 0.001)
+				var by := Quaternion(axes[0], (left_over if attempt == 0 else -left_over) * share)
+				back.track_set_key_value(track, key, by * started[key])
+			ends_at = _hips_bearing(_globals_of(rig, _locals_at(back, rig, back.length, tracks)), rig, axes[0], axes[1])
+			if absf(wrapf(stance - ends_at, -180.0, 180.0)) < 2.0:
+				break
+	print("PLAYGROUND_CLIP_BACK hips at the blow %.0f deg, the back clip's first frame %.0f -> turned %.0f deg; ends at %.0f" % [
+		want, have, rad_to_deg(turn), ends_at])
+
+
+# 2026-11-21 (the user: "spin round on the left foot in one go, not walk
+# round"): a way back made here, `pivot` {"foot", "seconds"}. Every bone eases
+# (smoothstep) from `before` at `at` -- the blow's last frame -- into the
+# stance (the profile's idle clip, first frame), so the hips spin from where
+# the blow left them to the front; the spin goes the way the clip's own
+# follow-through went, the short way round if that is the way, else the long
+# way (a whole turn added to the root, nothing at its first frame). The root
+# does not travel; the body does, by _pivot_paths: round the pivot foot, so
+# that foot stays where it is (and is held there, _study_feet).
+#
+# 2026-11-22 (the user: "2nd, spin, 3rd in one go"): with a `target`, the
+# spin runs into that clip at `target_at` instead of the stance, at one speed
+# all the way (slowing at neither end). Every bone on the straight way
+# (slerp) between the two poses: a cubic through the frames either side was
+# tried first and bent the body out of shape mid-spin (2026-11-22).
+static func _pivot_clip(clip: String, before: Animation, at: float, rig: Skeleton3D, pivot: Dictionary,
+		target: Animation = null, target_at := 0.0) -> Animation:
+	var linked := target != null
+	if not linked:
+		var idle_spec: Dictionary = (profile().get("library_clips", {}) as Dictionary).get(
+			String((profile().get("clips", {}) as Dictionary).get("idle", "")), {})
+		var library := load(String(profile().get("library", ""))) as AnimationLibrary
+		if idle_spec.is_empty() or library == null:
+			return null
+		target = library.get_animation(StringName(String(idle_spec["source"])))
+		target_at = 0.0
+	var seconds := maxf(float(pivot.get("seconds", 0.4)), MOTION_SAMPLE * 2.0)
+	var axes := _body_axes()
+	var before_tracks := _track_map(before)
+	var target_tracks := _track_map(target)
+	var start := _locals_at(before, rig, at, before_tracks)
+	var stance := _locals_at(target, rig, target_at, target_tracks)
+	var root := rig.find_bone(String(profile().get("root_bone", "Hips")))
+	var h_start := _hips_bearing(_globals_of(rig, start), rig, axes[0], axes[1])
+	var h_stance := _hips_bearing(_globals_of(rig, stance), rig, axes[0], axes[1])
+	var h_later := _hips_bearing(_globals_of(rig, _locals_at(before, rig, minf(at + 0.3, before.length), before_tracks)),
+		rig, axes[0], axes[1])
+	var way := signf(wrapf(h_later - h_start, -180.0, 180.0))
+	if way == 0.0:
+		way = -1.0
+	# "turn": "ccw" / "cw" as seen from above, whatever the follow-through
+	# does (the rising cut's spin is counter-clockwise, the user's call
+	# 2026-11-21). A rising bearing is counter-clockwise from above.
+	match String(pivot.get("turn", "")):
+		"ccw":
+			way = 1.0
+		"cw":
+			way = -1.0
+	var short := wrapf(h_stance - h_start, -180.0, 180.0)
+	var whole := 0.0 if signf(short) == way else way * 360.0
+	if bool(pivot.get("whole", false)):
+		# A whole turn on top, whichever way is short (two poses facing alike).
+		whole = way * 360.0
+	# Which way a turn about `up` moves the bearing, on this rig.
+	var tried := stance.duplicate()
+	tried[root] = Transform3D(Basis(Quaternion(axes[0], deg_to_rad(10.0))) * stance[root].basis, stance[root].origin)
+	var sense := signf(wrapf(_hips_bearing(_globals_of(rig, tried), rig, axes[0], axes[1]) - h_stance, -180.0, 180.0))
+	var prefix := String(before.track_get_path(0)).get_slice(":", 0)
+	var out := Animation.new()
+	out.length = seconds
+	var count := int(ceil(seconds / MOTION_SAMPLE - 0.001))
+	for bone in rig.get_bone_count():
+		var turns := out.add_track(Animation.TYPE_ROTATION_3D)
+		out.track_set_path(turns, NodePath("%s:%s" % [prefix, rig.get_bone_name(bone)]))
+		var moves := out.add_track(Animation.TYPE_POSITION_3D)
+		out.track_set_path(moves, NodePath("%s:%s" % [prefix, rig.get_bone_name(bone)]))
+		var from_turn := start[bone].basis.get_rotation_quaternion()
+		var to_turn := stance[bone].basis.get_rotation_quaternion()
+		for index in count + 1:
+			var time := minf(index * MOTION_SAMPLE, seconds)
+			# Linked: at one speed all the way, so it slows at neither end.
+			var eased := time / seconds if linked else smoothstep(0.0, 1.0, time / seconds)
+			var turn := from_turn.slerp(to_turn, eased)
+			var place := start[bone].origin.lerp(stance[bone].origin, eased)
+			if bone == root:
+				# Starts a whole turn behind, so the turn itself adds `whole` to the
+				# bearing (2026-11-21: the sign was the wrong way, the spin ran
+				# 518 deg clockwise for the 202 counter-clockwise it said).
+				turn = Quaternion(axes[0], deg_to_rad(-sense * whole * (1.0 - eased))) * turn
+				place = start[bone].origin
+			out.rotation_track_insert_key(turns, time, turn)
+			out.position_track_insert_key(moves, time, place)
+	# The body's way round the pivot foot.
+	var legs: Dictionary = profile().get("leg_bones", {})
+	var side := String(pivot.get("foot", "l"))
+	var path := PackedVector3Array()
+	if legs.has(side):
+		var foot := rig.find_bone(String((legs[side] as Array)[2]))
+		var forward := _measured_forward if _measured_forward.length_squared() > 0.0001 else Vector3.FORWARD
+		var right := forward.cross(Vector3.UP).normalized()
+		var metre := Player.BODY_HALF_HEIGHT * 2.0 / model_height()
+		var tracks := _track_map(out)
+		var first := Vector3.INF
+		for index in count + 1:
+			var globals := _globals_of(rig, _locals_at(out, rig, minf(index * MOTION_SAMPLE, seconds), tracks))
+			var place := _skeleton_in_model.basis * (globals[foot].origin - globals[root].origin) * metre
+			var flat := Vector3(place.dot(right), 0.0, place.dot(forward))
+			if first == Vector3.INF:
+				first = flat
+			path.append(first - flat)
+		_pivot_paths[clip] = path
+		_pivot_feet[clip] = side
+	# The spin as it comes out, bearing step by step (+ = counter-clockwise
+	# from above).
+	var spun := 0.0
+	var out_tracks := _track_map(out)
+	var last := h_start
+	for index in range(1, count + 1):
+		var now := _hips_bearing(_globals_of(rig, _locals_at(out, rig, minf(index * MOTION_SAMPLE, seconds), out_tracks)),
+			rig, axes[0], axes[1])
+		spun += wrapf(now - last, -180.0, 180.0)
+		last = now
+	print("PLAYGROUND_CLIP_PIVOT clip=%s on the %s foot, %.2f s: hips %.0f -> %.0f deg, meant %+.0f deg, measured %+.0f deg (%s from above), the body goes round %.2f m" % [
+		clip, side, seconds, h_start, h_stance, short + whole, spun, "counter-clockwise" if spun > 0.0 else "clockwise",
+		path[path.size() - 1].length() if not path.is_empty() else 0.0])
+	return out
+
+
+static func _time_blade(library: AnimationLibrary, clip: String, source: String, animation: Animation, rig: Skeleton3D,
+		pass_index := -1, back_clip: Animation = null, then_clip: Animation = null, pivot: Dictionary = {}) -> Animation:
+	var study := _blade_study(animation, rig)
+	_print_study(clip, source, animation, study)
+	if study.is_empty() or (study["passes"] as Array).is_empty():
+		return animation
+	var times: Array[float] = study["times"]
+	var passes: Array = study["passes"]
+	var splits: Array[int] = study["splits"]
+	var chosen := int(study["fastest"]) if pass_index < 0 else pass_index
+	if chosen >= passes.size():
+		print("PLAYGROUND_CLIP_BLADE clip=%s source=%s: %d번째 칼 지나감이 없음 (%d번뿐), 가장 빠른 것으로" % [
+			clip, source, chosen + 1, passes.size()])
+		chosen = int(study["fastest"])
+	var part_from := times[splits[chosen - 1]] if chosen > 0 and pass_index >= 0 else 0.0
+	var pass_from := times[int(passes[chosen][0])]
+	var pass_to := times[int(passes[chosen][1])]
+	var back_to := times[splits[chosen]] if chosen < splits.size() else animation.length
+	_timed_full[clip] = animation
+	# 2026-11-22: "lead" {"from", "into", "foot", "seconds", "turn"}: the clip
+	# is only ever played straight after `from`'s blow, and begins with a spin
+	# made here (_pivot_clip, linked) out of that blow's last frame into this
+	# clip `into` seconds in, at speed both ends; the clip plays on from there.
+	var lead: Animation = null
+	var lead_spec: Dictionary = ((profile().get("library_clips", {}) as Dictionary).get(clip, {}) as Dictionary).get("lead", {})
+	if not lead_spec.is_empty():
+		var other := String(lead_spec.get("from", ""))
+		if _timed_full.has(other) and _blade_parts.has(other):
+			var into := clampf(float(lead_spec.get("into", 0.0)), 0.0, maxf(pass_from - MOTION_SAMPLE * 2.0, 0.0))
+			lead = _pivot_clip(clip + "_lead", _timed_full[other], float((_blade_parts[other] as Dictionary)["pass_to"]),
+				rig, lead_spec, animation, into)
+			if lead != null:
+				part_from = into
+		else:
+			push_error("CharacterVisual: %s leads in from %s, which is not timed before it" % [clip, other])
+	var lead_seconds := lead.length if lead != null else 0.0
+	if not pivot.is_empty():
+		# 2026-11-21: the way back is a spin made here (_pivot_clip).
+		back_clip = _pivot_clip(clip, animation, pass_to, rig, pivot)
+	elif back_clip != null:
+		# 2026-11-21: a way back from elsewhere ("back_clip"), turned about
+		# the up axis so it begins facing the way the blow left the hips.
+		_face_like(back_clip, animation, pass_to, rig)
+	if back_clip != null:
+		var back := clip + "_end"
+		library.add_animation(back, back_clip)
+		_clip_lengths[back] = back_clip.length
+		_auto_recoveries[clip] = back
+		_raw_backs[clip] = back_clip
+		_auto_strikes[clip] = pass_from - part_from + lead_seconds
+		_blade_parts[clip] = {"part_from": part_from, "pass_from": pass_from, "pass_to": pass_to,
+			"back_to": pass_to + back_clip.length, "lead": lead_seconds}
+		return _led(lead, _cut(animation, part_from, pass_to))
+	if back_to > pass_to + 0.05:
+		var back := clip + "_end"
+		var tail := _cut(animation, pass_to, back_to)
+		if then_clip != null:
+			# 2026-11-21: and after the clip's own way back, another clip
+			# ("then_clip": the rising cut's landing), facing on from it.
+			_face_like(then_clip, tail, tail.length, rig)
+			tail = _joined(tail, then_clip)
+			back_to += then_clip.length
+		library.add_animation(back, tail)
+		_clip_lengths[back] = tail.length
+		_auto_recoveries[clip] = back
+	_auto_strikes[clip] = pass_from - part_from + lead_seconds
+	_blade_parts[clip] = {"part_from": part_from, "pass_from": pass_from, "pass_to": pass_to,
+		"back_to": back_to if back_to > pass_to + 0.05 else pass_to, "lead": lead_seconds}
+	return _led(lead, _cut(animation, part_from, pass_to))
+
+
+# 2026-11-22: _time_blade's bookkeeping for a clip whose blow is known rather
+# than read off its blade (a composed clip: the landing of the rising cut's
+# dive). Played up to the blow's end; the rest is its way back.
+static func _time_given(library: AnimationLibrary, clip: String, animation: Animation, pass_from: float,
+		pass_to: float) -> Animation:
+	pass_to = minf(pass_to, animation.length)
+	_timed_full[clip] = animation
+	if animation.length > pass_to + 0.05:
+		var back := clip + "_end"
+		var tail := _cut(animation, pass_to, animation.length)
+		library.add_animation(back, tail)
+		_clip_lengths[back] = tail.length
+		_auto_recoveries[clip] = back
+	_auto_strikes[clip] = pass_from
+	_blade_parts[clip] = {"part_from": 0.0, "pass_from": pass_from, "pass_to": pass_to,
+		"back_to": animation.length, "lead": 0.0}
+	print("PLAYGROUND_CLIP_BLADE clip=%s (composed) blow %.3f..%.3f s of %.3f s" % [clip, pass_from, pass_to, animation.length])
+	return _cut(animation, 0.0, pass_to)
+
+
+# The root bone's place put back on its rest all through (after
+# _strip_travel "body", which holds it on its first frame: for a clip that
+# does not start on the ground that frame is off the rest).
+static func _rest_root(animation: Animation, rig: Skeleton3D, root_bone: String) -> void:
+	var root := rig.find_bone(root_bone)
+	if root < 0:
+		return
+	var rest := rig.get_bone_rest(root).origin
+	for track in animation.get_track_count():
+		if animation.track_get_type(track) == Animation.TYPE_POSITION_3D \
+				and String(animation.track_get_path(track).get_subname(0)) == root_bone:
+			for key in animation.track_get_key_count(track):
+				animation.track_set_key_value(track, key, rest)
+
+
+static func _led(lead: Animation, head: Animation) -> Animation:
+	return head if lead == null else _joined(lead, head)
+
+
+# 2026-11-21: a timed library clip's motion, for SkillDef "Motion" (written by
+# tools/sword_animset/bake.tscn): its windup, swing and recovery (seconds of
+# the clip at its own speed: the part before the blade's pass, the pass, the
+# way back) and the root bone's path over all three, sampled every
+# MOTION_SAMPLE, as (right, up, forward) metres at the human capsule from
+# where the part begins, and its turn about the up axis (degrees, + left).
+# {} for a clip that was not timed. Needs the model loaded once (the
+# skeleton's place and the facing are measured then).
+const MOTION_SAMPLE := 1.0 / 30.0
+
+
+static func baked_motion(clip: String) -> Dictionary:
+	if not _blade_parts.has(clip) or not _raw_sources.has(clip):
+		return {}
+	var parts: Dictionary = _blade_parts[clip]
+	var source := _raw_sources[clip] as Animation
+	var root_bone := String(profile().get("root_bone", "Hips"))
+	var moves := -1
+	var turns := -1
+	for track in source.get_track_count():
+		if String(source.track_get_path(track).get_subname(0)) != root_bone:
+			continue
+		if source.track_get_type(track) == Animation.TYPE_POSITION_3D:
+			moves = track
+		elif source.track_get_type(track) == Animation.TYPE_ROTATION_3D:
+			turns = track
+	var from := float(parts["part_from"])
+	var to := float(parts["back_to"])
+	var skeleton_basis := _skeleton_in_model.basis
+	var turn_basis := skeleton_basis.orthonormalized()
+	var forward := _measured_forward if _measured_forward.length_squared() > 0.0001 else Vector3.FORWARD
+	var right := forward.cross(Vector3.UP).normalized()
+	var metre := Player.BODY_HALF_HEIGHT * 2.0 / model_height()
+	# A clip with a lead spin is measured off its own first frame, as it was
+	# before it had one (the crouch it starts into is in the height).
+	var lead := float(parts.get("lead", 0.0))
+	var reference := 0.0 if lead > 0.0 else from
+	var start_place := source.position_track_interpolate(moves, reference) if moves >= 0 else Vector3.ZERO
+	var start_turn := source.rotation_track_interpolate(turns, reference) if turns >= 0 else Quaternion.IDENTITY
+	var times := PackedFloat32Array()
+	var path := PackedVector3Array()
+	var yaw := PackedFloat32Array()
+	var time := from
+	var pass_to := float(parts["pass_to"])
+	var turned_back := _raw_backs.has(clip)
+	var blow_moved := Vector3.ZERO
+	while true:
+		var at := minf(time, to)
+		var moved := Vector3.ZERO
+		if turned_back and at > pass_to:
+			# A way back from elsewhere turns on the spot, its turn the
+			# model's own (its root's): the body stays where the blow left it
+			# -- or, for a pivot, goes round the pivot foot.
+			var round_foot := Vector3.ZERO
+			if _pivot_paths.has(clip):
+				var steps := _pivot_paths[clip] as PackedVector3Array
+				round_foot = steps[clampi(int(round((at - pass_to) / MOTION_SAMPLE)), 0, steps.size() - 1)]
+			times.append(at)
+			path.append(Vector3(blow_moved.dot(right), blow_moved.y, blow_moved.dot(forward)) * metre + round_foot)
+			yaw.append(yaw[yaw.size() - 1] if not yaw.is_empty() else 0.0)
+			if at >= to:
+				break
+			time += MOTION_SAMPLE
+			continue
+		if moves >= 0:
+			moved = skeleton_basis * (source.position_track_interpolate(moves, at) - start_place)
+		blow_moved = moved
+		var bearing := 0.0
+		if turns >= 0:
+			var turned := Basis(source.rotation_track_interpolate(turns, at) * start_turn.inverse())
+			var faced := turn_basis * turned * turn_basis.inverse() * forward
+			faced.y = 0.0
+			if faced.length_squared() > 0.0001:
+				bearing = rad_to_deg(forward.signed_angle_to(faced.normalized(), Vector3.UP))
+		times.append(at)
+		path.append(Vector3(moved.dot(right), moved.y, moved.dot(forward)) * metre)
+		yaw.append(bearing)
+		if at >= to:
+			break
+		time += MOTION_SAMPLE
+	_hold_ground(clip, times, path)
+	if lead > 0.0:
+		# The lead spin first: round the pivot foot, easing into the height and
+		# turn the clip starts at; the clip's own path after it, from where the
+		# spin left the body.
+		var steps := _pivot_paths.get(clip + "_lead", PackedVector3Array()) as PackedVector3Array
+		var n := int(round(lead / MOTION_SAMPLE))
+		var round_end := steps[steps.size() - 1] if not steps.is_empty() else Vector3.ZERO
+		var lead_times := PackedFloat32Array()
+		var lead_path := PackedVector3Array()
+		var lead_yaw := PackedFloat32Array()
+		for index in n:
+			var share := smoothstep(0.0, 1.0, float(index) / n)
+			lead_times.append(from - lead + index * MOTION_SAMPLE)
+			var round_foot := steps[mini(index, steps.size() - 1)] if not steps.is_empty() else Vector3.ZERO
+			lead_path.append(round_foot + Vector3(path[0].x, path[0].y, path[0].z) * share)
+			lead_yaw.append(yaw[0] * share)
+		for index in path.size():
+			path[index] += round_end
+		lead_times.append_array(times)
+		lead_path.append_array(path)
+		lead_yaw.append_array(yaw)
+		times = lead_times
+		path = lead_path
+		yaw = lead_yaw
+	var out := {
+		"windup": float(parts["pass_from"]) - from + lead,
+		"swing": float(parts["pass_to"]) - float(parts["pass_from"]),
+		"recovery": to - float(parts["pass_to"]),
+		"times": times, "path": path, "yaw": yaw,
+		"return_foot": "", "return_move": Vector3.ZERO,
+	}
+	var specs: Dictionary = profile().get("library_clips", {})
+	if bool((specs.get(clip, {}) as Dictionary).get("return", false)):
+		out.merge(_return_step(clip, to), true)
+	return out
+
+
+# 2026-11-21: the step back into the stance after a clip that does not end in
+# it (SkillDef motion_return_*): the foot further forward at the clip's last
+# frame (`at`, seconds of the source) stays; the body goes where the stance
+# (the profile's idle clip, first frame) would have that foot exactly there.
+# Feet against the root, metres at the capsule, (right, 0, forward).
+static func _return_step(clip: String, at: float) -> Dictionary:
+	var legs: Dictionary = profile().get("leg_bones", {})
+	var specs: Dictionary = profile().get("library_clips", {})
+	var idle_spec: Dictionary = specs.get(String((profile().get("clips", {}) as Dictionary).get("idle", "")), {})
+	var library := load(String(profile().get("library", ""))) as AnimationLibrary
+	var model := load(String(profile()["model"])) as PackedScene
+	if legs.is_empty() or idle_spec.is_empty() or library == null or model == null:
+		return {}
+	var idle := library.get_animation(StringName(String(idle_spec["source"])))
+	var holder := model.instantiate()
+	var rig := holder.find_children("*", "Skeleton3D", true, false)[0] as Skeleton3D
+	var forward := _measured_forward if _measured_forward.length_squared() > 0.0001 else Vector3.FORWARD
+	var right := forward.cross(Vector3.UP).normalized()
+	var metre := Player.BODY_HALF_HEIGHT * 2.0 / model_height()
+	var root := rig.find_bone(String(profile().get("root_bone", "Hips")))
+	var feet := {}
+	for name_text: String in ["end", "stance"]:
+		var animation := _raw_sources[clip] as Animation if name_text == "end" else idle
+		var globals := _globals_of(rig, _locals_at(animation, rig, at if name_text == "end" else 0.0, _track_map(animation)))
+		for side: String in ["l", "r"]:
+			var foot := rig.find_bone(String((legs[side] as Array)[2]))
+			var place := _skeleton_in_model.basis * (globals[foot].origin - globals[root].origin) * metre
+			feet[name_text + side] = Vector3(place.dot(right), 0.0, place.dot(forward))
+	holder.free()
+	var kept := "l" if (feet["endl"] as Vector3).z >= (feet["endr"] as Vector3).z else "r"
+	var move := (feet["end" + kept] as Vector3) - (feet["stance" + kept] as Vector3)
+	print("PLAYGROUND_CLIP_RETURN clip=%s keeps %s foot, the body steps (%.2f right, %.2f forward) m; feet at the end l %s r %s, the stance's l %s r %s" % [
+		clip, kept, move.x, move.z, feet["endl"], feet["endr"], feet["stancel"], feet["stancer"]])
+	return {"return_foot": kept, "return_move": move}
+
+
+# 2026-11-21: a library clip's "hold": part of its path kept where it is
+# across the ground (the height is left alone). "after_blow": from the end
+# of the blade's pass on. "until_air": until both feet have left the ground
+# (_leaves_ground), and from there on what it travels, from that point.
+static func _hold_ground(clip: String, times: PackedFloat32Array, path: PackedVector3Array) -> void:
+	var specs: Dictionary = profile().get("library_clips", {})
+	var hold := String((specs.get(clip, {}) as Dictionary).get("hold", ""))
+	if hold == "" or path.is_empty():
+		return
+	var parts: Dictionary = _blade_parts[clip]
+	if hold == "after_blow":
+		if _raw_backs.has(clip):
+			# Its way back is another clip, which does not travel: the path
+			# there is already where the body stays (baked_motion).
+			return
+		var pass_to := float(parts["pass_to"])
+		var kept := Vector3.ZERO
+		for index in times.size():
+			if times[index] <= pass_to + 0.0001:
+				kept = path[index]
+			else:
+				path[index] = Vector3(kept.x, path[index].y, kept.z)
+	elif hold == "until_air":
+		var air := float(_leaves_ground.get(clip, -1.0))
+		if air < 0.0:
+			push_error("CharacterVisual: %s never leaves the ground; its hold is not applied" % clip)
+			return
+		var at_air := Vector3.ZERO
+		for index in times.size():
+			if times[index] <= air + 0.0001:
+				at_air = path[index]
+				path[index] = Vector3(0.0, path[index].y, 0.0)
+			else:
+				path[index] = Vector3(path[index].x - at_air.x, path[index].y, path[index].z - at_air.z)
+
+
+# 2026-11-21: which feet a timed clip has on the ground: the ball of the foot
+# (the leg's fourth bone) within FOOT_DOWN_HEIGHT of where the rest pose has
+# it, metres at the capsule. Height only: this pack slides its feet along
+# the ground on purpose (03_03 skids them at up to 20 m/s), so a foot that
+# is down is not a foot that is still. Kept as the moment both feet first
+# leave the ground (_leaves_ground), and per played clip (_foot_contacts)
+# only where the body is held off the clip's own travel (the "hold" span):
+# a foot is held there and nowhere else, so a clip the body follows exactly
+# keeps its own feet, skids and all. PLAYGROUND_CLIP_FEET prints it.
+const FOOT_DOWN_HEIGHT := 0.06
+
+
+static func _study_feet(clip: String, rig: Skeleton3D) -> void:
+	var legs: Dictionary = profile().get("leg_bones", {})
+	if legs.is_empty() or not _raw_sources.has(clip):
+		return
+	var source := _raw_sources[clip] as Animation
+	var parts: Dictionary = _blade_parts[clip]
+	var tracks := _track_map(source)
+	var to_model := _skeleton_in_model.basis
+	var metre := Player.BODY_HALF_HEIGHT * 2.0 / model_height()
+	var feet := {}
+	var ground := {}
+	for side: String in ["l", "r"]:
+		var bones: Array = legs[side]
+		feet[side] = rig.find_bone(String(bones[3] if bones.size() > 3 else bones[2]))
+		if int(feet[side]) < 0:
+			return
+		ground[side] = (to_model * rig.get_bone_global_rest(int(feet[side])).origin).y * metre
+	var from := float(parts["part_from"])
+	var to := float(parts["back_to"])
+	var down := {"l": [], "r": []}
+	var times := PackedFloat32Array()
+	var time := from
+	var blow_end := float(parts["pass_to"])
+	var back := _raw_backs.get(clip, null) as Animation
+	var back_tracks := _track_map(back) if back != null else {}
+	while true:
+		var at := minf(time, to)
+		var globals: Array[Transform3D]
+		if back != null and at > blow_end:
+			# The way back from elsewhere, on its own clock.
+			globals = _globals_of(rig, _locals_at(back, rig, at - blow_end, back_tracks))
+		else:
+			globals = _globals_of(rig, _locals_at(source, rig, at, tracks))
+		for side: String in ["l", "r"]:
+			var place := to_model * globals[int(feet[side])].origin * metre
+			var is_down := place.y <= float(ground[side]) + FOOT_DOWN_HEIGHT
+			(down[side] as Array).append(1 if is_down else 0)
+		times.append(at)
+		if at >= to:
+			break
+		time += MOTION_SAMPLE
+	# Split as played: the clip up to the blade's pass end, then its "_end".
+	var pass_to := float(parts["pass_to"])
+	var head := {"l": [], "r": []}
+	var tail := {"l": [], "r": []}
+	var air := -1.0
+	var pass_from := float(parts["pass_from"])
+	var left_marks := down["l"] as Array
+	var right_marks := down["r"] as Array
+	for index in times.size() - 1:
+		if times[index] >= pass_from - 0.3 \
+				and int(left_marks[index]) == 0 and int(right_marks[index]) == 0 \
+				and int(left_marks[index + 1]) == 0 and int(right_marks[index + 1]) == 0:
+			air = times[index]
+			break
+	_leaves_ground[clip] = air
+	var specs: Dictionary = profile().get("library_clips", {})
+	var hold := String((specs.get(clip, {}) as Dictionary).get("hold", ""))
+	for index in times.size():
+		# 2026-11-21: not over a way back from elsewhere (the turn): it does
+		# not travel, so the body held in place IS where it puts the feet --
+		# and holding a foot that pivots on its ball twisted the leg.
+		var held := (hold == "after_blow" and times[index] > pass_to + 0.0001 and back == null) \
+			or (hold == "until_air" and air >= 0.0 and times[index] <= air + 0.0001)
+		for side: String in ["l", "r"]:
+			var mark := int((down[side] as Array)[index]) if held else 0
+			if _pivot_feet.has(clip) and times[index] > pass_to + 0.0001:
+				# A pivot: the pivot foot is held all the way round.
+				mark = 1 if side == String(_pivot_feet[clip]) else 0
+			if times[index] <= pass_to + 0.0001:
+				(head[side] as Array).append(mark)
+			else:
+				(tail[side] as Array).append(mark)
+	var lead := float(parts.get("lead", 0.0))
+	if lead > 0.0:
+		# The lead spin: the pivot foot held all the way round.
+		var pivot_side := String(_pivot_feet.get(clip + "_lead", ""))
+		for side: String in ["l", "r"]:
+			var marks := []
+			for index in int(round(lead / MOTION_SAMPLE)):
+				marks.append(1 if side == pivot_side else 0)
+			marks.append_array(head[side] as Array)
+			head[side] = marks
+	_foot_contacts[clip] = {"l": PackedByteArray(head["l"]), "r": PackedByteArray(head["r"])}
+	if _auto_recoveries.has(clip):
+		_foot_contacts[String(_auto_recoveries[clip])] = {"l": PackedByteArray(tail["l"]), "r": PackedByteArray(tail["r"])}
+	var line := ""
+	for side: String in ["l", "r"]:
+		var marks := down[side] as Array
+		var text := ""
+		for mark in marks:
+			text += "|" if mark == 1 else "."
+		line += " %s %s" % [side, text]
+	print("PLAYGROUND_CLIP_FEET clip=%s from %.2f s, one mark per %.3f s (| down . up), leaves the ground at %.2f s:%s" % [
+		clip, from, MOTION_SAMPLE, air, line])
+
+
+# PLAYGROUND_CLIP_GAP: the end of `first` against the start of `second`: the
+# bone that differs most and by how much, and how far apart the hips face.
+# Over GAP_WARN_DEG the blend between them shows as a slide.
+const GAP_WARN_DEG := 30.0
+
+
+static func _print_gap(first_name: String, first: Animation, second_name: String, second: Animation, rig: Skeleton3D) -> void:
+	var a := _locals_at(first, rig, first.length, _track_map(first))
+	var b := _locals_at(second, rig, 0.0, _track_map(second))
+	var worst := 0.0
+	var worst_bone := ""
+	for bone in rig.get_bone_count():
+		var bone_name := rig.get_bone_name(bone)
+		if bone_name.begins_with("ik_") or bone == 0:
+			continue
+		var angle := rad_to_deg(a[bone].basis.get_rotation_quaternion().angle_to(b[bone].basis.get_rotation_quaternion()))
+		if angle > worst:
+			worst = angle
+			worst_bone = bone_name
+	var axes := _body_axes()
+	var turn := wrapf(_hips_bearing(_globals_of(rig, b), rig, axes[0], axes[1])
+		- _hips_bearing(_globals_of(rig, a), rig, axes[0], axes[1]), -180.0, 180.0)
+	print("PLAYGROUND_CLIP_GAP %s 끝 -> %s 시작: 가장 다른 뼈 %s %.0f°, 엉덩이 방향 차 %+.0f°  %s" % [
+		first_name, second_name, worst_bone, worst, turn, "튈 수 있음" if worst > GAP_WARN_DEG or absf(turn) > GAP_WARN_DEG else "괜찮음"])
+
+
+# Where in an attack clip the blade starts its pass, and the clip of its way
+# back: the profile's tables, or what the blade timing found.
+static func _strike_of(clip: String) -> float:
+	var strikes: Dictionary = profile().get("strikes", {})
+	return float(strikes.get(clip, _auto_strikes.get(clip, -1.0)))
+
+
+static func _recovery_of(clip: String) -> String:
+	var recoveries: Dictionary = profile().get("recoveries", {})
+	return String(recoveries.get(clip, _auto_recoveries.get(clip, "")))
+
+
+# How fast a clip's root bone goes across the floor, start to end, as m/s at
+# the human capsule (the paces' unit): the model's units turned to metres by
+# the scale that makes the model the capsule's height.
+static func _root_pace(animation: Animation, root_bone: String) -> float:
+	for track in animation.get_track_count():
+		if animation.track_get_type(track) != Animation.TYPE_POSITION_3D:
+			continue
+		if String(animation.track_get_path(track).get_subname(0)) != root_bone:
+			continue
+		var count := animation.track_get_key_count(track)
+		if count < 2 or animation.length <= 0.0:
+			return 0.0
+		var moved: Vector3 = animation.track_get_key_value(track, count - 1) - animation.track_get_key_value(track, 0)
+		moved = _skeleton_in_model.basis * moved
+		var per_second := Vector2(moved.x, moved.z).length() / animation.length
+		return per_second * Player.BODY_HALF_HEIGHT * 2.0 / model_height()
+	return 0.0
 
 
 # ------------------------------------------------------------------ Mixamo clips
@@ -1049,14 +2642,15 @@ static func _turn_clip(animation: Animation, degrees: float) -> void:
 				animation.track_set_key_value(track, key, turn * (animation.track_get_key_value(track, key) as Vector3))
 
 
-# Takes the walk across the floor out of the hips: the body moves itself.
-static func _strip_travel(animation: Animation, mode: String) -> void:
+# Takes the walk across the floor out of the hips (or the profile's root
+# bone): the body moves itself.
+static func _strip_travel(animation: Animation, mode: String, bone := "Hips") -> void:
 	if mode == "":
 		return
 	for track in animation.get_track_count():
 		if animation.track_get_type(track) != Animation.TYPE_POSITION_3D:
 			continue
-		if String(animation.track_get_path(track).get_subname(0)) != "Hips":
+		if String(animation.track_get_path(track).get_subname(0)) != bone:
 			continue
 		var count := animation.track_get_key_count(track)
 		if count == 0:
@@ -1065,7 +2659,11 @@ static func _strip_travel(animation: Animation, mode: String) -> void:
 		var last: Vector3 = animation.track_get_key_value(track, count - 1)
 		for key in count:
 			var value: Vector3 = animation.track_get_key_value(track, key)
-			if mode == "pin":
+			if mode == "body":
+				# 2026-11-21: the body carries all of it, the height too (a
+				# skill whose path is baked off this clip, SkillDef "Motion").
+				value = first
+			elif mode == "pin":
 				value.x = first.x
 				value.z = first.z
 			else:
@@ -1161,6 +2759,11 @@ static func _mirrored(source: Animation, skeleton: Skeleton3D) -> Animation:
 
 
 static func _is_lower(bone: String) -> bool:
+	if profile().has("lower_bones"):
+		for head: String in profile()["lower_bones"]:
+			if bone.begins_with(head):
+				return true
+		return false
 	for tail in LOWER_BONES:
 		if bone.ends_with(tail):
 			return true
@@ -1230,21 +2833,34 @@ static func _upper_only(source: Animation) -> Animation:
 func _load_model() -> void:
 	if String(profile()["model"]) == "":
 		return
-	var packed := _generate(String(profile()["model"]))
+	var path := String(profile()["model"])
+	var packed: PackedScene = (load(path) as PackedScene) if bool(profile().get("imported", false)) else _generate(path)
 	if packed == null:
+		push_error("CharacterVisual: %s would not load" % path)
 		return
-	_model = packed.instantiate() as Node3D
+	var scene := packed.instantiate() as Node3D
+	# The clips' tracks are paths from the file's own root. A root that
+	# carries a turn or a scale of its own (an FBX's axis or unit fix) keeps
+	# it inside a holder, which takes the yaw and the body's scale instead.
+	var clip_root := scene
+	if scene.transform.is_equal_approx(Transform3D()):
+		_model = scene
+	else:
+		_model = Node3D.new()
+		_model.add_child(scene)
 	_model.name = "Model"
-	_model.rotation.y = float(profile()["yaw"])
-	add_child(_model)
 	var skeletons := _model.find_children("*", "Skeleton3D", true, false)
 	if skeletons.is_empty():
 		push_error("CharacterVisual: the model has no skeleton")
+		add_child(_model)
 		return
 	_skeleton = skeletons[0] as Skeleton3D
+	_measure_model()
+	_model.rotation.y = float(profile()["yaw"]) + _measured_yaw
+	add_child(_model)
 	_anim = AnimationPlayer.new()
 	_anim.name = "AnimationPlayer"
-	_model.add_child(_anim)
+	clip_root.add_child(_anim)
 	_anim.root_node = NodePath("..")
 	_anim.add_animation_library("", _build_library())
 	_anim.animation_finished.connect(_on_clip_finished)
@@ -1253,7 +2869,7 @@ func _load_model() -> void:
 		# tracks for its pose is the one left standing each frame.
 		_upper = AnimationPlayer.new()
 		_upper.name = "UpperBody"
-		_model.add_child(_upper)
+		clip_root.add_child(_upper)
 		_upper.root_node = NodePath("..")
 		_upper.process_priority = 1
 		_upper.add_animation_library("", _upper_library)
@@ -1266,8 +2882,9 @@ func _load_model() -> void:
 			named.append(String(bone))
 		_lean.set("bones", named)
 		_skeleton.add_child(_lean)
-	_hand = _attachment(HAND_BONE, "Hand")
-	_offhand = _attachment(OFFHAND_BONE, "OffHandSlot")
+	_add_feet()
+	_hand = _attachment(hand_bone(), "Hand")
+	_offhand = _attachment(offhand_bone(), "OffHandSlot")
 	_grip = _grip_under(_hand)
 	_offgrip = _grip_under(_offhand)
 	if _lean != null:
@@ -1275,7 +2892,7 @@ func _load_model() -> void:
 		var forearm: Array = profile().get("forearm_bones", [])
 		if forearm.size() == 2:
 			_lean.set("grip", _grip)
-			_lean.set("slot_bone", HAND_BONE)
+			_lean.set("slot_bone", hand_bone())
 			_lean.set("elbow_bone", String(forearm[0]))
 			_lean.set("wrist_bone", String(forearm[1]))
 	_loaded = _hand != null
@@ -1293,6 +2910,41 @@ func _attachment(bone: String, label: String) -> BoneAttachment3D:
 	attachment.bone_name = bone
 	_skeleton.add_child(attachment)
 	return attachment
+
+
+# For a profile that leaves them to be measured: the height (floor to the
+# top of the meshes, "height" 0), the skeleton's place in the model, and the
+# turn that faces the model the body's way ("yaw_from": the heel and the ball
+# of a foot, rest pose). Once per process, like the library.
+func _measure_model() -> void:
+	_skeleton_in_model = _in_model(_skeleton, _model)
+	if float(profile()["height"]) <= 0.0 and _measured_height <= 0.0:
+		var top := -INF
+		for node in _model.find_children("*", "MeshInstance3D", true, false):
+			var mesh := node as MeshInstance3D
+			var box := _in_model(mesh, _model) * mesh.get_aabb()
+			top = maxf(top, box.position.y + box.size.y)
+		_measured_height = top if top > 0.0 else 1.0
+	var feet: Array = profile().get("yaw_from", [])
+	if feet.size() == 2:
+		var heel := _skeleton.find_bone(String(feet[0]))
+		var ball := _skeleton.find_bone(String(feet[1]))
+		if heel >= 0 and ball >= 0:
+			var along := _skeleton_in_model.basis * (_skeleton.get_bone_global_rest(ball).origin - _skeleton.get_bone_global_rest(heel).origin)
+			# The body faces -Z: turned by this, the foot's line points there.
+			_measured_yaw = PI - atan2(along.x, along.z)
+			_measured_forward = Vector3(along.x, 0.0, along.z).normalized()
+
+
+# A node's place against the model's root, built from local transforms (the
+# model is not in the tree yet when it is measured).
+static func _in_model(node: Node, model_root: Node) -> Transform3D:
+	var out := Transform3D()
+	while node != null and node != model_root:
+		if node is Node3D:
+			out = (node as Node3D).transform * out
+		node = node.get_parent()
+	return out
 
 
 static func _grip_under(attachment: BoneAttachment3D) -> Node3D:
@@ -1314,11 +2966,15 @@ func set_body_scale(scale: float) -> void:
 	model_scale = half * 2.0 / model_height()
 	_model.scale = Vector3.ONE * model_scale
 	_model.position = Vector3(0.0, -half, 0.0)
+	# An FBX's unit scale on the skeleton (the mannequin's) is undone too.
+	var inner := _skeleton_in_model.basis.get_scale().x
+	if inner <= 0.0:
+		inner = 1.0
 	for grip in [_grip, _offgrip]:
 		if grip != null:
-			grip.scale = Vector3.ONE / model_scale
+			grip.scale = Vector3.ONE / (model_scale * inner)
 	if _lean != null:
-		_lean.set("grip_scale", 1.0 / model_scale)
+		_lean.set("grip_scale", 1.0 / (model_scale * inner))
 
 
 # The model's height on this screen, measured off the skeleton's meshes.
@@ -1389,7 +3045,12 @@ func attach_weapon(node: Node3D) -> bool:
 		return false
 	_grip.add_child(node)
 	node.position = Vector3.ZERO
-	node.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+	if profile().has("grip_basis"):
+		# The profile's own hand bone, laid out its own way (the mannequin's
+		# Weapon_R: the blade along its +X).
+		node.basis = profile()["grip_basis"]
+	else:
+		node.rotation_degrees = Vector3(90.0, 0.0, 0.0)
 	return true
 
 
@@ -1418,13 +3079,42 @@ func show_phase(def: SkillDef, phase: String) -> void:
 	if def == null or phase == "":
 		if _attack_clip != "":
 			_blend_once = ATTACK_OUT_BLEND
+			# 2026-11-21 (the user: the side cut's second step stepped twice):
+			# its clip steps back into a stance of its own; the blend into
+			# the idle after it must not move the feet again. They stay
+			# planted where the clip left them until the body moves.
+			if _attack_baked and _feet != null and player != null:
+				_feet.call("plant")
 		_attack_clip = ""
 		_attack_phase = ""
+		_attack_phase_of_return = ""
 		_vanish_left = 0.0
 		_pick_state_clip(true)
 		_blend_once = -1.0
 		return
+	if def.motion_return_only:
+		# 2026-11-23: a step that is only the step back into the stance (the
+		# thrust's pull): no clip starts; the pose the step before it left
+		# goes into the stance now, as that step's own return would have.
+		if _attack_phase_of_return != def.id or phase == "windup" or _attack_phase == "":
+			_attack_phase_of_return = def.id
+			_attack_baked = true
+			_follow_hold = 0.0
+			_return_seconds = def.motion_return_seconds()
+			_return_foot = def.motion_return_foot
+			_returned = false
+			_step_back_into_stance()
+		_attack_phase = phase
+		return
+	_attack_phase_of_return = ""
 	var clip := _attack_clip_for(def)
+	_attack_baked = def.has_motion() and _blade_parts.has(clip)
+	# The step back into the stance after the clip (SkillDef motion_return_*),
+	# shown once the clip and its own way back are through.
+	if phase == "windup" or (phase == "strike" and _attack_clip != clip):
+		_returned = false
+	_return_seconds = def.motion_return_seconds() if _attack_baked else 0.0
+	_return_foot = def.motion_return_foot
 	# What is left of the recovery once the swing is through: how long a
 	# recovery clip (the profile's "recoveries") has to play in.
 	_recovery_seconds = maxf(def.value("recovery") - def.swing_time(), 0.0)
@@ -1500,11 +3190,11 @@ func _start_attack(clip: String, seconds: float, swing := -1.0) -> void:
 	var length := clip_length(clip)
 	if length <= 0.0:
 		return
-	var strikes: Dictionary = profile().get("strikes", {})
+	var strike := _strike_of(clip)
 	_strike_at = -1.0
 	var speed := length / maxf(seconds, 0.02)
-	if swing > 0.0 and seconds - swing > 0.02 and strikes.has(clip):
-		_strike_at = clampf(float(strikes[clip]), 0.01, length - 0.01)
+	if swing > 0.0 and seconds - swing > 0.02 and strike >= 0.0:
+		_strike_at = clampf(strike, 0.01, length - 0.01)
 		speed = _strike_at / (seconds - swing)
 	_follow_hold = 0.0
 	_attack_clip = clip
@@ -1544,11 +3234,72 @@ func _play_at(clip: String, speed: float) -> void:
 	_anim.play(clip, _blend_once if _blend_once >= 0.0 else BLEND)
 
 
+# 2026-11-22: a guard's own pictures, "perfect", "hit" or "break" (the
+# profile's "guard_<kind>" clips; nothing where it has none). They hold over
+# the state's clip the way the hit clip does; a blow on the guard does not
+# cut a perfect guard or a break short.
+var _guard_until_msec := 0
+var _guard_kind := ""
+# 2026-11-22 (the user): a picture started at the press off this screen's
+# foresight (PlayerSkills._guard_foresight), not yet the server's word. A
+# blow that then lands on the guard with damage (late: a plain block) cuts it
+# for the guard's hit; the server's perfect guard confirms it instead.
+var _guard_foreseen := false
+
+
+func play_guard(kind: String, foreseen := false, damaged := false) -> void:
+	if _anim == null or player == null or _attack_clip != "":
+		return
+	if player.state == Player.State.DEAD or player.state == Player.State.DOWNED:
+		return
+	if kind == "hit" and Time.get_ticks_msec() < _guard_until_msec and _guard_kind != "hit" \
+			and not (_guard_foreseen and damaged):
+		return
+	var clip := clip_now("guard_" + kind)
+	if clip == "" or not _anim.has_animation(clip):
+		return
+	_guard_foreseen = foreseen
+	# A perfect guard (knocked away or deflected) is ruled at the touch: its
+	# clip starts a little way in, after a moment held still.
+	var perfect := kind == "perfect" or kind == "deflect"
+	var lead: float = Tuning.values.guard_anim_lead if perfect else 0.0
+	var hold: float = Tuning.values.guard_hitstop if perfect else 0.0
+	_guard_until_msec = Time.get_ticks_msec() + int((clip_length(clip) - lead + hold) * 1000.0)
+	_guard_kind = kind
+	_hit_until_msec = _guard_until_msec
+	picture = "guard"
+	_anim.stop(true)
+	_play_at(clip, 0.0 if hold > 0.0 else 1.0)
+	if lead > 0.0:
+		_anim.seek(minf(lead, clip_length(clip)), true)
+	if hold > 0.0:
+		var started := clip
+		get_tree().create_timer(hold).timeout.connect(func() -> void:
+			if is_instance_valid(_anim) and _anim.assigned_animation == started:
+				_anim.speed_scale = 1.0)
+
+
+# 2026-11-22: the server's word on a perfect guard (or a break) of `kind`:
+# true when that picture is already running, started at the press off the
+# foresight -- it is kept, not started over, and is the server's now.
+func confirm_guard(kind: String) -> bool:
+	if _guard_kind == kind and Time.get_ticks_msec() < _guard_until_msec:
+		_guard_foreseen = false
+		return true
+	return false
+
+
 # A hit lands: the hit clip, unless something that matters more is showing.
-func play_hit() -> void:
+# `damaged`: it cost something (a guarded blow that was not perfect).
+func play_hit(damaged := true) -> void:
 	if _anim == null or player == null:
 		return
 	if _attack_clip != "" or player.state == Player.State.DEAD or player.state == Player.State.DOWNED:
+		return
+	# 2026-11-22: on a raised guard, or while a guard's picture runs, the
+	# guard's own.
+	if _block_raised or Time.get_ticks_msec() < _guard_until_msec:
+		play_guard("hit", false, damaged)
 		return
 	var clip := clip_now("hit")
 	if clip == "" or not _anim.has_animation(clip):
@@ -1568,9 +3319,31 @@ func _on_clip_finished(clip: StringName) -> void:
 		# takes over from wherever this has got to.
 		# First the blow is held for a moment (FOLLOW_HOLD): the stop after a
 		# fast cut is what gives it weight. _process starts the way back.
-		var recoveries: Dictionary = profile().get("recoveries", {})
-		if String(recoveries.get(_attack_clip, "")) != "":
-			_follow_hold = FOLLOW_HOLD
+		if _recovery_of(_attack_clip) != "":
+			_follow_hold = FOLLOW_HOLD if not _attack_baked else 0.0001
+		elif _return_seconds > 0.0:
+			_step_back_into_stance()
+	elif _attack_clip != "" and _attack_done and _return_seconds > 0.0 			and String(clip) == _recovery_of(_attack_clip):
+		# The clip's own way back (the thrust's pause) is through: the step.
+		_step_back_into_stance()
+
+
+# 2026-11-21: after a clip that does not end in the stance, the stance is
+# blended into over the return (SkillDef motion_return_*) while the body
+# (moved by the cast's path) steps into it: the kept foot stays where it is
+# and the other one steps through (foot_lock_modifier.gd).
+func _step_back_into_stance() -> void:
+	if _returned:
+		return
+	_returned = true
+	var stance := clip_now("idle")
+	if stance == "" or not _anim.has_animation(stance):
+		return
+	_blend_once = _return_seconds
+	_play_at(stance, 1.0)
+	_blend_once = -1.0
+	if _feet != null:
+		_feet.call("begin_return", _return_seconds, _return_foot)
 
 
 # The way back after a blow, once its hold is over. It is not squeezed into
@@ -1578,12 +3351,13 @@ func _on_clip_finished(clip: StringName) -> void:
 # is a snap): it plays at up to RECOVERY_SPEED_MAX and the end of the cast
 # blends out of wherever it has got to.
 func _play_recovery() -> void:
-	var recoveries: Dictionary = profile().get("recoveries", {})
-	var back := String(recoveries.get(_attack_clip, ""))
+	var back := _recovery_of(_attack_clip)
 	if back == "" or not _anim.has_animation(back):
 		return
-	var left := maxf(_recovery_seconds - FOLLOW_HOLD, 0.05)
-	_play_at(back, minf(clip_length(back) / left, RECOVERY_SPEED_MAX))
+	var left := maxf(_recovery_seconds - _return_seconds - (0.0 if _attack_baked else FOLLOW_HOLD), 0.05)
+	# A baked one runs exactly over its recovery: the body's path does too.
+	var speed := clip_length(back) / left
+	_play_at(back, speed if _attack_baked else minf(speed, RECOVERY_SPEED_MAX))
 
 
 # ------------------------------------------------------------------ the loop
@@ -1593,6 +3367,7 @@ func _process(delta: float) -> void:
 		return
 	_aim_grip(delta)
 	_bend(delta)
+	_feed_feet()
 	if _follow_hold > 0.0:
 		_follow_hold -= delta
 		if _follow_hold <= 0.0 and _attack_clip != "" and _attack_done:
@@ -1613,6 +3388,76 @@ func _process(delta: float) -> void:
 			return
 		_stop_until_msec = 0
 	_pick_state_clip(false)
+
+
+# ------------------------------------------------------------------ the feet
+
+# 2026-11-21: the foot lock and, after it on the skeleton, the engine's
+# two-bone IK with a target and a knee pole per leg (top level: placed in the
+# world by the lock every frame). Last of the modifiers, so it bends the legs
+# of the pose everything else has made.
+func _add_feet() -> void:
+	var legs: Dictionary = profile().get("leg_bones", {})
+	if legs.is_empty() or _skeleton == null:
+		return
+	_feet = FOOT_LOCK.new()
+	_feet.name = "FootLock"
+	_skeleton.add_child(_feet)
+	var ik := TwoBoneIK3D.new()
+	ik.name = "LegIK"
+	_skeleton.add_child(ik)
+	ik.setting_count = 2
+	var targets := {}
+	var poles := {}
+	var index := 0
+	for side: String in ["l", "r"]:
+		var names: Array = legs[side]
+		var target := Node3D.new()
+		target.name = "FootTarget_" + side
+		target.top_level = true
+		add_child(target)
+		var pole := Node3D.new()
+		pole.name = "KneePole_" + side
+		pole.top_level = true
+		add_child(pole)
+		ik.set_root_bone_name(index, String(names[0]))
+		ik.set_middle_bone_name(index, String(names[1]))
+		ik.set_end_bone_name(index, String(names[2]))
+		ik.set_target_node(index, ik.get_path_to(target))
+		ik.set_pole_node(index, ik.get_path_to(pole))
+		targets[side] = target
+		poles[side] = pole
+		index += 1
+	ik.active = false
+	_feet.set("ik", ik)
+	_feet.set("legs", legs)
+	_feet.set("targets", targets)
+	_feet.set("poles", poles)
+
+
+# Every frame: which feet the clip on screen has down, off what was measured
+# at load (none for a clip that was not: those feet are let go). A step home
+# under way is given up the moment the body starts to walk.
+func _feed_feet() -> void:
+	if _feet == null:
+		return
+	var contact := {"l": false, "r": false}
+	var clip := String(_anim.assigned_animation)
+	if _attack_clip != "" and _foot_contacts.has(clip):
+		var marks: Dictionary = _foot_contacts[clip]
+		var at := int(round(_anim.current_animation_position / MOTION_SAMPLE)) if _anim.is_playing() \
+			else (marks["l"] as PackedByteArray).size() - 1
+		for side: String in ["l", "r"]:
+			var row := marks[side] as PackedByteArray
+			if not row.is_empty():
+				contact[side] = row[clampi(at, 0, row.size() - 1)] == 1
+	_feet.set("contact", contact)
+	if bool(_feet.call("returning")) and player != null and _attack_clip == "" \
+			and not (player.state == Player.State.IDLE or player.is_casting()):
+		_feet.call("cancel_return")
+	# Planted feet are let go the moment anything but standing shows.
+	if bool(_feet.call("planted")) and (_attack_clip != "" or picture != "idle"):
+		_feet.call("unplant")
 
 
 # The waist, bent forward while a clip the profile names (the thrust and the
@@ -1727,7 +3572,10 @@ func _pick_state_clip(force: bool) -> void:
 # The pace the gait clip on screen was made at.
 func _pace(key: String) -> float:
 	var paces: Dictionary = profile().get("paces", {})
-	return maxf(float(paces.get(clip_now(key), profile()[key + "_speed"])), 0.01)
+	var clip := clip_now(key)
+	if float(_measured_paces.get(clip, 0.0)) > 0.0:
+		return float(_measured_paces[clip])
+	return maxf(float(paces.get(clip, profile()[key + "_speed"])), 0.01)
 
 
 # A dash that ends standing: the braking, once, then the idle.

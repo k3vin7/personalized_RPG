@@ -224,11 +224,27 @@ func _physics_process(delta: float) -> void:
 
 @rpc("authority", "call_remote", "unreliable_ordered")
 func push_state(at_position: Vector3, at_rotation: Vector3) -> void:
+	# 2026-11-22: the flight as this replica sees it, off two states in a row.
+	var now := float(Time.get_ticks_msec()) / 1000.0
+	if _has_state and now - _seen_at > 0.001:
+		seen_velocity = (at_position - _sync_position) / (now - _seen_at)
+	_seen_at = now
 	_sync_position = at_position
 	_sync_rotation = at_rotation
 	if not _has_state:
 		_snap_state = true
 	_has_state = true
+
+
+# 2026-11-22: how it is flying on this screen: the body's own velocity where
+# it is simulated (the server), the one read off the states on a replica.
+# A guard pressed against it reads this for its picture (PlayerSkills).
+var seen_velocity := Vector3.ZERO
+var _seen_at := 0.0
+
+
+func flight_velocity() -> Vector3:
+	return linear_velocity if is_multiplayer_authority() else seen_velocity
 
 
 # Written by ServerAuthority's hold table and by nothing else. On the server
@@ -336,6 +352,10 @@ func _on_body_entered(body: Node) -> void:
 	# as "the host hit itself" whenever a rock hit the host and left the fall
 	# that followed with no launch to attribute. Ally is judged the way a shove
 	# judges it: a player's throw, with the party toggle on.
+	# 2026-11-22: a guard that sends thrown things back (the sword's block at
+	# mastery 2, in its perfect window) takes it instead of being hit.
+	if body is Player and ServerAuthority.instance.reflects_thrown(body as Player, self, _flight_velocity):
+		return
 	var source := _thrower_peer if _thrower_grace > 0.0 else 0
 	var ally := source != 0 and body is Player and Tuning.server.same_party
 	# C-1a: the damage is apply_hit's (a hit with no skill: the number
@@ -349,6 +369,7 @@ func _on_body_entered(body: Node) -> void:
 		"source_strength": 0.0,
 		"source_peer": source,
 		"ally": ally,
+		"from_node": self,
 	}
 	if def == null:
 		ctx["raw_damage"] = _hit_damage()

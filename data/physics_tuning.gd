@@ -516,6 +516,85 @@ extends Resource
 # default -- the earlier stages stand bodies beside scarecrows for minutes.
 # catch_force is large on purpose: a bare human cannot catch it, a trained
 # one can.
+# 2026-11-22: the sword scarecrow (SwordDummy): cuts when a person is
+# within dummy_sword_approach, rests dummy_sword_rest between cuts.
+@export var dummy_sword_enabled: bool = true:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_sword_enabled = value
+# 2026-11-23 (the user: they are for trying the guard): a sword scarecrow is
+# a post in the ground -- a blow takes its HP and shows, and moves it nowhere.
+@export var dummy_sword_anchored: bool = true:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_sword_anchored = value
+@export var dummy_sword_approach: float = 2.6:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_sword_approach = value
+@export var dummy_sword_rest: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_sword_rest = value
+@export var dummy_sword_windup: float = 0.8:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_sword_windup = value
+@export var dummy_sword_recovery: float = 0.6:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_sword_recovery = value
+@export var dummy_sword_cooldown: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_sword_cooldown = value
+@export var dummy_sword_range: float = 2.2:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_sword_range = value
+@export var dummy_sword_angle: float = 100.0:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_sword_angle = value
+@export var dummy_sword_damage: float = 8.0:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_sword_damage = value
+@export var dummy_sword_power: float = 4.0:
+	set(value):
+		if Tuning.may_write(self):
+			dummy_sword_power = value
+# 2026-11-22: the pitching machines (PitchingMachine): every pitch_period
+# at the nearest person in its lane within pitch_range, shown for pitch_windup, thrown at
+# pitch_speed on the low arc.
+@export var pitch_enabled: bool = true:
+	set(value):
+		if Tuning.may_write(self):
+			pitch_enabled = value
+@export var pitch_period: float = 5.0:
+	set(value):
+		if Tuning.may_write(self):
+			pitch_period = value
+@export var pitch_windup: float = 0.8:
+	set(value):
+		if Tuning.may_write(self):
+			pitch_windup = value
+@export var pitch_range: float = 10.0:
+	set(value):
+		if Tuning.may_write(self):
+			pitch_range = value
+# 2026-11-23 (the user): a machine never turns -- it throws straight down its
+# own lane, at someone standing in it: ahead of it within pitch_range and no
+# further than this to either side of its line (m; the machines stand 3 m
+# apart, so 1.5 keeps one lane to one machine).
+@export var pitch_lane_half_width: float = 1.5:
+	set(value):
+		if Tuning.may_write(self):
+			pitch_lane_half_width = value
+@export var pitch_speed: float = 14.0:
+	set(value):
+		if Tuning.may_write(self):
+			pitch_speed = value
 @export var dummy_attack_enabled: bool = false:
 	set(value):
 		if Tuning.may_write(self):
@@ -580,14 +659,24 @@ extends Resource
 # _damage (the coefficient on weapon_attack_sword), _power, _stamina,
 # _angle (the range shape's fan, until C-1g-c) and _arc_deg (C-1g-a: the
 # swing's arc, which the ruling, the picture and the trail share).
-@export var thrust_windup: float = 0.15:
+# The thrust: 2026-11-21: its windup, swing and recovery and the body's path are the
+# clip's own (SkillDef "Motion", baked); these two are how fast the clip runs
+# (1 = its own speed) and how far its path goes across the ground (1 = the
+# clip's).
+@export var thrust_motion_speed: float = 1.0:
 	set(value):
 		if Tuning.may_write(self):
-			thrust_windup = value
-@export var thrust_recovery: float = 0.3:
+			thrust_motion_speed = value
+@export var thrust_motion_reach: float = 1.0:
 	set(value):
 		if Tuning.may_write(self):
-			thrust_recovery = value
+			thrust_motion_reach = value
+# 2026-11-21: the thrust's clip ends in a pause, not the stance: after it the
+# body steps back into the stance over this long, the front foot kept.
+@export var thrust_motion_return: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_motion_return = value
 @export var thrust_cooldown: float = 0.0:
 	set(value):
 		if Tuning.may_write(self):
@@ -604,7 +693,8 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			thrust_damage = value
-@export var thrust_power: float = 3.0:
+# 2026-11-23 (the user): the blade goes in, so the one hit barely moves: 3.0 -> 0.5.
+@export var thrust_power: float = 0.5:
 	set(value):
 		if Tuning.may_write(self):
 			thrust_power = value
@@ -618,6 +708,69 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			thrust_speed_bonus = value
+# 2026-11-23 (the user): a thrust that lands stays in. For this long after
+# the blade is through (seconds) another sword key cuts straight out of it
+# (SkillDef.combo_branches); the thrust's own key, or nothing by the end of
+# it, pulls the blade out (thrust_pull), which cuts again on the way.
+@export var thrust_combo_auto_after: float = 0.45:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_combo_auto_after = value
+# The pull is the thrust's own way back into the stance (the front foot
+# kept, over thrust_pull_motion_return) with a blow at its start: its own
+# damage (x attack power, as the thrust's), push and cost; reach and width
+# are the thrust's.
+@export var thrust_pull_motion_return: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_pull_motion_return = value
+@export var thrust_pull_damage: float = 0.5:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_pull_damage = value
+@export var thrust_pull_power: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_pull_power = value
+@export var thrust_pull_stamina: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_pull_stamina = value
+@export var thrust_pull_cooldown: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_pull_cooldown = value
+@export var thrust_pull_speed_bonus: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			thrust_pull_speed_bonus = value
+# 2026-11-23 (the user): the stab down, the thrust's key while standing on a
+# monster's back (data/skills/back_stab.tres): it lands on that monster only
+# and is always a crit. _damage is x attack power, as the thrust's.
+@export var back_stab_windup: float = 0.35:
+	set(value):
+		if Tuning.may_write(self):
+			back_stab_windup = value
+@export var back_stab_recovery: float = 0.6:
+	set(value):
+		if Tuning.may_write(self):
+			back_stab_recovery = value
+@export var back_stab_damage: float = 1.5:
+	set(value):
+		if Tuning.may_write(self):
+			back_stab_damage = value
+@export var back_stab_power: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			back_stab_power = value
+@export var back_stab_stamina: float = 8.0:
+	set(value):
+		if Tuning.may_write(self):
+			back_stab_stamina = value
+@export var back_stab_cooldown: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			back_stab_cooldown = value
 # 2026-11-18: the thrust's second step (the push kick): its own windup and
 # recovery; every other number is the kick's.
 @export var thrust_2_windup: float = 0.45:
@@ -628,18 +781,29 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			thrust_2_recovery = value
-# 2026-11-18: 0.2 -> 0.5, the first cut of the three-step side cut (the clip's
-# blade lands 0.5 s in).
-# 2026-11-19: 0.5 -> 0.27, the level cut (the user asked for a quicker one):
-# the draw-back of its clip is 0.37 s long and plays in this, 1.4x.
-@export var side_cut_windup: float = 0.27:
+# The side cut, both steps (the second falls back on these): 2026-11-21: its windup, swing and recovery and the body's path are the
+# clip's own (SkillDef "Motion", baked); these two are how fast the clip runs
+# (1 = its own speed) and how far its path goes across the ground (1 = the
+# clip's).
+@export var side_cut_motion_speed: float = 1.0:
 	set(value):
 		if Tuning.may_write(self):
-			side_cut_windup = value
-@export var side_cut_recovery: float = 0.35:
+			side_cut_motion_speed = value
+@export var side_cut_motion_reach: float = 1.0:
 	set(value):
 		if Tuning.may_write(self):
-			side_cut_recovery = value
+			side_cut_motion_reach = value
+# 2026-11-21 (the user: the last step's after-swing is too long): the second
+# step's way back runs this many times faster (its clip's is 1.52 s -> 0.61).
+# 2026-11-21 (the user: the first step's is too long as well): 1.37 s -> 0.55.
+@export var side_cut_motion_recovery_speed: float = 2.5:
+	set(value):
+		if Tuning.may_write(self):
+			side_cut_motion_recovery_speed = value
+@export var side_cut_2_motion_recovery_speed: float = 2.5:
+	set(value):
+		if Tuning.may_write(self):
+			side_cut_2_motion_recovery_speed = value
 @export var side_cut_cooldown: float = 0.0:
 	set(value):
 		if Tuning.may_write(self):
@@ -675,20 +839,6 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			side_cut_stamina = value
-# 2026-11-18: the side cut's second step (SkillDef.combo_next). A step has
-# its own windup and recovery here; every other number is the skill it falls
-# back on (the side cut).
-# 2026-11-19: the third step is gone (the user's call: two level cuts, and
-# the overhead cut is its own skill). The second step is the backhand that
-# starts where the first ends, so its windup is short: 0.25 -> 0.10.
-@export var side_cut_2_windup: float = 0.10:
-	set(value):
-		if Tuning.may_write(self):
-			side_cut_2_windup = value
-@export var side_cut_2_recovery: float = 0.35:
-	set(value):
-		if Tuning.may_write(self):
-			side_cut_2_recovery = value
 # 2026-11-18 (the user's rule): the next step is asked for while the step
 # before it is still going -- any time from its press to the end of its
 # recovery -- and then follows the moment its blade is through, with no
@@ -702,6 +852,13 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			combo_window = value
+# 2026-11-21 (the user's rule, replacing "to the end of its recovery"): the
+# next step is taken only from a press up to this long after the step's
+# blade is through; a press later in the recovery does nothing.
+@export var combo_press_after_swing: float = 0.2:
+	set(value):
+		if Tuning.may_write(self):
+			combo_press_after_swing = value
 @export var combo_grace: float = 0.3:
 	set(value):
 		if Tuning.may_write(self):
@@ -831,6 +988,172 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			parry_window = value
+# 2026-11-22: the sword's held block (sword_guard). Front angle; the share of
+# a blocked blow's damage that still lands (the rest is stamina,
+# block_stamina_mult); the perfect window after the press (mastery 1: no
+# damage, no push, the attacker held; mastery 2: thrown things sent back).
+@export var sword_guard_angle: float = 60.0:
+	set(value):
+		if Tuning.may_write(self):
+			sword_guard_angle = value
+@export var sword_guard_damage_taken: float = 0.15:
+	set(value):
+		if Tuning.may_write(self):
+			sword_guard_damage_taken = value
+# 2026-11-22: walking with a guard up, times the walk (the sword's: still).
+@export var sword_guard_move_mult: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			sword_guard_move_mult = value
+@export var shield_raise_move_mult: float = 0.6:
+	set(value):
+		if Tuning.may_write(self):
+			shield_raise_move_mult = value
+# 2026-11-22 (the user: too hard): 0.2 -> 0.4.
+@export var sword_guard_perfect_window: float = 0.4:
+	set(value):
+		if Tuning.may_write(self):
+			sword_guard_perfect_window = value
+# A perfect guard's stamina: this share of what a plain block of the same
+# blow costs (the user, 2026-11-22: it blocks everything, at a small price).
+@export var guard_perfect_stamina_share: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			guard_perfect_stamina_share = value
+# The heaviest thrown thing a guard sends back; heavier ones are blocked.
+# 2026-11-23 (the user: sending a ball back was too easy on the perfect
+# guard's 0.4): a thrown thing is sent back only inside this long after the
+# press (the blow's perfect guard keeps its own window).
+@export var sword_guard_reflect_window: float = 0.3:
+	set(value):
+		if Tuning.may_write(self):
+			sword_guard_reflect_window = value
+@export var guard_reflect_max_weight: float = 10.0:
+	set(value):
+		if Tuning.may_write(self):
+			guard_reflect_max_weight = value
+# The sword's guard cannot be raised again for this long after it comes
+# down (the shield's is shield_raise_recovery): a perfect window per raise
+# is not a window per key press.
+# 2026-11-23 (the user): once raised, the sword's guard stays up at least
+# this long: a key let go sooner brings it down then, and no other skill is
+# cast out of it before (a guard is a commitment, not a tap). A perfect guard
+# frees it at once -- its counter and its sure crit follow straight away.
+@export var sword_guard_min_hold: float = 0.6:
+	set(value):
+		if Tuning.may_write(self):
+			sword_guard_min_hold = value
+@export var sword_guard_recovery: float = 0.4:
+	set(value):
+		if Tuning.may_write(self):
+			sword_guard_recovery = value
+# 2026-11-22 (the user): a blow perfectly guarded is deflected past the
+# guard's left side: the attacker is drawn on that way at guard_deflect_pull
+# (and held guard_perfect_stun). A thrown thing sent back is knocked away.
+# 2026-11-22 (the user): 0 by default -- held only, not drawn (no deflect
+# motion for now, so a pull would not read).
+@export var guard_deflect_pull: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			guard_deflect_pull = value
+# 2026-11-22 (the user): the counter after a perfect guard (SkillDef
+# guard_counter_skill): open this long from the ruling (+ combo_grace on the
+# server, for the press's trip). The counter cut itself reads side_cut_* for
+# what it does not set here. 2026-11-22 (the user): its damage back to the
+# side cut's 1.2 -- a perfect guard's sure crit (guard_crit_window) is the
+# reward now, for any attack.
+@export var guard_counter_window: float = 0.6:
+	set(value):
+		if Tuning.may_write(self):
+			guard_counter_window = value
+@export var counter_cut_damage: float = 1.2:
+	set(value):
+		if Tuning.may_write(self):
+			counter_cut_damage = value
+@export var counter_cut_power: float = 5.0:
+	set(value):
+		if Tuning.may_write(self):
+			counter_cut_power = value
+@export var counter_cut_motion_recovery_speed: float = 2.5:
+	set(value):
+		if Tuning.may_write(self):
+			counter_cut_motion_recovery_speed = value
+# 2026-11-22 (the user): after a perfect guard, the guard's next attack cast
+# within this many seconds (+ combo_grace) is a sure crit on the attacker it
+# guarded -- on that one body only; spent at the cast, hit or miss.
+@export var guard_crit_window: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			guard_crit_window = value
+# How long a perfect guard holds the attacker still, whatever its blow was
+# (the user, 2026-11-22: one time for all).
+@export var guard_perfect_stun: float = 0.8:
+	set(value):
+		if Tuning.may_write(self):
+			guard_perfect_stun = value
+# 2026-11-20: the rising cut, in the dash cut's slot (the user's call).
+# 2026-11-21: its first blow is the first pass of Attack_Combo_03_03; a
+# horizontal sweep (temporary: the sweep is level; the blade's own rise is
+# the clip's).
+@export var rising_cut_cooldown: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_cooldown = value
+@export var rising_cut_range: float = 2.34:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_range = value
+@export var rising_cut_angle: float = 120.0:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_angle = value
+@export var rising_cut_arc_deg: float = 180.0:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_arc_deg = value
+@export var rising_cut_damage: float = 1.5:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_damage = value
+@export var rising_cut_power: float = 5.0:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_power = value
+@export var rising_cut_stamina: float = 12.0:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_stamina = value
+# The rising cut (2026-11-22: Attack_Rising; m2 = the dive from the top of
+# the leap at mastery 2, which falls back on these where it has none of its
+# own): its windup, swing and recovery and the body's path are the clip's own
+# (SkillDef "Motion", baked); these two are how fast the clip runs (1 = its
+# own speed) and how far its path goes across the ground (1 = the clip's).
+@export var rising_cut_motion_speed: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_motion_speed = value
+@export var rising_cut_motion_reach: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_motion_reach = value
+# 2026-11-22: the dive (rising_cut_m2) lands in a disc: its radius, and how
+# far ahead of the body its centre is (0 = round the body).
+@export var rising_cut_m2_radius: float = 2.0:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_m2_radius = value
+@export var rising_cut_m2_range: float = 0.0:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_m2_range = value
+# 2026-11-20: every body's mastery of every skill, until mastery is earned
+# (Mastery.level_of). The server's number: which form a skill is cast in is a
+# ruling. 0 = every skill in its first form. Ships at the top (5) since
+# 2026-11-21, the user's call: every form open while the skills are tried.
+@export var mastery_debug_level: int = 5:
+	set(value):
+		if Tuning.may_write(self):
+			mastery_debug_level = value
 
 @export_group("Dash combo")
 # C-1d: a combo skill (dash_combo on the SkillDef: the punch, the thrust,
@@ -1175,18 +1498,18 @@ extends Resource
 		if Tuning.may_write(self):
 			wolf_leash_range = value
 # Metres to the target at which it stops and winds up the bite.
-@export var wolf_bite_start_range: float = 2.0:
+@export var wolf_bite_start_range: float = 2.7:
 	set(value):
 		if Tuning.may_write(self):
 			wolf_bite_start_range = value
 # The bite (data/skills/wolf_bite.tres, tuning_prefix wolf_bite): _range is
 # how far it leaps, and with _width the path the telegraph shows and the
 # judge rules; _damage is the HP itself (bare, coefficient x 1).
-@export var wolf_bite_range: float = 2.5:
+@export var wolf_bite_range: float = 3.2:
 	set(value):
 		if Tuning.may_write(self):
 			wolf_bite_range = value
-@export var wolf_bite_width: float = 1.0:
+@export var wolf_bite_width: float = 1.4:
 	set(value):
 		if Tuning.may_write(self):
 			wolf_bite_width = value
@@ -1243,15 +1566,39 @@ extends Resource
 			wolf_wander_pause = value
 # The body: what a push divides by and the lift limit weighs; the strength
 # that buys its knockback tolerance (x tolerance_per_strength); its HP.
-@export var wolf_weight: float = 40.0:
+# 2026-11-23 (the user: twice the size, an early zone's monster): 40 kg / 45
+# / 35 HP -> 100 kg (between a human's 80 and an orc's 140), 65 (a human's
+# 60), 50 HP. The bite's damage stays (strength is not in it).
+@export var wolf_weight: float = 100.0:
 	set(value):
 		if Tuning.may_write(self):
 			wolf_weight = value
-@export var wolf_strength: float = 45.0:
+@export var wolf_strength: float = 65.0:
 	set(value):
 		if Tuning.may_write(self):
 			wolf_strength = value
-@export var wolf_max_hp: float = 35.0:
+# 2026-11-23: the body's size, which was three constants in wolf.gd (0.35 /
+# 1.3 / 0.5), now twice that. A capsule on its side: _body_radius is its
+# radius (the height of its back is twice that), _body_length its length
+# nose to tail; _hit_radius is what the judge's shapes add for this body
+# (between its half width and its half length). The collider, the picture,
+# the carcass and the height it is put down at all read these; a body
+# already in the world keeps the size it was built with until the game is
+# started again. The bite's distances above went up with it (2.0 / 2.5 /
+# 1.0 -> 2.7 / 3.2 / 1.4: the same gap from the nose to the target).
+@export var wolf_body_radius: float = 0.7:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_body_radius = value
+@export var wolf_body_length: float = 2.6:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_body_length = value
+@export var wolf_hit_radius: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_hit_radius = value
+@export var wolf_max_hp: float = 50.0:
 	set(value):
 		if Tuning.may_write(self):
 			wolf_max_hp = value
@@ -1260,6 +1607,42 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			wolf_corpse_time = value
+# 2026-11-23 (the user: standing on a big wolf's back is worth keeping): a
+# species whose back can be stood on. The server keeps who is on whose back
+# (ServerAuthority.rider_mount); what hangs off that -- the stab down, the
+# shake-off, its own bite passing its rider by -- reads the same table.
+@export var wolf_rideable: bool = true:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_rideable = value
+# 2026-11-23 (the user): the shake-off, a monster's answer to a body on its
+# back. Once someone has been on it _after seconds it stands and shakes for
+# _windup (shown on every screen), then everyone on its back is thrown off:
+# a force event like any other, _power strong, aimed _angle degrees up and
+# out to the side (past knock_lift_angle_deg, so it is a lift: it always
+# throws). It then stands _recovery before it does anything else.
+@export var wolf_shake_after: float = 3.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_shake_after = value
+@export var wolf_shake_windup: float = 0.5:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_shake_windup = value
+# (Measured 2026-11-23 at 6 / 70 deg: an 80 kg body went 0.31 m up and 1.7 m
+# aside, still over the back 0.6 s later. 10 / 65 deg throws it clear.)
+@export var wolf_shake_power: float = 10.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_shake_power = value
+@export var wolf_shake_angle: float = 65.0:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_shake_angle = value
+@export var wolf_shake_recovery: float = 0.5:
+	set(value):
+		if Tuning.may_write(self):
+			wolf_shake_recovery = value
 # Seconds after its death until it is back on its mark.
 @export var wolf_respawn_time: float = 60.0:
 	set(value):

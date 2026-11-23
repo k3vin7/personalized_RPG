@@ -55,14 +55,14 @@ func retire() -> void:
 
 
 func body_radius() -> float:
-	return Wolf.BODY_RADIUS
+	return Wolf.radius()
 
 
 func _build_visual(_radius: float) -> void:
 	var mesh_instance := MeshInstance3D.new()
 	var capsule := CapsuleMesh.new()
-	capsule.radius = Wolf.BODY_RADIUS
-	capsule.height = Wolf.BODY_LENGTH
+	capsule.radius = Wolf.radius()
+	capsule.height = Wolf.length()
 	mesh_instance.mesh = capsule
 	mesh_instance.transform.basis = Basis(Vector3.RIGHT, PI * 0.5)
 	var material := StandardMaterial3D.new()

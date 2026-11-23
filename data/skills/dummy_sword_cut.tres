@@ -1,0 +1,26 @@
+[gd_resource type="Resource" script_class="SkillDef" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://data/skill_def.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "dummy_sword_cut"
+label = "허수아비 베기"
+intent = -1
+outcome = 0
+usable_while_holding = false
+tuning_prefix = "dummy_sword"
+windup_lean_deg = 20.0
+recovery_lean_deg = -6.0
+strike_extent = 1.4
+strike_height = 0.4
+colour = Color(1.0, 0.35, 0.3, 1)
+range_shape = 3
+shape_angle_deg = 100.0
+telegraph = true
+arc_plane = 0
+arc_start_deg = 60.0
+arc_duration = 0.15
+feedback_big = false
+weapon_id = "bare"
+arc_deg = 120.0
