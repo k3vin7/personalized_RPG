@@ -164,7 +164,9 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			stamina_climb_drain = value
-@export var stamina_regen: float = 25.0:
+# 2026-11-24 (the user): a quarter of the 25 it was -- the pool was back
+# before a low one could be played or measured.
+@export var stamina_regen: float = 6.25:
 	set(value):
 		if Tuning.may_write(self):
 			stamina_regen = value
@@ -1040,10 +1042,12 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			sword_guard_reflect_window = value
-@export var guard_reflect_max_weight: float = 10.0:
+# 2026-11-24 (the user): the heaviest thing sent back goes by strength, off
+# the lift formula: lift_limit x this share (a human's 60 x 1.2 x 0.14 = 10 kg).
+@export var guard_reflect_lift_share: float = 0.14:
 	set(value):
 		if Tuning.may_write(self):
-			guard_reflect_max_weight = value
+			guard_reflect_lift_share = value
 # The sword's guard cannot be raised again for this long after it comes
 # down (the shield's is shield_raise_recovery): a perfect window per raise
 # is not a window per key press.
@@ -1213,10 +1217,23 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			shield_raise_angle = value
-@export var block_stamina_mult: float = 0.5:
+# 2026-11-24 (the user): 3, from 0.5 -- at 0.5 a thrust guarded cost 4 of a
+# pool of 100 and a guard never ran out of it.
+@export var block_stamina_mult: float = 3.0:
 	set(value):
 		if Tuning.may_write(self):
 			block_stamina_mult = value
+# 2026-11-24 (the user), for trying a guard the pool cannot pay for: every
+# body's stamina held at debug_stamina_pin_value (no regen above it, a cost
+# is back the next step), and a broken guard's lockout lifted at once.
+@export var debug_stamina_pin: bool = false:
+	set(value):
+		if Tuning.may_write(self):
+			debug_stamina_pin = value
+@export var debug_stamina_pin_value: float = 3.0:
+	set(value):
+		if Tuning.may_write(self):
+			debug_stamina_pin_value = value
 @export var block_tolerance_mult: float = 1.0:
 	set(value):
 		if Tuning.may_write(self):

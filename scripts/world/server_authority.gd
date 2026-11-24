@@ -1123,9 +1123,25 @@ func can_grab(actor: Player, target: Node3D) -> bool:
 
 # 4-chapter: strength x lift_per_strength, halved while one hand is busy.
 func lift_limit(actor: Player) -> float:
+	return lift_of(actor)
+
+
+# The formula itself, static and off replicated numbers only, so that what
+# is derived from it (reflect_limit) reads the same on the owner's machine.
+static func lift_of(actor: Player) -> float:
+	if actor == null or actor.stats == null:
+		return 0.0
 	var limit: float = actor.stats.strength * Tuning.server.lift_per_strength
 	if Tuning.server.one_hand_weapon:
 		limit /= maxf(Tuning.server.grab_one_hand_strength_mult, 0.01)
+	return limit if is_finite(limit) else 0.0
+
+
+# 2026-11-24 (the user): the heaviest thrown thing this body's guard sends
+# back: a share of what it can lift, so it goes by strength. Static, and off
+# replicated numbers only: the owner's foresight (PlayerSkills) asks it too.
+static func reflect_limit(actor: Player) -> float:
+	var limit := lift_of(actor) * maxf(float(Tuning.server.guard_reflect_lift_share), 0.0)
 	return limit if is_finite(limit) else 0.0
 
 
@@ -1633,6 +1649,10 @@ func _tick_stamina(player: Player, delta: float) -> void:
 		return
 	if player.sync_dead:
 		return
+	# 2026-11-24: the debug pin (PhysicsTuning.debug_stamina_pin).
+	if Tuning.server.debug_stamina_pin:
+		server_set_stamina(player, minf(maxf(float(Tuning.server.debug_stamina_pin_value), 0.0), player.stats.max_stamina))
+		return
 	if player.state == Player.State.CLIMB:
 		spend_stamina(player, Tuning.server.stamina_climb_drain * delta, "climb")
 	elif player.is_grounded_state():
@@ -1741,16 +1761,25 @@ func apply_hit(attacker: Node3D, target: Node3D, def: SkillDef, ctx: Dictionary)
 			# 2026-11-23: ctx.unguardable -- from underfoot (a shake-off).
 			var guard := {} if bool(ctx.get("unguardable", false)) else guard_against(person, guard_from)
 			if not guard.is_empty():
-				posture = float(guard["posture"])
 				var guard_def: SkillDef = guard["def"]
-				if bool(guard["perfect"]):
+				var taken := clampf(guard_def.value("guard_damage_taken"), 0.0, 1.0) if guard_def != null else 0.0
+				# 2026-11-22: a perfect guard pays a small price (a share of
+				# the plain block's).
+				var absorbed: float = final * (float(Tuning.server.guard_perfect_stamina_share) if bool(guard["perfect"]) else 1.0 - taken)
+				var cost: float = absorbed * Tuning.server.block_stamina_mult
+				if cost > 0.0 and person.stamina <= cost:
+					# 2026-11-24 (the user): a pool that cannot pay for this
+					# blow guards none of it -- the guard comes apart and the
+					# blow lands whole (a perfect guard's too).
+					_block_fails(person, absorbed, attacker)
+				elif bool(guard["perfect"]):
+					posture = float(guard["posture"])
 					perfect = true
 					dealt = 0.0
-					# 2026-11-22: a small price (a share of the plain block's).
-					_block_absorbs(person, final * float(Tuning.server.guard_perfect_stamina_share), posture, attacker)
+					_block_absorbs(person, absorbed, posture, attacker)
 				else:
-					var taken := clampf(guard_def.value("guard_damage_taken"), 0.0, 1.0) if guard_def != null else 0.0
-					_block_absorbs(person, final * (1.0 - taken), posture, attacker)
+					posture = float(guard["posture"])
+					_block_absorbs(person, absorbed, posture, attacker)
 					dealt = final * taken
 	elif not (target is Dummy):
 		# A rock has no HP to lose.
@@ -1764,7 +1793,10 @@ func apply_hit(attacker: Node3D, target: Node3D, def: SkillDef, ctx: Dictionary)
 	if perfect:
 		# 2026-11-22: super stance -- the blow pushes nothing -- and the
 		# attacker is held still for one time whatever its blow was.
-		_perfect_guard(target as Player, attacker, def)
+		# 2026-11-24 (the user): a thrown thing (ctx.from_node) touched no
+		# blade of its thrower's: nobody is held, drawn on or marked for the
+		# sure crit.
+		_perfect_guard(target as Player, null if ctx.has("from_node") else attacker, def)
 		power = 0.0
 	var event := ForceSystem.make_event(
 		int(ctx.get("kind", ForceSystem.Kind.KNOCKBACK)),
@@ -2266,6 +2298,17 @@ func move_allowance(player: Player) -> Vector2:
 	# dash's speed is allowed around that notice and nowhere else.
 	var horizontal := maxf(player.get_move_speed(), player.leap_speed_cap())
 	var now := float(Time.get_ticks_msec()) / 1000.0
+	# 2026-11-22: a raised guard walks at its own pace (the shield 0.6 of the
+	# walk, the sword still), once it has been up past the grace.
+	# 2026-11-24: it takes the walk's place and nothing else's -- set over the
+	# horse's and the dash's allowances below, it took those away from a body
+	# that raised its guard just off a horse or out of a dash.
+	if _blocks.has(peer) and _blocks[peer].get("def", null) != null:
+		var held := float(Time.get_ticks_msec() - int(_blocks[peer]["since"])) / 1000.0
+		if held >= SyncRules.GUARD_SPEED_GRACE:
+			var guard_def: SkillDef = _blocks[peer]["def"]
+			horizontal = maxf(player.get_move_speed() * maxf(guard_def.value("guard_move_mult"), 0.0),
+				SyncRules.GUARD_SPEED_FLOOR)
 	# Riding: the horse's speed, while the body is on it and for a grace after
 	# it got off -- the stage is the server's and changes here at once, while
 	# the positions that show the body slowing arrive a round trip later.
@@ -2274,14 +2317,6 @@ func move_allowance(player: Player) -> Vector2:
 		horizontal = maxf(horizontal, player.get_mount_speed())
 	if now - float(_dash_seen.get(peer, -100.0)) <= _dash_window(player):
 		horizontal = maxf(horizontal, player.dash_speed())
-	# 2026-11-22: a raised guard walks at its own pace (the shield 0.6 of the
-	# walk, the sword still), once it has been up past the grace.
-	if _blocks.has(peer) and _blocks[peer].get("def", null) != null:
-		var held := float(Time.get_ticks_msec() - int(_blocks[peer]["since"])) / 1000.0
-		if held >= SyncRules.GUARD_SPEED_GRACE:
-			var guard_def: SkillDef = _blocks[peer]["def"]
-			horizontal = maxf(player.get_move_speed() * maxf(guard_def.value("guard_move_mult"), 0.0),
-				SyncRules.GUARD_SPEED_FLOOR)
 	# A skill's own step (the dash cut's 3 m in its swing): the speed the
 	# skill's data says, while the cast the server itself ruled is going.
 	var step: Dictionary = _step_seen.get(peer, {})
@@ -2741,7 +2776,10 @@ var _blocks := {}
 var _block_lockout := {}
 # 2026-11-22: when each peer's guard last came down, and which guard.
 var _block_downs := {}
-const GUARD_RAISE_SLACK := 0.1
+# 2026-11-24: when each peer's last ruled cast began (msec), and how many
+# raises were refused for arriving inside one.
+var _skill_cast_at := {}
+var blocks_refused_mid_cast := 0
 var blocks_broken := 0
 # 2026-11-22: the sword's block, for the checks.
 var guards_perfect := 0
@@ -2772,6 +2810,11 @@ func _rule_block(actor: Player, on: bool, guard := "shield_raise", direction := 
 			_blocks[peer]["down_at"] = Time.get_ticks_msec() + left_ms
 			print("PLAYGROUND_BLOCK_HELD by=%s for_ms=%d" % [actor.name, left_ms])
 			return true
+		# 2026-11-24: with no guard up there is nothing to bring down, and
+		# nothing to forgive: asked over and over, this kept the move check
+		# forgiven (forgive_move and speed_over = 0 in _bring_block_down).
+		if not _blocks.has(peer):
+			return true
 		_bring_block_down(peer)
 		return true
 	if actor.sync_dead or not actor.is_grounded_state():
@@ -2793,12 +2836,21 @@ func _rule_block(actor: Player, on: bool, guard := "shield_raise", direction := 
 	if _block_lockout.has(peer):
 		print("PLAYGROUND_BLOCK_REFUSED by=%s why=recovering stamina=%.1f" % [actor.name, actor.stamina])
 		return null
+	# 2026-11-24: not inside a cast this server ruled (its swing and its
+	# recovery): the owner's slot does not send it (PlayerSkills.is_busy), so
+	# one that arrives is forged. Less the slack the two trips vary by; and a
+	# dash since that cast has cut its recovery short (dash_cancel_after).
+	var busy_ms := int(_skill_lock.get(peer, 0)) - Time.get_ticks_msec() - int(SyncRules.GUARD_RAISE_SLACK * 1000.0)
+	if busy_ms > 0 and float(_dash_seen.get(peer, -100.0)) * 1000.0 < float(_skill_cast_at.get(peer, 0)):
+		blocks_refused_mid_cast += 1
+		print("PLAYGROUND_BLOCK_REFUSED by=%s why=mid_cast left_ms=%d" % [actor.name, busy_ms])
+		return null
 	# 2026-11-22: the guard's own recovery after it last came down (the
 	# sword's 0.4 s), less a little for the two presses' trips varying.
 	var down: Dictionary = _block_downs.get(peer, {})
 	if not down.is_empty() and down.get("def", null) == def:
 		var since_down := float(Time.get_ticks_msec() - int(down["at"])) / 1000.0
-		if since_down < def.value("recovery") - GUARD_RAISE_SLACK:
+		if since_down < def.value("recovery") - SyncRules.GUARD_RAISE_SLACK:
 			print("PLAYGROUND_BLOCK_REFUSED by=%s why=guard_recovery after=%.3fs" % [actor.name, since_down])
 			return null
 	_blocks[peer] = {"since": Time.get_ticks_msec(), "def": def}
@@ -2826,7 +2878,7 @@ func _bring_block_down(peer: int) -> void:
 
 
 # 2026-11-23: how much of its least hold the guard `peer` has up still owes,
-# ms (0: none, or a perfect guard freed it). GUARD_RAISE_SLACK is taken off:
+# ms (0: none, or a perfect guard freed it). SyncRules.GUARD_RAISE_SLACK is taken off:
 # the press and the release do not take the same time over the wire.
 func _block_hold_left_ms(peer: int) -> int:
 	if not _blocks.has(peer):
@@ -2835,7 +2887,7 @@ func _block_hold_left_ms(peer: int) -> int:
 	var def: SkillDef = record.get("def", null)
 	if def == null or bool(record.get("freed", false)):
 		return 0
-	var least := def.value("guard_min_hold") - GUARD_RAISE_SLACK
+	var least := def.value("guard_min_hold") - SyncRules.GUARD_RAISE_SLACK
 	if least <= 0.0:
 		return 0
 	return maxi(0, int(record["since"]) + int(least * 1000.0) - Time.get_ticks_msec())
@@ -2907,10 +2959,12 @@ func reflects_thrown(target: Player, thrown: Rock, velocity: Vector3) -> bool:
 	if target.sync_dead:
 		return false
 	var guard := guard_against(target, thrown)
-	# 2026-11-22: only up to guard_reflect_max_weight; a heavier thing is
-	# blocked like a blow (Rock._on_body_entered goes on to apply_hit).
-	if not guard.is_empty() and thrown.weight > float(Tuning.server.guard_reflect_max_weight):
-		print("PLAYGROUND_GUARD_TOO_HEAVY by=%s thrown=%s weight=%.0f" % [target.name, thrown.name, thrown.weight])
+	# 2026-11-24 (the user): only up to reflect_limit (by strength, off the
+	# lift formula); a heavier thing is blocked like a blow
+	# (Rock._on_body_entered goes on to apply_hit).
+	if not guard.is_empty() and thrown.weight > reflect_limit(target):
+		print("PLAYGROUND_GUARD_TOO_HEAVY by=%s thrown=%s weight=%.0f limit=%.1f" % [
+			target.name, thrown.name, thrown.weight, reflect_limit(target)])
 		return false
 	if guard.is_empty() or not bool(guard["reflect"]):
 		if _blocks.has(target.get_multiplayer_authority()):
@@ -2927,8 +2981,13 @@ func reflects_thrown(target: Player, thrown: Rock, velocity: Vector3) -> bool:
 	if speed <= 0.01:
 		return false
 	var peer := target.get_multiplayer_authority()
+	# 2026-11-24 (the user): sent the way the guard is turned (the heading its
+	# press sent, or the body's), not back along the way it came.
+	var away: Vector3 = (_blocks.get(peer, {}) as Dictionary).get("direction", -target.global_transform.basis.z)
+	away.y = 0.0
+	away = away.normalized() if away.length_squared() > 0.0001 else -velocity / speed
 	send_force(thrown, ForceSystem.make_event(
-		ForceSystem.Kind.THROW, -velocity / speed, speed, 0.0, peer, true, 0.0, 0.0))
+		ForceSystem.Kind.THROW, away, speed, 0.0, peer, true, 0.0, 0.0))
 	thrown.note_thrown(peer)
 	guards_reflected += 1
 	_free_block_hold(peer)
@@ -3047,15 +3106,37 @@ func _block_absorbs(target: Player, damage: float, posture: float, attacker: Nod
 	last_block = {"by": peer, "attacker": attacker.name if attacker != null else "-", "damage": damage,
 		"posture": posture, "stamina_cost": cost, "broken": false}
 	if target.stamina <= 0.0:
-		_blocks.erase(peer)
-		_block_lockout[peer] = true
-		blocks_broken += 1
-		target.sync_guard_breaks += 1
-		last_block["broken"] = true
-		_tell_block(target, false)
-		print("PLAYGROUND_BLOCK_BROKEN by=%s attacker=%s" % [target.name, last_block["attacker"]])
+		_break_block(target)
 	print("PLAYGROUND_BLOCKED by=%s attacker=%s damage=%.2f posture=%.2f stamina_cost=%.2f stamina=%.1f" % [
 		target.name, last_block["attacker"], damage, posture, cost, target.stamina])
+
+
+# 2026-11-24 (the user): a blow the pool could not pay for: nothing of it is
+# guarded. What was left of the pool goes, and the guard breaks as it does
+# at 0 (the lockout, the picture, the owner told).
+func _block_fails(target: Player, damage: float, attacker: Node3D) -> void:
+	var peer := target.get_multiplayer_authority()
+	var cost: float = damage * Tuning.server.block_stamina_mult
+	var left := target.stamina
+	spend_stamina(target, left, "block")
+	last_block = {"by": peer, "attacker": attacker.name if attacker != null else "-", "damage": damage,
+		"posture": -1.0, "stamina_cost": left, "broken": false, "failed": true}
+	_break_block(target)
+	print("PLAYGROUND_BLOCK_FAILED by=%s attacker=%s needed=%.2f had=%.2f" % [
+		target.name, last_block["attacker"], cost, left])
+
+
+# The guard breaks: down, locked until the pool is back, shown on every
+# screen, and its owner told.
+func _break_block(target: Player) -> void:
+	var peer := target.get_multiplayer_authority()
+	_blocks.erase(peer)
+	_block_lockout[peer] = true
+	blocks_broken += 1
+	target.sync_guard_breaks += 1
+	last_block["broken"] = true
+	_tell_block(target, false)
+	print("PLAYGROUND_BLOCK_BROKEN by=%s attacker=%s" % [target.name, last_block.get("attacker", "-")])
 
 
 func _tell_block(target: Player, raised: bool) -> void:
@@ -3101,7 +3182,8 @@ func _tick_blocks() -> void:
 		var actor := actor_for(peer)
 		if actor == null:
 			_block_lockout.erase(peer)
-		elif actor.stats != null and actor.stamina >= actor.stats.max_stamina * Tuning.server.block_recover_fraction:
+		elif actor.stats != null and (Tuning.server.debug_stamina_pin
+				or actor.stamina >= actor.stats.max_stamina * Tuning.server.block_recover_fraction):
 			_block_lockout.erase(peer)
 			print("PLAYGROUND_BLOCK_RECOVERED by=%s stamina=%.1f" % [actor.name, actor.stamina])
 
@@ -3294,6 +3376,7 @@ func _rule_skill(actor: Player, payload: Dictionary) -> Variant:
 	# and the cooldown run from the impact, not from now.
 	var impact_ms := int(def.impact_time() * 1000.0)
 	_skill_lock[peer] = now + impact_ms + int(def.value("recovery") * 1000.0)
+	_skill_cast_at[peer] = now
 	cooldowns[def.id] = now + impact_ms + int(def.value("cooldown") * 1000.0)
 	_skill_cooldown[peer] = cooldowns
 	skills_ruled += 1

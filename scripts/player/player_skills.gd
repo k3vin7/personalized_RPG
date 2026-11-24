@@ -803,7 +803,7 @@ func _guard_foresight(def: SkillDef) -> String:
 				continue
 			if gap.length() / closing <= horizon:
 				# 2026-11-23: sent back only inside the guard's reflect window.
-				var sends_back := reflects and rock.weight <= float(Tuning.server.guard_reflect_max_weight) \
+				var sends_back := reflects and rock.weight <= ServerAuthority.reflect_limit(player) \
 					and gap.length() / closing <= def.guard_reflect_seconds() + float(Tuning.values.guard_foresight_slack)
 				return "perfect" if sends_back else "deflect"
 			continue

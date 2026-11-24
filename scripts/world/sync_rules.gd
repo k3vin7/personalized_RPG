@@ -26,6 +26,9 @@ const STATE_INTERVAL := 0.05
 # floor (m/s): a body held still still jitters on the wire.
 const GUARD_SPEED_GRACE := 0.3
 const GUARD_SPEED_FLOOR := 0.5
+# A guard's raise and its release (or the cast before it) do not take the same
+# time over the wire: this much (s) is taken off every wait a raise is held to.
+const GUARD_RAISE_SLACK := 0.1
 
 
 # The fraction of the remaining gap to close this step.

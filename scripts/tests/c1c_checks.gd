@@ -219,7 +219,7 @@ func _table_checks() -> void:
 		and slam.range_shape == SkillDef.RangeShape.CIRCLE and absf(slam.circle_radius_value() - 1.0) < 0.001 and slam.usable_airborne,
 		"the_shapes_and_modes_are_the_tables_none_rect_line_circle")
 	expect(absf(Tuning.server.shield_raise_time - 0.2) < 0.001 and absf(Tuning.server.shield_posture_time - 0.6) < 0.001
-		and absf(Tuning.server.shield_raise_recovery - 0.1) < 0.001 and absf(Tuning.server.block_stamina_mult - 0.5) < 0.001,
+		and absf(Tuning.server.shield_raise_recovery - 0.1) < 0.001 and absf(Tuning.server.block_stamina_mult - 3.0) < 0.001,
 		"the_raise_is_0_2_up_0_6_full_0_1_recovery_and_half_the_damage_in_stamina")
 
 
@@ -373,8 +373,11 @@ func _block_checks() -> void:
 	var broken := await _slam_into(1.0)
 	note("slam into a block with 3 stamina: %s | lockout %s, owner blocking %s, stamina %.1f" % [
 		broken, _judge.block_locked(_peer_id), _local.skills.is_blocking(), _local.stamina])
-	expect(bool(broken["blocked"]) and int(broken["broken"]) == 1 and float(broken["hp_lost"]) < 0.01 and not _local.skills.is_blocking(),
-		"a_hit_that_empties_the_pool_breaks_the_block")
+	# 2026-11-24 (the user): a blow the pool cannot pay for is not guarded at
+	# all -- the block breaks and the blow lands whole.
+	expect(not bool(broken["blocked"]) and int(broken["broken"]) == 1 and absf(float(broken["hp_lost"]) - slam_damage) < 0.01
+			and _local.stamina < 0.01 and not _local.skills.is_blocking(),
+		"a_hit_the_pool_cannot_pay_for_breaks_the_block_and_lands_whole")
 	await tick_request(func() -> void: _local.skills.press_slot(4))
 	await _wait(0.3)
 	var refused_early := not _local.skills.is_blocking()
