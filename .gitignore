@@ -2,3 +2,5 @@
 .DS_Store
 # Godot copies a GDExtension DLL to ~name while it is loaded (editor hot reload); never source.
 addons/terrain_3d/bin/~*
+# Scratch output of the sword motion audit (pictures, logs); never source.
+_sword_motion_audit_tmp/
