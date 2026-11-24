@@ -1072,8 +1072,8 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			guard_deflect_pull = value
-# 2026-11-22 (the user): the counter after a perfect guard (SkillDef
-# guard_counter_skill): open this long from the ruling (+ combo_grace on the
+# 2026-11-22 (the user): the counter after a perfect guard of a blow (SkillDef
+# guard_counter_skill; a thrown thing perfectly guarded does not open it): open this long from the ruling (+ combo_grace on the
 # server, for the press's trip). The counter cut itself reads side_cut_* for
 # what it does not set here. 2026-11-22 (the user): its damage back to the
 # side cut's 1.2 -- a perfect guard's sure crit (guard_crit_window) is the

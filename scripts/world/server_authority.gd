@@ -3057,17 +3057,21 @@ func _perfect_guard(target: Player, attacker: Node3D, attack: SkillDef) -> void:
 			(attacker as Dummy).apply_catch_stun(stun)
 	print("PLAYGROUND_GUARD_PERFECT by=%s attacker=%s skill=%s deflected stun=%.2f" % [
 		target.name, last_guard["attacker"], last_guard["skill"], stun])
-	_open_counter(target)
 	_free_block_hold(target.get_multiplayer_authority())
 	# 2026-11-22 (the user): the guard's next attack is a sure crit on this
 	# attacker (_arm_guard_crit at its cast, apply_hit at the touch).
+	# 2026-11-24 (the user): and the counter opens with it, for a blow only --
+	# a thrown thing perfectly guarded comes here with no attacker (apply_hit)
+	# and opens neither.
 	if attacker != null and is_instance_valid(attacker) and attacker != target:
+		_open_counter(target)
 		_guard_crit[target.get_multiplayer_authority()] = {"target": attacker.get_instance_id(),
 			"until": Time.get_ticks_msec() + int((float(Tuning.server.guard_crit_window) + Tuning.server.combo_grace) * 1000.0)}
 
 
 # 2026-11-22 (the user): from the guard's guard_counter_mastery, its counter
-# may follow a perfect guard: the combo chain is opened on it (from now to
+# may follow a perfect guard of a blow (not of a thrown thing: _perfect_guard
+# asks only with an attacker): the combo chain is opened on it (from now to
 # guard_counter_window + combo_grace), so _rule_skill takes it as a step in
 # turn, and the owner is told so its slot casts it (counter_open).
 func _open_counter(target: Player) -> void:

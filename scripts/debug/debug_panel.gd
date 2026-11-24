@@ -217,7 +217,7 @@ const FIELD_LABELS := {
 	"guard_perfect_stun": "완벽 막기 시 공격자 경직 (초)",
 	"guard_perfect_stamina_share": "완벽 막기 기력 소모 (그냥 막기 대비)",
 	"guard_deflect_pull": "흘리기: 공격자를 막은 사람 왼쪽 앞으로 끄는 힘",
-	"guard_counter_window": "반격베기: 완벽 막기 뒤 옆베기 키를 받는 시간 (초)",
+	"guard_counter_window": "반격베기: 근접 공격을 완벽 막기한 뒤 옆베기 키를 받는 시간 (초, 던진 것은 안 열림)",
 	"guard_crit_window": "완벽 막기 뒤 확정 치명타: 다음 공격을 받는 시간 (초)",
 	"counter_cut_damage": "반격베기 피해 계수",
 	"counter_cut_power": "반격베기 미는 힘",

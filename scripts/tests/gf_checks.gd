@@ -19,7 +19,9 @@ extends Node
 #   4. the guard up, a rock thrown at it from well off its front: sent the
 #      way the guard is turned, not back the way it came;
 #   5. a perfect guard the pool cannot pay for: the blow lands whole, no
-#      perfect guard is ruled and the guard breaks.
+#      perfect guard is ruled and the guard breaks;
+#   6. a thrown thing perfectly guarded (too heavy to send back) opens no
+#      counter; a blow perfectly guarded opens it.
 
 const GAP := 1.6
 const SIDE_ANGLE := 120.0
@@ -105,6 +107,10 @@ func run(world: Node3D) -> void:
 		Tuning.server.sword_guard_angle = SIDE_ANGLE
 		await _side_reflect(body, other, who)
 		Tuning.server.sword_guard_angle = angle_before
+		var share_before: float = Tuning.server.guard_reflect_lift_share
+		Tuning.server.guard_reflect_lift_share = 0.0
+		await _counter_after_perfect(body, other, who)
+		Tuning.server.guard_reflect_lift_share = share_before
 		Tuning.server.stamina_regen = 0.0
 		await _perfect_unpaid(body, other, who)
 		Tuning.server.stamina_regen = regen_before
@@ -302,6 +308,68 @@ func _side_reflect(body: Player, other: Player, who: String) -> void:
 	await _wait(0.9)
 	_ask(body, "lower")
 	await _down_within(peer, 2.0 + _lag * 2.0)
+
+
+# 6: the counter opens on a blow perfectly guarded, not on a thrown thing.
+# (Nothing is sent back here: the reflect limit is 0 for this.)
+func _counter_after_perfect(body: Player, other: Player, who: String) -> void:
+	var peer := body.get_multiplayer_authority()
+	var rock: Rock = null
+	for node in _world.find_children("*", "", true, false):
+		if node is Rock and (node as Rock).holder_peer == 0:
+			rock = node as Rock
+			break
+	if rock == null:
+		expect(false, "%s_a_rock_for_the_counter_check" % who)
+		return
+	Tuning.server.mastery_debug_level = 5
+	await _wait(1.0)
+	_ask(body, "raise", other.global_position)
+	var up := await _blocking_within(peer, 1.5 + _lag * 2.0)
+	var forward := -body.global_transform.basis.z
+	var record: Dictionary = _judge._blocks.get(peer, {})
+	if record.has("direction"):
+		forward = record["direction"]
+	forward.y = 0.0
+	forward = forward.normalized()
+	var from := body.global_position + forward * 1.6 + Vector3.UP * 0.9
+	var perfect := _judge.guards_perfect
+	var opened := _judge.counters_opened
+	var reflected := _judge.guards_reflected
+	Net.queue_physics(func() -> void:
+		rock.global_position = from
+		rock.linear_velocity = Vector3.ZERO)
+	for frame in 6:
+		await get_tree().physics_frame
+	var toward := (body.global_position + Vector3.UP * 0.9 - rock.global_position).normalized()
+	_judge.send_force(rock, ForceSystem.make_event(ForceSystem.Kind.THROW, toward, 14.0, 0.0, 1, true, 0.0, 0.0))
+	var flew := 0.0
+	while _judge.guards_perfect == perfect and flew < 0.6:
+		await get_tree().physics_frame
+		flew += 1.0 / 120.0
+	note("%s: guard up %s; a rock perfectly guarded: perfect guards %d -> %d, sent back %d -> %d, counters opened %d -> %d" % [
+		who, up, perfect, _judge.guards_perfect, reflected, _judge.guards_reflected, opened, _judge.counters_opened])
+	expect(_judge.guards_perfect == perfect + 1 and _judge.guards_reflected == reflected, "%s_the_rock_is_perfectly_guarded_not_sent_back" % who)
+	expect(_judge.counters_opened == opened, "%s_a_thrown_thing_perfectly_guarded_opens_no_counter" % who)
+	await _wait(0.9)
+	_ask(body, "lower")
+	await _down_within(peer, 2.0 + _lag * 2.0)
+	# The blow.
+	await _wait(1.0)
+	_ask(body, "raise", other.global_position)
+	up = await _blocking_within(peer, 1.5 + _lag * 2.0)
+	perfect = _judge.guards_perfect
+	opened = _judge.counters_opened
+	var direction := body.global_position - other.global_position
+	direction.y = 0.0
+	_judge.apply_hit(other, body, Skills.get_def("thrust"), {"direction": direction.normalized(), "source_strength": 0.0})
+	note("%s: guard up %s; a thrust perfectly guarded: perfect guards %d -> %d, counters opened %d -> %d" % [
+		who, up, perfect, _judge.guards_perfect, opened, _judge.counters_opened])
+	expect(_judge.guards_perfect == perfect + 1 and _judge.counters_opened == opened + 1, "%s_a_blow_perfectly_guarded_opens_the_counter" % who)
+	await _wait(1.2 + _lag * 2.0)
+	_ask(body, "lower")
+	await _down_within(peer, 2.0 + _lag * 2.0)
+	await _wait(1.0)
 
 
 # 5: a perfect guard the pool cannot pay for is no guard.
