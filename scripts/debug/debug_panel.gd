@@ -137,7 +137,7 @@ const FIELD_LABELS := {
 	"ratio_k_jump": "점프 배율 계수",
 	"rising_cut_lift_floor": "올려베기 점프 높이: 바닥 (m, 비율이 아주 낮을 때)",
 	"rising_cut_lift_ceil": "올려베기 점프 높이: 천장 (m, 비율이 아주 높을 때)",
-	"rising_cut_lift_centre": "올려베기 점프 높이: 중심 (근력÷무게, 이 비율에서 바닥과 천장의 중간)",
+	"rising_cut_lift_centre": "올려베기 점프 높이: 중심 (근력÷무게, 이 비율에서 바닥과 천장의 중간 · 기본은 검 든 인간)",
 	"rising_cut_lift_steep": "올려베기 점프 높이: 가파름 (클수록 비율 차이에 민감)",
 	"ratio_k_speed": "이속 배율 계수",
 	"ratio_mult_min": "배율 하한",

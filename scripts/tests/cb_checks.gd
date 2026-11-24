@@ -39,6 +39,12 @@ func expect(condition: bool, label: String) -> void:
 	print("CB_CHECK peer=%d %s %s" % [_peer_id, "PASS" if condition else "FAIL", label])
 
 
+# 2026-11-24 (the user): a check kept but not counted, for a skill that is
+# not wired in just now. Turn it back into expect() when the skill is.
+func skip(condition: bool, label: String) -> void:
+	print("CB_CHECK peer=%d SKIP %s (would %s)" % [_peer_id, label, "pass" if condition else "fail"])
+
+
 func note(line: String) -> void:
 	print("CB_NOTE peer=%d %s" % [_peer_id, line])
 
@@ -309,7 +315,8 @@ func run(world: Node3D) -> void:
 		var landed := await _thrust_and_press_again(thrust_slot)
 		note("a thrust at the other body %.2f m away (reach %.2f), pressed again while going, was followed by: '%s'" % [
 			gap, Skills.get_def("thrust").value("reach"), landed])
-		expect(landed == "thrust_2", "a_thrust_that_lands_is_followed_by_the_kick")
+		# Skipped: the thrust's next step is the pull since 2026-11-23; the kick (thrust_2) is in no chain.
+		skip(landed == "thrust_2", "a_thrust_that_lands_is_followed_by_the_kick")
 	_local.movement.set_aim_override(_local.global_position)
 	expect(_local.skills.combo_steps_cast == 2, "the_slots_cast_two_steps_in_all")
 
@@ -322,7 +329,8 @@ func run(world: Node3D) -> void:
 		var held_now := _local.skills.slot_def(index)
 		if held_now != null and held_now.id == "dash_cut":
 			dash_slot = index
-	expect(dash_slot >= 0, "the_dash_cut_is_in_a_slot")
+	# Skipped: the dash cut is in no slot of the sword since 2026-11-23 (the sword skills' rework).
+	skip(dash_slot >= 0, "the_dash_cut_is_in_a_slot")
 	if dash_slot >= 0:
 		var idle := 0.0
 		while _local.skills.is_busy() and idle < 5.0:
@@ -368,9 +376,10 @@ func run(world: Node3D) -> void:
 		await _until(func() -> bool: return _mate_stamps.has("dash_cut"), 40.0)
 		await _wait(4.0 + _lag * 4.0)
 	note("the other body's skill stamps seen here: %s; its streaks drawn here: %d" % [_mate_stamps.keys(), _mate.streaks_drawn if is_instance_valid(_mate) else -1])
-	expect(_mate_stamps.has("side_cut_2") and _mate_stamps.has("thrust_2"),
+	# Skipped: both wait for a skill that is cast by nothing just now (thrust_2, dash_cut; see above).
+	skip(_mate_stamps.has("side_cut_2") and _mate_stamps.has("thrust_2"),
 		"this_screen_saw_the_other_bodys_steps")
-	expect(_mate_stamps.has("dash_cut") and is_instance_valid(_mate) and _mate.streaks_drawn >= 1, "this_screen_saw_the_other_bodys_dash_cut_and_streak")
+	skip(_mate_stamps.has("dash_cut") and is_instance_valid(_mate) and _mate.streaks_drawn >= 1, "this_screen_saw_the_other_bodys_dash_cut_and_streak")
 	var judge: ServerAuthority = null
 	if is_instance_valid(_world):
 		judge = _world.get_node_or_null("ServerAuthority") as ServerAuthority

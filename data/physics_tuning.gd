@@ -119,8 +119,10 @@ extends Resource
 # 2026-11-24 (the user): how high the rising cut's leap takes a body, off the
 # same ratio (strength over weight, the weapon's weight in it), on an S curve:
 #     height = floor + (ceil - floor) / (1 + e^(-steep x (ratio - centre)))
-# The centre is the reference body (a human, bare, 0.75), which lands halfway
-# between floor and ceil: 1.99 m, the clip's own leap. Tuning.ratio_curve.
+# The centre is the body the skill is cast by at its plainest -- a human with
+# the sword in hand, 60 over 82 = 0.73 (the user, 2026-11-24) -- which lands
+# halfway between floor and ceil: 1.99 m, the clip's own leap.
+# Tuning.ratio_curve.
 @export var rising_cut_lift_floor: float = 1.0:
 	set(value):
 		if Tuning.may_write(self):
@@ -129,7 +131,7 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			rising_cut_lift_ceil = value
-@export var rising_cut_lift_centre: float = 0.75:
+@export var rising_cut_lift_centre: float = 0.73:
 	set(value):
 		if Tuning.may_write(self):
 			rising_cut_lift_centre = value
