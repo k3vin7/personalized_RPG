@@ -772,6 +772,8 @@ func _ground_step(delta: float) -> void:
 	# "walked off something" is what cut the stomp short.
 	if _stand_on_head(delta):
 		return
+	if _leave_back():
+		return
 	if not player.is_on_floor() and not _on_step:
 		# Walked off something, or onto ground too steep to stand on. Coyote
 		# time is already running, so a jump pressed a frame late still goes.
@@ -1057,6 +1059,87 @@ func _stand_on_head(delta: float) -> bool:
 	player.change_state(Player.State.AIRBORNE)
 	print("PLAYGROUND_HEAD_SLIDE off=%s by=%s window=%.2f" % [
 		stepped_off.name, player.name, Tuning.server.head_stomp_time])
+	return true
+
+
+# 2026-11-24 (the user): with riding on hold (back_ride_enabled off) an enemy
+# is not a floor. A body standing on one goes off it at its walking pace, to
+# the nearer side first; a side that a wall closes, or where it would only
+# come down on another enemy, is passed over for the next one (the other side,
+# then either end), and the side taken is kept while it stays free. With no
+# side free it stands where it is -- pushed at a closed side it would jam.
+# Its own velocity, so not a force event. Returns true when it has moved the
+# body this step.
+var _back_body: Dummy
+var _back_side := Vector3.ZERO
+
+
+func _leave_back() -> bool:
+	if Tuning.server.back_ride_enabled:
+		return false
+	var back := _floor_body() as Dummy
+	if back == null:
+		# Forgotten once the feet are on something else, not while the body
+		# is between two touches of the same back.
+		if player.is_on_floor():
+			_back_body = null
+		return false
+	var across := back.global_transform.basis.x
+	across.y = 0.0
+	across = across.normalized() if across.length_squared() > 0.0001 else Vector3.RIGHT
+	var along := Vector3.UP.cross(across)
+	var offset := player.global_position - back.global_position
+	offset.y = 0.0
+	var near := across if offset.dot(across) >= 0.0 else -across
+	var end := along if offset.dot(along) >= 0.0 else -along
+	var sides: Array[Vector3] = [near, -near, end, -end]
+	if _back_body == back and _back_side != Vector3.ZERO:
+		sides.push_front(_back_side)
+	var wolf := back as Wolf
+	var taken := Vector3.ZERO
+	for side: Vector3 in sides:
+		# How far the back reaches that way, from its middle.
+		var reach := back.body_radius()
+		if wolf != null:
+			reach = absf(side.dot(across)) * Wolf.radius() + absf(side.dot(along)) * Wolf.length() * 0.5
+		var travel := reach + player.radius() + BACK_CLEAR - offset.dot(side)
+		if _back_side_free(back, side, maxf(travel, BACK_CLEAR)):
+			taken = side
+			break
+	if taken == Vector3.ZERO:
+		if _back_body != back or _back_side != Vector3.ZERO:
+			print("PLAYGROUND_BACK_LEAVE off=%s by=%s no_free_side" % [back.name, player.name])
+		_back_body = back
+		_back_side = Vector3.ZERO
+		return false
+	if _back_body != back or _back_side != taken:
+		print("PLAYGROUND_BACK_LEAVE off=%s by=%s side=(%.2f, %.2f)" % [back.name, player.name, taken.x, taken.z])
+	_back_body = back
+	_back_side = taken
+	var pace := player.get_move_speed()
+	player.velocity = Vector3(taken.x * pace, -0.5, taken.z * pace)
+	player.floor_snap_length = 0.0
+	player.move_and_slide()
+	return true
+
+
+# Clear of the back's edge by this much before the body is let down (m).
+const BACK_CLEAR := 0.2
+
+
+# Whether the body can go `travel` metres off `back` toward `side` and come
+# down there: nothing in the way at its own height (a wall), and not another
+# enemy under where it would land.
+func _back_side_free(back: Dummy, side: Vector3, travel: float) -> bool:
+	var raised := player.global_transform.translated(Vector3.UP * STEP_MARGIN * 5.0)
+	var motion := side * travel
+	if player.test_move(raised, motion):
+		return false
+	var drop := _feet_y() - (back.global_position.y - back.body_half_height()) + 0.3
+	var rest := KinematicCollision3D.new()
+	if player.test_move(raised.translated(motion), Vector3.DOWN * maxf(drop, 0.3), rest):
+		if PhysicsServer3D.body_get_collision_layer(rest.get_collider_rid()) & Layers.DUMMY != 0:
+			return false
 	return true
 
 
@@ -1369,6 +1452,14 @@ func _cast_step(delta: float) -> void:
 		if push_running:
 			# A push has the body: the path is given up for good.
 			_motion_def = null
+		elif _leave_back():
+			# 2026-11-24: the path set the body down on an enemy (the rising
+			# cut's leap ends over what it cut) and riding is on hold: the
+			# path is given up and the body goes off it now. Followed to its
+			# end, the path held the body on the back for the rest of the
+			# clip (half a second and more).
+			_motion_def = null
+			return
 		else:
 			_follow_motion(delta)
 			return
@@ -1377,6 +1468,10 @@ func _cast_step(delta: float) -> void:
 		_step_left = 0.0
 		_step_wait = 0.0
 		_stunned_step(delta)
+		return
+	if _leave_back():
+		# Come down on what it cut (the rising cut's leap): off it now, not
+		# when the recovery is over.
 		return
 	if _step_wait <= 0.0 and _step_left <= 0.0 and not _step_next.is_empty():
 		# The cast's own step is taken: the one waiting behind it starts.

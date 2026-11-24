@@ -45,9 +45,11 @@ static func held_features_on() -> void:
 	Tuning.server.jump_enabled = true
 	Tuning.server.climb_enabled = true
 	Tuning.server.coop_launch_enabled = true
+	# 2026-11-24: and the back ride, held the same way.
+	Tuning.server.back_ride_enabled = true
 	if ServerAuthority.instance != null:
 		ServerAuthority.instance._push_server_tuning()
-	print("PLAYGROUND_HARNESS held features on: jump, climb, co-op launch")
+	print("PLAYGROUND_HARNESS held features on: jump, climb, co-op launch, back ride")
 
 
 static func forgive_lead(tree: SceneTree, again := Callable()) -> void:

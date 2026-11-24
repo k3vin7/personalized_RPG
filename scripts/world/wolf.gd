@@ -147,7 +147,8 @@ const BACK_FEET_ABOVE := 0.35
 
 
 func rideable() -> bool:
-	return bool(Tuning.server.wolf_rideable) and not _dead and _dying <= 0
+	# 2026-11-24: behind the hold on riding (PhysicsTuning.back_ride_enabled).
+	return bool(Tuning.server.back_ride_enabled) and bool(Tuning.server.wolf_rideable) and not _dead and _dying <= 0
 
 
 # The back is the top of the lying capsule: as long as the body, as wide as

@@ -92,6 +92,16 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			coop_launch_enabled = value
+# 2026-11-24 (the user): standing on a monster's back is on hold with them.
+# Nothing was removed: the rider table, the stab down and the shake-off all
+# ask Wolf.rideable(), which asks this (and wolf_rideable). Off, an enemy is
+# not a floor: a body that comes down on one -- the rising cut's leap ends
+# over what it cut -- goes off it to a side that is free
+# (PlayerMovement._leave_back).
+@export var back_ride_enabled: bool = false:
+	set(value):
+		if Tuning.may_write(self):
+			back_ride_enabled = value
 
 @export_group("Strength to weight")
 # v4: the ratio a multiplier of 1.0 stands at. A human at training 0, bare, is

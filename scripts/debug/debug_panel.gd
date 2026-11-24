@@ -88,6 +88,7 @@ const FIELD_LABELS := {
 	"jump_enabled": "점프 허용 (보류 중 · 기본 꺼짐)",
 	"climb_enabled": "등반 · 벽잡기 허용 (보류 중 · 기본 꺼짐)",
 	"coop_launch_enabled": "협동 발사(아군 발판) 허용 (보류 중 · 기본 꺼짐)",
+	"back_ride_enabled": "올라타기(적 등에 서기 · 등 찌르기 · 털어내기) 허용 (보류 중 · 기본 꺼짐)",
 	"terrain_collision_radius": "클라 지형 충돌 반경 (몸 주변)",
 	"terrain_collision_shape_size": "클라 지형 충돌 조각 크기",
 	"camera_zoom": "카메라 줌 (1 멀리 · 0 가까이, 휠 클릭으로 3단계)",
