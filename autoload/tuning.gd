@@ -70,6 +70,13 @@ func ratio_mult(ratio: float, k: float, mult_max: float = -1.0) -> float:
 		server.ratio_mult_min, top)
 
 
+# 2026-11-24: an S curve over the same ratio, for a number that should level
+# off at both ends (the rising cut's leap):
+#     floor + (ceil - floor) / (1 + e^(-steep x (ratio - centre)))
+func ratio_curve(ratio: float, low: float, high: float, centre: float, steep: float) -> float:
+	return low + (high - low) / (1.0 + exp(-steep * (ratio - centre)))
+
+
 func notify_changed() -> void:
 	tuning_changed.emit()
 

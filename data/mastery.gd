@@ -43,10 +43,11 @@ static func allows(def: SkillDef, actor: Node) -> bool:
 
 
 # The step a combo goes on to for this body: def.combo_next, or none when
-# that step asks for more mastery than the body has (2026-11-21: the rising
-# cut is one blow at 0, two at 1, three at 2 -- the chain stops where the
-# mastery does). Both sides ask this, so the owner never offers a step the
-# server would refuse.
+# that step asks for more mastery than the body has (2026-11-24: the rising
+# cut is one blow at 0; from 1 its dive follows, and that is the last step;
+# from 2 the dive's disc is wider and it stuns -- SkillDef.mastered_level, not
+# a step). Both sides ask this, so the owner never offers a step the server
+# would refuse.
 static func next_step(def: SkillDef, actor: Node) -> String:
 	if def == null or def.combo_next == "":
 		return ""

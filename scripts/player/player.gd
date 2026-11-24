@@ -550,6 +550,15 @@ func get_jump_height() -> float:
 	return Tuning.server.base_jump_height * Tuning.ratio_mult(get_ratio(), Tuning.server.ratio_k_jump)
 
 
+# 2026-11-24 (the user): how high a skill whose path is the body's own
+# (SkillDef.lift_by_ratio: the rising cut) takes this body: the same ratio,
+# on the server's S curve. Here for the reason the jump's is: the owner moves
+# by it and the server allows the speed of it, off one number.
+func skill_lift_height() -> float:
+	return Tuning.ratio_curve(get_ratio(), Tuning.server.rising_cut_lift_floor, Tuning.server.rising_cut_lift_ceil,
+		Tuning.server.rising_cut_lift_centre, Tuning.server.rising_cut_lift_steep)
+
+
 func get_jump_velocity() -> float:
 	return sqrt(2.0 * Tuning.server.gravity * get_jump_height())
 

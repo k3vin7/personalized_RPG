@@ -116,6 +116,27 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			ratio_k_jump = value
+# 2026-11-24 (the user): how high the rising cut's leap takes a body, off the
+# same ratio (strength over weight, the weapon's weight in it), on an S curve:
+#     height = floor + (ceil - floor) / (1 + e^(-steep x (ratio - centre)))
+# The centre is the reference body (a human, bare, 0.75), which lands halfway
+# between floor and ceil: 1.99 m, the clip's own leap. Tuning.ratio_curve.
+@export var rising_cut_lift_floor: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_lift_floor = value
+@export var rising_cut_lift_ceil: float = 2.98:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_lift_ceil = value
+@export var rising_cut_lift_centre: float = 0.75:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_lift_centre = value
+@export var rising_cut_lift_steep: float = 12.0:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_lift_steep = value
 @export var ratio_k_speed: float = 0.30:
 	set(value):
 		if Tuning.may_write(self):
@@ -1172,6 +1193,17 @@ extends Resource
 	set(value):
 		if Tuning.may_write(self):
 			rising_cut_m2_range = value
+# 2026-11-24 (the user): from the dive's mastered_level (2) its disc is this
+# wide instead, and a body it hits is held still this long (the stun a
+# perfect guard uses; not through a guard, not on a party member).
+@export var rising_cut_m2_radius_mastered: float = 3.0:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_m2_radius_mastered = value
+@export var rising_cut_m2_stun: float = 1.0:
+	set(value):
+		if Tuning.may_write(self):
+			rising_cut_m2_stun = value
 # 2026-11-20: every body's mastery of every skill, until mastery is earned
 # (Mastery.level_of). The server's number: which form a skill is cast in is a
 # ruling. 0 = every skill in its first form. Ships at the top (5) since

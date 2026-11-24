@@ -1823,6 +1823,10 @@ func apply_hit(attacker: Node3D, target: Node3D, def: SkillDef, ctx: Dictionary)
 	for key in ["hit_y", "down_request", "spring"]:
 		if ctx.has(key) and not (perfect and key == "down_request"):
 			event[key] = ctx[key]
+	# 2026-11-24: a blow that holds what it hits (a mastered skill's): on a
+	# person through the stun path (_rule_hurt), unless a guard took it.
+	if ctx.has("catch_stun") and posture < 0.0 and not perfect:
+		event["catch_stun"] = ctx["catch_stun"]
 	var hit_id := int(event["id"])
 	if dealt > 0.0:
 		if target is Player:
@@ -3491,6 +3495,11 @@ func _note_step(peer: int, def: SkillDef) -> void:
 		# 2026-11-21: a baked path (SkillDef "Motion"): its fastest sample,
 		# across and up, for its whole length (the recovery included).
 		var top := def.motion_top_speed()
+		# 2026-11-24: a path whose height is the body's own rises that much
+		# faster or slower (SkillDef.lift_by_ratio).
+		var mover := actor_for(peer)
+		if mover != null:
+			top.y *= def.lift_scale(mover.skill_lift_height())
 		if top.x <= 0.0 and top.y <= 0.0:
 			return
 		steps_noted += 1
@@ -3852,7 +3861,7 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0)
 		# 2026-11-22: a disc reaches reach + its radius (the query ball was
 		# reach and width only: the dive's disc round the body, reach 0, found
 		# no one, and the shield slam's far edge was missed).
-		shape.radius = maxf(shape.radius, reach + def.circle_radius_value())
+		shape.radius = maxf(shape.radius, reach + def.circle_radius_value(_skill_level(actor, def)))
 	var params := PhysicsShapeQueryParameters3D.new()
 	params.shape = shape
 	params.transform = Transform3D(Basis.IDENTITY, actor.global_position)
@@ -3872,7 +3881,7 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0)
 	var fan := def.range_shape == SkillDef.RangeShape.FAN
 	# C-1c: a CIRCLE is a disc of circle_radius centred reach ahead.
 	var circle := def.range_shape == SkillDef.RangeShape.CIRCLE
-	var circle_radius := def.circle_radius_value()
+	var circle_radius := def.circle_radius_value(_skill_level(actor, def))
 	var half_angle := def.value("shape_angle_deg") * 0.5
 	# C-1c: the height bonus (the shield slam's), off the server's record of
 	# how far this body has fallen by now.
@@ -3910,6 +3919,14 @@ func _rule_strike(actor: Node3D, def: SkillDef, direction: Vector3, mult := 1.0)
 		_land_strike(actor, def, body, forward, strike_y, caster_strength, mult, tally)
 	_finish_strike(actor, def, mult, tally)
 	return tally["hits"]
+
+
+# The caster's mastery of the skill `def` is (or is a form of); -1 for a
+# body that has none (a scarecrow, a monster).
+func _skill_level(actor: Node3D, def: SkillDef) -> int:
+	if not (actor is Player) or def == null:
+		return -1
+	return MASTERY.level_of(actor, def.form_of if def.form_of != "" else def.id)
 
 
 # A blow does not land on a body of the caster's own species: a pack does not
@@ -4043,8 +4060,17 @@ func _land_strike(actor: Node3D, def: SkillDef, body: Node3D, forward: Vector3, 
 	# all it gets. A body already down is put down again, for the full time.
 	if def.outcome == SkillDef.Outcome.DOWN:
 		ctx["down_request"] = true
+	# 2026-11-24 (the user): a skill mastered (SkillDef.mastered_level: the
+	# dive at 2) holds what it hits still -- the stun a perfect guard uses.
+	# Not a party member; and not through a guard (apply_hit leaves it out).
+	var held := def.value("mastered_stun") if def.is_mastered(_skill_level(actor, def)) and not is_ally else 0.0
+	if held > 0.0:
+		ctx["catch_stun"] = held
 	# C-1a: the damage is apply_hit's; the push goes out with it.
 	var hit := apply_hit(actor, body, def, ctx)
+	if held > 0.0 and body is Dummy:
+		(body as Dummy).apply_catch_stun(held)
+		print("PLAYGROUND_MASTERED_STUN by=%s skill=%s target=%s for=%.2f" % [actor.name, def.id, body.name, held])
 	tally["hits"] = int(tally["hits"]) + 1
 	if float(hit.get("down_apply", 0.0)) > 0.0:
 		tally["downed"] = int(tally["downed"]) + 1

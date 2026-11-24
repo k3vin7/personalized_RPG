@@ -179,9 +179,9 @@ var wielded: WeaponDef = null
 # rock do not count.
 @export var combo_needs_hit: bool = false
 # 2026-11-21: the next step follows only once this one's recovery is over,
-# not at the end of its swing: this clip carries on into the next one (the
-# rising cut's second blow spins the body round and ends in the pose its
-# third starts from). The press is still asked for in the same window.
+# not at the end of its swing: this clip carries on into the next one. (Made
+# for a rising cut of three blows, 2026-11-21; it has two now and nothing
+# sets this.) The press is still asked for in the same window.
 @export var combo_after_recovery: bool = false
 # 2026-11-22: the next step starts this long after this one's blade is
 # through (seconds of its clip; 0 = at once): the rising cut's blade passes
@@ -334,6 +334,11 @@ var wielded: WeaponDef = null
 @export var motion_speed: float = 1.0
 @export var motion_reach: float = 1.0
 @export var motion_recovery_speed: float = 1.0
+# 2026-11-24 (the user): the path's height is not the clip's but the body's
+# own (Player.skill_lift_height: strength over weight, on Tuning.ratio_curve)
+# -- the path's up and down are scaled so its top (motion_lift) is that
+# height. The rising cut's leap, and its dive back down the same height.
+@export var lift_by_ratio: bool = false
 @export var motion_return: float = 0.0
 @export var motion_return_foot: String = ""
 @export var motion_return_move: Vector3 = Vector3.ZERO
@@ -405,6 +410,8 @@ const TUNING_SUFFIX := {
 	"speed_bonus": "speed_bonus",
 	"height_bonus": "height_bonus",
 	"circle_radius": "radius",
+	"circle_radius_mastered": "radius_mastered",
+	"mastered_stun": "stun",
 	"guard_damage_taken": "damage_taken",
 	"guard_perfect_window": "perfect_window",
 	"guard_reflect_window": "reflect_window",
@@ -700,5 +707,31 @@ func shows_range() -> bool:
 
 # C-1c: the circle's radius through value(), so a slider-backed one (the
 # shield slam's shield_slam_radius) is what the server rules with.
-func circle_radius_value() -> float:
+# 2026-11-24: `level` is the caster's mastery of the skill (-1: not asked);
+# from mastered_level the disc is circle_radius_mastered wide.
+func circle_radius_value(level := -1) -> float:
+	if is_mastered(level) and value("circle_radius_mastered") > 0.0:
+		return value("circle_radius_mastered")
 	return value("circle_radius")
+
+
+# 2026-11-24 (the user): what a skill gains at a mastery of its own, without
+# becoming another skill: from mastered_level (-1: nothing) its disc is
+# circle_radius_mastered and a body it hits is held still mastered_stun
+# seconds. Sliders: <tuning_prefix>_radius_mastered / _stun.
+@export var mastered_level: int = -1
+@export var circle_radius_mastered: float = 0.0
+@export var mastered_stun: float = 0.0
+
+
+func is_mastered(level: int) -> bool:
+	return mastered_level >= 0 and level >= mastered_level
+
+
+# What the path's height is multiplied by for a body whose leap is `height`
+# metres (lift_by_ratio); 1 for every other skill.
+func lift_scale(height: float) -> float:
+	var top := motion_lift()
+	if not lift_by_ratio or top <= 0.0:
+		return 1.0
+	return maxf(height, 0.0) / top

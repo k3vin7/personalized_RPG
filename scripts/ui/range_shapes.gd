@@ -21,7 +21,7 @@ const LINE_TIP := 0.3
 # Rewrites `mesh` as one triangle surface of the def's shape. The reach, the
 # width and the angle are read through def.value() so a slider-backed skill
 # draws what the server would rule with.
-static func write(mesh: ImmediateMesh, def: SkillDef, scale: float = 1.0) -> void:
+static func write(mesh: ImmediateMesh, def: SkillDef, scale: float = 1.0, level := -1) -> void:
 	mesh.clear_surfaces()
 	if def == null or def.range_shape == SkillDef.RangeShape.NONE or scale <= 0.0:
 		return
@@ -54,7 +54,8 @@ static func write(mesh: ImmediateMesh, def: SkillDef, scale: float = 1.0) -> voi
 				mesh.surface_add_vertex(Vector3(sin(b) * reach, 0.0, -cos(b) * reach))
 		SkillDef.RangeShape.CIRCLE:
 			var centre := Vector3(0.0, 0.0, -reach)
-			var radius := def.circle_radius_value() * scale
+			# 2026-11-24: `level`, the caster's mastery: a mastered disc is wider.
+			var radius := def.circle_radius_value(level) * scale
 			for index in CIRCLE_SEGMENTS:
 				var a := TAU * float(index) / float(CIRCLE_SEGMENTS)
 				var b := TAU * float(index + 1) / float(CIRCLE_SEGMENTS)

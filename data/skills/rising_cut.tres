@@ -27,6 +27,7 @@ step_distance = 0.3
 step_from = 0.3
 step_to = 0.9
 motion_clip = "m_rise"
+lift_by_ratio = true
 motion_windup = 0.15
 motion_swing = 0.06666666666666665
 motion_recovery = 1.1833333333333333

@@ -1396,9 +1396,15 @@ func begin_cast_motion(direction: Vector3, def: SkillDef) -> void:
 	_motion_right = _motion_forward.cross(Vector3.UP).normalized()
 	_motion_def = def
 	_motion_t = 0.0
+	# 2026-11-24: a path whose height is the body's own (lift_by_ratio).
+	_motion_lift_scale = def.lift_scale(player.skill_lift_height())
 	_motion_done = def.motion_at(0.0)
+	_motion_done.y *= _motion_lift_scale
 	_motion_yaw0 = player.rotation.y
 	cast_motions += 1
+
+
+var _motion_lift_scale := 1.0
 
 
 func cast_motion_active() -> bool:
@@ -1414,6 +1420,7 @@ func _follow_motion(delta: float) -> void:
 	var def := _motion_def
 	_motion_t += delta
 	var target := def.motion_at(_motion_t)
+	target.y *= _motion_lift_scale
 	var moved := target - _motion_done
 	_motion_done = target
 	var lifts := def.motion_lift() > MOTION_LIFT_MIN
